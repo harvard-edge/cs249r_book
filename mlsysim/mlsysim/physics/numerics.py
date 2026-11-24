@@ -250,8 +250,11 @@ def calc_float_spacing(value: float, exponent_bits: int, fraction_bits: int) -> 
     >>> calc_float_spacing(1.0, 3, 2)
     0.25
     """
+    if not math.isfinite(value):
+        raise ValueError("value must be finite.")
     _, smallest_normal, _ = calc_float_range(exponent_bits, fraction_bits)
-    exponent = max(math.floor(math.log2(abs(value))), math.floor(math.log2(smallest_normal)))
+    emin = math.floor(math.log2(smallest_normal))
+    exponent = emin if value == 0.0 else max(math.floor(math.log2(abs(value))), emin)
     return 2.0 ** (exponent - fraction_bits)
 
 
@@ -546,7 +549,7 @@ def calc_zero_point(alpha: float, scale: float, qmin: int = 0):
 
     Excludes: Clamping the zero point to a valid code interval.
 
-    Integer that stands for real zero on an affine grid: ``qmin + round(-alpha / s)``.
+    Integer that stands for exact zero on an affine grid: ``qmin + round(-alpha / s)``.
 
     Returns ``(exact, zero_point)``: the unrounded ``-alpha / s`` and the stored
     integer. Rounding is to nearest, ties to even, as Python and PyTorch round.
@@ -575,8 +578,8 @@ def calc_quantize(x: float, scale: float, zero_point: int, qmin: int, qmax: int)
         Positive quantization step in value units per integer code.
     zero_point : int
         Integer code representing zero.
-    qmin : int, optional
-        Lowest code; defaults to zero when omitted.
+    qmin : int
+        Lowest representable integer code.
     qmax : int
         Highest code, at least qmin.
 
@@ -632,7 +635,7 @@ def calc_dequantize(code: int, scale: float, zero_point: int) -> float:
 
     Excludes: Recovering information lost through rounding or clipping.
 
-    Real value a code reads back as: ``s (q - z)``.
+    Scalar value a code decodes to: ``s (q - z)``.
 
     References
     ----------

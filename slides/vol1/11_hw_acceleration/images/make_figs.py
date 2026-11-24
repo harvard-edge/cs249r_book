@@ -10,8 +10,8 @@ typed here. Lecture 11b's figures live in that deck's own folder.
 
 Run from this folder: python3 make_figs.py
 """
-_VALS = {'voice_minutes_words': 'three', 'tpu_mhz': '700', 'tpu_dim': '256', 'tpu_macs': '65,536', 'tpu_buffer_mb': '24', 'tpu_thr_lo': '15', 'tpu_thr_hi': '30', 'tpu_ppw_lo': '30', 'tpu_ppw_hi': '80', 'tpu_workloads_words': 'six', 'lat_fp32_ms': '0.38', 'lat_int8_ms': '0.30', 'lat_int8_ms_short': '0.3', 'int8_b1_gain': '1.3', 'int8_big_gain': '5.9', 'h100_fp16': '989', 'cpu_lo': '1', 'cpu_hi': '2', 'cpu_gap_lo': '490', 'cpu_gap_hi': '990', 'h100_transistors_b': '80', 'die_buffers': '37', 'die_compute': '30', 'die_io': '10', 'die_control': '2', 'die_ub': '29', 'die_mxu': '24', 'h100_cuda_cores': '16,896', 'h100_tensor_cores': '528', 'e_int8_add': '0.03', 'e_fp32_add': '0.9', 'e_fp32_mul': '3.7', 'e_sram8k': '5', 'e_dram': '640', 'dram_per_mul': '173', 'dram_per_sram': '128', 'dram_per_fma': '139', 'e_fp32_mul_7nm': '1.31', 'mul_gain_7nm': '2.8', 'e_ddr64_45': '1,300', 'e_ddr64_7': '1,300', 'p100_fp16': '21.2', 'v100_fp16': '125', 'tc_gain': '6', 'mma_macs': '2,048', 'mma_per_thread': '64', 'resnet_classes': '1,000', 'tpu4_dim': '128', 'tpu4_macs': '16,384', 'sys_dim': '128', 'sys_edge_loads': '2', 'sys_edge_loads_words': 'two', 'naive_accesses': '4', 'naive_accesses_words': 'four', 'mac_pj': '1', 'naive_pj': '2,561', 'sys_access': '0.016', 'sys_pj': '11', 'sys_ratio': '232.8', 'sys_ratio_int': '233', 'wall_params': '3,900', 'wall_bw': '33', 'gpt2_gb': '3', 'e_reg': '0.1', 'smem_kb': '228', 'smem_ns': '17', 'l2_mb': '50', 'l2_ns': '150', 'hbm_gb': '80', 'h100_bw': '3.35', 'hbm_ns': '273', 'e_dram_byte': '160', 'clock_ghz': '2', 'cycle_ps': '500', 'hbm_cycles': '546', 'cnc_l1': '22.4', 'cnc_l2': '159.7', 'cnc_l2far': '294', 'cnc_hbm': '377.9', 'cnc_hbm_l1': '17', 'pcie_sms': '114', 'pcie_bw': '2', 'need_tbs': '989', 'need_short': '295', 'hbm_gbs': '3,350', 'nvlink_gbs': '900', 'pcie_gbs': '64', 'net_gbs': '50', 'hbm_pcie': '52', 'a100_fp16': '312', 'a100_bw': '2.04', 'a100_ridge': '153', 'h100_fp32': '67', 'h100_int8': '1,979', 'ridge32': '20', 'ridge16': '295.2', 'ridge16_int': '295', 'ridge8': '590.7', 'ridge8_int': '591', 'int8_over_fp16': '2', 'fp16_over_fp32': '15', 'k_ai': '200', 'k_compute_ratio': '3.2', 'k_bw_ratio': '1.6', 'k_a100': '312', 'k_h100': '670', 'k_gain': '2.1', 'k_gain_2': '2.15', 'ridge_v100': '139', 'ridge_a100': '153', 'ridge_h100': '295', 'ridge_b200': '281', 'gen_first_year': '2017', 'gen_last_year': '2024', 'gen_compute': '18', 'gen_bw': '8.9', 'ridge_years_words': 'five', 'env_devices': '52', 'env_compute': '55', 'env_bw': '13', 'env_best_bw': '8', 'env_since_year': '2025', 'qkv_batch': '8', 'conv_batch': '32', 'qkv_gflop': '125.8', 'qkv_mb': '120.2', 'qkv_ai': '1,046.7', 'conv_gflop': '7.4', 'conv_mb': '13.1', 'conv_ai': '563.1', 'head_mflop': '131.1', 'head_mb': '4.3', 'head_ai': '30.5', 'ln_mflop': '104.9', 'ln_mb': '52.4', 'ln_ai': '2.0', 'ln_ops_words': 'eight', 'dec_gflop': '3', 'dec_ai': '1', 'head_tflops': '102', 'head_pct': '10.3', 'ln_tflops': '6.7', 'ln_pct': '0.7', 'dec_tflops': '3.4', 'dec_pct': '0.3', 'top_pct': '100', 'softmax_ai': '0.75', 'nsight_dram_pct': '0.34', 'dense_width': '2048', 'batch_mid': '32', 'batch_big': '512', 'ai_b1': '1', 'ai_b32': '31', 'ai_b512': '341', 'ai_b512_1': '341.3', 'crossing': '415', 'resnet_gflop': '8.2', 'floor16_us': '8', 'floor8_us': '4', 's3_fp16': '563', 's3_int8': '1,126', 's3_mixed': '569', 's2_fp16': '287', 's2_int8': '574', 'p2_fp16': '51', 'p2_int8': '102', 'p_resnet': '0.95', 'p_resnet_pct': '95', 'serial_resnet': '0.05', 'serial_resnet_pct': '5', 'p_gpt': '0.80', 'p_gpt_pct': '80', 'cpu_tops': '8', 'gain': '247', 'amdahl_rn': '18.6', 'amdahl_gpt': '4.9', 'bw_gain': '67', 'amdahl_bw': '4.7', 'amdahl_ceiling': '5', 'lh_resnet16': '51.1', 'lh_resnet8': '25.6', 'lh_mobilenet16': '7.0', 'lh_mobilenet8': '3.5', 'lh_mobilenet_gflop': '0.6', 'lh_gpt8': '1.5', 'lh_dlrm_gb': '100', 'lh_kws16': '400', 'lh_kws8': '200', 'lh_kws_mflop': '20', 'a100_t4_peak': '4.8', 'a100_t4_bw': '6.4', 'ds_tf32': '989', 'ds_fp16': '1,979', 'ds_int8': '3,958', 'mapping_gain': '75'}
-_NUMS = {'tpu_mhz': 700.0, 'tpu_dim': 256.0, 'tpu_macs': 65536.0, 'tpu_buffer_mb': 24.0, 'tpu_thr_lo': 15.0, 'tpu_thr_hi': 30.0, 'tpu_ppw_lo': 30.0, 'tpu_ppw_hi': 80.0, 'lat_fp32_ms': 0.38, 'lat_int8_ms': 0.3, 'lat_int8_ms_short': 0.3, 'int8_b1_gain': 1.3, 'int8_big_gain': 5.9, 'h100_fp16': 989.0, 'cpu_lo': 1.0, 'cpu_hi': 2.0, 'cpu_gap_lo': 490.0, 'cpu_gap_hi': 990.0, 'h100_transistors_b': 80.0, 'die_buffers': 37.0, 'die_compute': 30.0, 'die_io': 10.0, 'die_control': 2.0, 'die_ub': 29.0, 'die_mxu': 24.0, 'h100_cuda_cores': 16896.0, 'h100_tensor_cores': 528.0, 'e_int8_add': 0.03, 'e_fp32_add': 0.9, 'e_fp32_mul': 3.7, 'e_sram8k': 5.0, 'e_dram': 640.0, 'dram_per_mul': 173.0, 'dram_per_sram': 128.0, 'dram_per_fma': 139.0, 'e_fp32_mul_7nm': 1.31, 'mul_gain_7nm': 2.8, 'e_ddr64_45': 1300.0, 'e_ddr64_7': 1300.0, 'p100_fp16': 21.2, 'v100_fp16': 125.0, 'tc_gain': 6.0, 'mma_macs': 2048.0, 'mma_per_thread': 64.0, 'resnet_classes': 1000.0, 'tpu4_dim': 128.0, 'tpu4_macs': 16384.0, 'sys_dim': 128.0, 'sys_edge_loads': 2.0, 'naive_accesses': 4.0, 'mac_pj': 1.0, 'naive_pj': 2561.0, 'sys_access': 0.016, 'sys_pj': 11.0, 'sys_ratio': 232.8, 'sys_ratio_int': 233.0, 'wall_params': 3900.0, 'wall_bw': 33.0, 'gpt2_gb': 3.0, 'e_reg': 0.1, 'smem_kb': 228.0, 'smem_ns': 17.0, 'l2_mb': 50.0, 'l2_ns': 150.0, 'hbm_gb': 80.0, 'h100_bw': 3.35, 'hbm_ns': 273.0, 'e_dram_byte': 160.0, 'clock_ghz': 2.0, 'cycle_ps': 500.0, 'hbm_cycles': 546.0, 'cnc_l1': 22.4, 'cnc_l2': 159.7, 'cnc_l2far': 294.0, 'cnc_hbm': 377.9, 'cnc_hbm_l1': 17.0, 'pcie_sms': 114.0, 'pcie_bw': 2.0, 'need_tbs': 989.0, 'need_short': 295.0, 'hbm_gbs': 3350.0, 'nvlink_gbs': 900.0, 'pcie_gbs': 64.0, 'net_gbs': 50.0, 'hbm_pcie': 52.0, 'a100_fp16': 312.0, 'a100_bw': 2.04, 'a100_ridge': 153.0, 'h100_fp32': 67.0, 'h100_int8': 1979.0, 'ridge32': 20.0, 'ridge16': 295.2, 'ridge16_int': 295.0, 'ridge8': 590.7, 'ridge8_int': 591.0, 'int8_over_fp16': 2.0, 'fp16_over_fp32': 15.0, 'k_ai': 200.0, 'k_compute_ratio': 3.2, 'k_bw_ratio': 1.6, 'k_a100': 312.0, 'k_h100': 670.0, 'k_gain': 2.1, 'k_gain_2': 2.15, 'ridge_v100': 139.0, 'ridge_a100': 153.0, 'ridge_h100': 295.0, 'ridge_b200': 281.0, 'gen_first_year': 2017.0, 'gen_last_year': 2024.0, 'gen_compute': 18.0, 'gen_bw': 8.9, 'env_devices': 52.0, 'env_compute': 55.0, 'env_bw': 13.0, 'env_best_bw': 8.0, 'env_since_year': 2025.0, 'qkv_batch': 8.0, 'conv_batch': 32.0, 'qkv_gflop': 125.8, 'qkv_mb': 120.2, 'qkv_ai': 1046.7, 'conv_gflop': 7.4, 'conv_mb': 13.1, 'conv_ai': 563.1, 'head_mflop': 131.1, 'head_mb': 4.3, 'head_ai': 30.5, 'ln_mflop': 104.9, 'ln_mb': 52.4, 'ln_ai': 2.0, 'dec_gflop': 3.0, 'dec_ai': 1.0, 'head_tflops': 102.0, 'head_pct': 10.3, 'ln_tflops': 6.7, 'ln_pct': 0.7, 'dec_tflops': 3.4, 'dec_pct': 0.3, 'top_pct': 100.0, 'softmax_ai': 0.75, 'nsight_dram_pct': 0.34, 'dense_width': 2048.0, 'batch_mid': 32.0, 'batch_big': 512.0, 'ai_b1': 1.0, 'ai_b32': 31.0, 'ai_b512': 341.0, 'ai_b512_1': 341.3, 'crossing': 415.0, 'resnet_gflop': 8.2, 'floor16_us': 8.0, 'floor8_us': 4.0, 's3_fp16': 563.0, 's3_int8': 1126.0, 's3_mixed': 569.0, 's2_fp16': 287.0, 's2_int8': 574.0, 'p2_fp16': 51.0, 'p2_int8': 102.0, 'p_resnet': 0.95, 'p_resnet_pct': 95.0, 'serial_resnet': 0.05, 'serial_resnet_pct': 5.0, 'p_gpt': 0.8, 'p_gpt_pct': 80.0, 'cpu_tops': 8.0, 'gain': 247.0, 'amdahl_rn': 18.6, 'amdahl_gpt': 4.9, 'bw_gain': 67.0, 'amdahl_bw': 4.7, 'amdahl_ceiling': 5.0, 'lh_resnet16': 51.1, 'lh_resnet8': 25.6, 'lh_mobilenet16': 7.0, 'lh_mobilenet8': 3.5, 'lh_mobilenet_gflop': 0.6, 'lh_gpt8': 1.5, 'lh_dlrm_gb': 100.0, 'lh_kws16': 400.0, 'lh_kws8': 200.0, 'lh_kws_mflop': 20.0, 'a100_t4_peak': 4.8, 'a100_t4_bw': 6.4, 'ds_tf32': 989.0, 'ds_fp16': 1979.0, 'ds_int8': 3958.0, 'mapping_gain': 75.0}
+_VALS = {'voice_minutes_words': 'three', 'tpu_mhz': '700', 'tpu_dim': '256', 'tpu_macs': '65,536', 'tpu_buffer_mb': '24', 'tpu_thr_lo': '15', 'tpu_thr_hi': '30', 'tpu_ppw_lo': '30', 'tpu_ppw_hi': '80', 'tpu_workloads_words': 'six', 'lat_fp32_ms': '0.38', 'lat_int8_ms': '0.30', 'lat_int8_ms_short': '0.3', 'int8_b1_gain': '1.3', 'int8_big_gain': '5.9', 'h100_fp16': '989', 'cpu_lo': '1', 'cpu_hi': '2', 'cpu_gap_lo': '490', 'cpu_gap_hi': '990', 'h100_transistors_b': '80', 'die_buffers': '37', 'die_compute': '30', 'die_io': '10', 'die_control': '2', 'die_ub': '29', 'die_mxu': '24', 'h100_cuda_cores': '16,896', 'h100_tensor_cores': '528', 'e_int8_add': '0.03', 'e_fp32_add': '0.9', 'e_fp32_mul': '3.7', 'e_sram8k': '5', 'e_dram': '640', 'dram_per_mul': '173', 'dram_per_sram': '128', 'dram_per_fma': '139', 'e_fp32_mul_7nm': '1.31', 'mul_gain_7nm': '2.8', 'e_ddr64_45': '1,300', 'e_ddr64_7': '1,300', 'p100_fp16': '21.2', 'v100_fp16': '125', 'tc_gain': '6', 'mma_macs': '2,048', 'mma_per_thread': '64', 'resnet_classes': '1,000', 'tpu4_dim': '128', 'tpu4_macs': '16,384', 'sys_dim': '128', 'sys_edge_loads': '2', 'sys_edge_loads_words': 'two', 'naive_accesses': '4', 'naive_accesses_words': 'four', 'mac_pj': '1', 'naive_pj': '2,561', 'sys_access': '0.016', 'sys_pj': '11', 'sys_ratio': '232.8', 'sys_ratio_int': '233', 'wall_params': '3,900', 'wall_bw': '33', 'gpt2_gb': '3', 'e_reg': '0.1', 'smem_kb': '228', 'smem_ns': '17', 'l2_mb': '50', 'l2_ns': '150', 'hbm_gb': '80', 'h100_bw': '3.35', 'hbm_ns': '273', 'e_dram_byte': '160', 'clock_ghz': '2', 'cycle_ps': '500', 'hbm_cycles': '546', 'cnc_l1': '22.4', 'cnc_l2': '159.7', 'cnc_l2far': '294', 'cnc_hbm': '377.9', 'cnc_hbm_l1': '17', 'pcie_sms': '114', 'pcie_bw': '2', 'need_tbs': '989', 'need_short': '295', 'hbm_gbs': '3,350', 'nvlink_gbs': '900', 'pcie_gbs': '64', 'net_gbs': '50', 'hbm_pcie': '52', 'a100_fp16': '312', 'a100_bw': '2.04', 'a100_ridge': '153', 'h100_fp32': '67', 'h100_int8': '1,979', 'ridge32': '20', 'ridge16': '295.2', 'ridge16_int': '295', 'ridge8': '590.7', 'ridge8_int': '591', 'int8_over_fp16': '2', 'fp16_over_fp32': '15', 'k_ai': '200', 'k_compute_ratio': '3.2', 'k_bw_ratio': '1.6', 'k_a100': '312', 'k_h100': '670', 'k_gain': '2.1', 'k_gain_2': '2.15', 'ridge_v100': '139', 'ridge_a100': '153', 'ridge_h100': '295', 'ridge_b200': '281', 'gen_first_year': '2017', 'gen_last_year': '2024', 'gen_compute': '18', 'gen_bw': '8.9', 'ridge_years_words': 'five', 'env_devices': '52', 'env_compute': '55', 'env_bw': '13', 'env_best_bw': '8', 'env_since_year': '2025', 'qkv_batch': '8', 'conv_batch': '32', 'qkv_gflop': '125.8', 'qkv_mb': '120.2', 'qkv_ai': '1,046.7', 'conv_gflop': '7.4', 'conv_mb': '13.1', 'conv_ai': '563.1', 'head_mflop': '131.1', 'head_mb': '4.3', 'head_ai': '30.5', 'ln_mflop': '104.9', 'ln_mb': '52.4', 'ln_ai': '2.0', 'ln_ops_words': 'eight', 'dec_gflop': '3', 'dec_ai': '1', 'head_tflops': '102', 'head_pct': '10.3', 'ln_tflops': '6.7', 'ln_pct': '0.7', 'dec_tflops': '3.4', 'dec_pct': '0.3', 'top_pct': '100', 'softmax_ai': '0.75', 'nsight_dram_pct': '0.34', 'dense_width': '2048', 'batch_mid': '32', 'batch_big': '512', 'ai_b1': '1', 'ai_b32': '31', 'ai_b512': '341', 'ai_b512_1': '341.3', 'crossing': '415', 'resnet_gflop': '8.2', 'floor16_us': '8', 'floor8_us': '4', 's3_fp16': '563', 's3_int8': '1,126', 's3_mixed': '569', 's2_fp16': '287', 's2_int8': '574', 'p2_fp16': '51', 'p2_int8': '102', 'p_resnet': '0.95', 'p_resnet_pct': '95', 'serial_resnet': '0.05', 'serial_resnet_pct': '5', 'p_gpt': '0.80', 'p_gpt_pct': '80', 'cpu_tops': '8', 'gain': '247', 'amdahl_rn': '18.6', 'amdahl_gpt': '4.9', 'bw_gain': '16.8', 'amdahl_bw': '4.0', 'amdahl_ceiling': '5', 'lh_resnet16': '51.1', 'lh_resnet8': '25.6', 'lh_mobilenet16': '7.0', 'lh_mobilenet8': '3.5', 'lh_mobilenet_gflop': '0.6', 'lh_gpt8': '1.5', 'lh_dlrm_gb': '100', 'lh_kws16': '400', 'lh_kws8': '200', 'lh_kws_mflop': '20', 'a100_t4_peak': '4.8', 'a100_t4_bw': '6.4', 'ds_tf32': '989', 'ds_fp16': '1,979', 'ds_int8': '3,958', 'mapping_gain': '75'}
+_NUMS = {'tpu_mhz': 700.0, 'tpu_dim': 256.0, 'tpu_macs': 65536.0, 'tpu_buffer_mb': 24.0, 'tpu_thr_lo': 15.0, 'tpu_thr_hi': 30.0, 'tpu_ppw_lo': 30.0, 'tpu_ppw_hi': 80.0, 'lat_fp32_ms': 0.38, 'lat_int8_ms': 0.3, 'lat_int8_ms_short': 0.3, 'int8_b1_gain': 1.3, 'int8_big_gain': 5.9, 'h100_fp16': 989.0, 'cpu_lo': 1.0, 'cpu_hi': 2.0, 'cpu_gap_lo': 490.0, 'cpu_gap_hi': 990.0, 'h100_transistors_b': 80.0, 'die_buffers': 37.0, 'die_compute': 30.0, 'die_io': 10.0, 'die_control': 2.0, 'die_ub': 29.0, 'die_mxu': 24.0, 'h100_cuda_cores': 16896.0, 'h100_tensor_cores': 528.0, 'e_int8_add': 0.03, 'e_fp32_add': 0.9, 'e_fp32_mul': 3.7, 'e_sram8k': 5.0, 'e_dram': 640.0, 'dram_per_mul': 173.0, 'dram_per_sram': 128.0, 'dram_per_fma': 139.0, 'e_fp32_mul_7nm': 1.31, 'mul_gain_7nm': 2.8, 'e_ddr64_45': 1300.0, 'e_ddr64_7': 1300.0, 'p100_fp16': 21.2, 'v100_fp16': 125.0, 'tc_gain': 6.0, 'mma_macs': 2048.0, 'mma_per_thread': 64.0, 'resnet_classes': 1000.0, 'tpu4_dim': 128.0, 'tpu4_macs': 16384.0, 'sys_dim': 128.0, 'sys_edge_loads': 2.0, 'naive_accesses': 4.0, 'mac_pj': 1.0, 'naive_pj': 2561.0, 'sys_access': 0.016, 'sys_pj': 11.0, 'sys_ratio': 232.8, 'sys_ratio_int': 233.0, 'wall_params': 3900.0, 'wall_bw': 33.0, 'gpt2_gb': 3.0, 'e_reg': 0.1, 'smem_kb': 228.0, 'smem_ns': 17.0, 'l2_mb': 50.0, 'l2_ns': 150.0, 'hbm_gb': 80.0, 'h100_bw': 3.35, 'hbm_ns': 273.0, 'e_dram_byte': 160.0, 'clock_ghz': 2.0, 'cycle_ps': 500.0, 'hbm_cycles': 546.0, 'cnc_l1': 22.4, 'cnc_l2': 159.7, 'cnc_l2far': 294.0, 'cnc_hbm': 377.9, 'cnc_hbm_l1': 17.0, 'pcie_sms': 114.0, 'pcie_bw': 2.0, 'need_tbs': 989.0, 'need_short': 295.0, 'hbm_gbs': 3350.0, 'nvlink_gbs': 900.0, 'pcie_gbs': 64.0, 'net_gbs': 50.0, 'hbm_pcie': 52.0, 'a100_fp16': 312.0, 'a100_bw': 2.04, 'a100_ridge': 153.0, 'h100_fp32': 67.0, 'h100_int8': 1979.0, 'ridge32': 20.0, 'ridge16': 295.2, 'ridge16_int': 295.0, 'ridge8': 590.7, 'ridge8_int': 591.0, 'int8_over_fp16': 2.0, 'fp16_over_fp32': 15.0, 'k_ai': 200.0, 'k_compute_ratio': 3.2, 'k_bw_ratio': 1.6, 'k_a100': 312.0, 'k_h100': 670.0, 'k_gain': 2.1, 'k_gain_2': 2.15, 'ridge_v100': 139.0, 'ridge_a100': 153.0, 'ridge_h100': 295.0, 'ridge_b200': 281.0, 'gen_first_year': 2017.0, 'gen_last_year': 2024.0, 'gen_compute': 18.0, 'gen_bw': 8.9, 'env_devices': 52.0, 'env_compute': 55.0, 'env_bw': 13.0, 'env_best_bw': 8.0, 'env_since_year': 2025.0, 'qkv_batch': 8.0, 'conv_batch': 32.0, 'qkv_gflop': 125.8, 'qkv_mb': 120.2, 'qkv_ai': 1046.7, 'conv_gflop': 7.4, 'conv_mb': 13.1, 'conv_ai': 563.1, 'head_mflop': 131.1, 'head_mb': 4.3, 'head_ai': 30.5, 'ln_mflop': 104.9, 'ln_mb': 52.4, 'ln_ai': 2.0, 'dec_gflop': 3.0, 'dec_ai': 1.0, 'head_tflops': 102.0, 'head_pct': 10.3, 'ln_tflops': 6.7, 'ln_pct': 0.7, 'dec_tflops': 3.4, 'dec_pct': 0.3, 'top_pct': 100.0, 'softmax_ai': 0.75, 'nsight_dram_pct': 0.34, 'dense_width': 2048.0, 'batch_mid': 32.0, 'batch_big': 512.0, 'ai_b1': 1.0, 'ai_b32': 31.0, 'ai_b512': 341.0, 'ai_b512_1': 341.3, 'crossing': 415.0, 'resnet_gflop': 8.2, 'floor16_us': 8.0, 'floor8_us': 4.0, 's3_fp16': 563.0, 's3_int8': 1126.0, 's3_mixed': 569.0, 's2_fp16': 287.0, 's2_int8': 574.0, 'p2_fp16': 51.0, 'p2_int8': 102.0, 'p_resnet': 0.95, 'p_resnet_pct': 95.0, 'serial_resnet': 0.05, 'serial_resnet_pct': 5.0, 'p_gpt': 0.8, 'p_gpt_pct': 80.0, 'cpu_tops': 8.0, 'gain': 247.0, 'amdahl_rn': 18.6, 'amdahl_gpt': 4.9, 'bw_gain': 16.8, 'amdahl_bw': 4.0, 'amdahl_ceiling': 5.0, 'lh_resnet16': 51.1, 'lh_resnet8': 25.6, 'lh_mobilenet16': 7.0, 'lh_mobilenet8': 3.5, 'lh_mobilenet_gflop': 0.6, 'lh_gpt8': 1.5, 'lh_dlrm_gb': 100.0, 'lh_kws16': 400.0, 'lh_kws8': 200.0, 'lh_kws_mflop': 20.0, 'a100_t4_peak': 4.8, 'a100_t4_bw': 6.4, 'ds_tf32': 989.0, 'ds_fp16': 1979.0, 'ds_int8': 3958.0, 'mapping_gain': 75.0}
 import sys
 from pathlib import Path
 import numpy as np
@@ -46,10 +46,11 @@ energy_rows = [('INT8 add', 0.03, 'compute', '0.03 pJ'), ('FP32 add', 0.9, 'comp
 for k, shown in ((1, 3), (2, 4), (3, 5)):
     sp.hbars(out / f'energy_step{k}.svg', energy_rows, 'pJ', step=shown, xlabel='Energy per operation or access (pJ, log scale; 45 nm)', size=(5.8, 2.3))
 sp.hbars(out / 'tensorcore.svg', [(f'P100 ({2016})', 21.2, 'neutral', '21.2'), (f'V100 ({2017})', 125.0, 'compute', '125: about 6×')], 'TFLOP/s', log=False, xlabel='Peak FP16 (TFLOP/s)', size=(2.6, 1.3))
+import html
 FONT = 'font-family="Helvetica, Arial, sans-serif"'
 
 def svg_text(x, y, s, size=20, weight='400', fill=C['text'], anchor='middle'):
-    return f'<text x="{x}" y="{y}" {FONT} font-size="{size}" font-weight="{weight}" fill="{fill}" text-anchor="{anchor}" dominant-baseline="central">{s}</text>'
+    return f'<text x="{x}" y="{y}" {FONT} font-size="{size}" font-weight="{weight}" fill="{fill}" text-anchor="{anchor}" dominant-baseline="central">{html.escape(str(s), quote=False)}</text>'
 
 def units_svg(step):
     lanes = [('Vector unit', 'ReLU, residual add', C['memory'], C['memory_l'], 'ResNet-50: after every conv'), ('Matrix unit', 'convolution, projections', C['compute'], C['compute_l'], 'Both: most of the arithmetic'), ('Special-function unit', 'softmax exp, GELU, rsqrt', C['network'], C['network_l'], 'GPT-2 XL: every step')]
@@ -317,7 +318,7 @@ for k in (1, 2):
         ax.annotate(f"{name}: { {'V100': '139', 'A100': '153', 'H100': '295', 'B200': '281'}[name]}", (year, ridge), xytext=(0, dy), textcoords='offset points', ha='center', fontsize=11, fontweight='bold', color=C['danger'])
     alpha = 1.0 if k == 2 else 0.0
     ax.axhline(200.0, color=C['memory'], lw=2, ls='--', alpha=alpha)
-    ax.text(2016.5, 200.0 * 1.04, '200 FLOP/byte kernel', color=C['memory'], fontsize=11, fontweight='bold', ha='left', va='bottom', alpha=alpha)
+    ax.text(2016.5, 208.0, '200 FLOP/byte\nkernel', color=C['memory'], fontsize=10.5, fontweight='bold', ha='left', va='bottom', linespacing=1.05, alpha=alpha)
     ax.set_xlim(2016.3, 2024.8)
     ax.set_ylim(0, 360)
     ax.set_xticks([2017, 2020, 2022, 2024])
@@ -328,4 +329,86 @@ for k in (1, 2):
     sp.save(fig, out / f'ridge_rise_step{k}.svg')
 sp.hbars(out / 'int8peak.svg', [('FP16', 989.0, 'compute', '989 TFLOP/s'), ('INT8', 1979.0, 'danger', '1,979 TOPS: 2×')], '', log=False, xlabel='H100 dense peak', size=(2.9, 1.5))
 sp.hbars(out / 'int8floor.svg', [('FP16', 8.291203236, 'compute', '8 µs'), ('INT8', 4.143506822, 'danger', '4 µs')], '', log=False, xlabel='ResNet-50 arithmetic, one image', size=(2.9, 1.5))
+
+# 3-step 2:4 Structured Sparsity GEMM hardware datapath (matching vol1:fig-2-4-gemm, §11.4.5)
+def sparse24_hw_svg(step):
+    w_vals = [2, 0, 0, 3, 0, 4, 5, 0]
+    x_vals = [1, 2, 3, 4, 5, 6, 7, 8]
+    packed_w = [2, 3, 4, 5]
+    meta_tags = ['00 (0)', '11 (3)', '01 (1)', '10 (2)']
+    sel_x = [1, 4, 6, 7]
+    prods = [2, 12, 24, 35]
+    parts = [
+        '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="360" viewBox="0 0 900 360">',
+        '<rect width="900" height="360" fill="white"/>',
+        '<defs>',
+    ]
+    for col in (C['compute'], C['memory'], C['data'], C['neutral']):
+        parts.append(f'<marker id="sh_{col[1:]}" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="{col}"/></marker>')
+    parts.append('</defs>')
+
+    def sbox(x, y, w, h, fc, ec, lw=2.0, rx=5, dash=''):
+        d = f' stroke-dasharray="{dash}"' if dash else ''
+        return f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{rx}" fill="{fc}" stroke="{ec}" stroke-width="{lw}"{d}/>'
+
+    def sarr(x1, y1, x2, y2, col, lw=2.5):
+        return f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{col}" stroke-width="{lw}" marker-end="url(#sh_{col[1:]})"/>'
+
+    # Step 1: 8-element 2:4 weight vector (two groups of 4) + input vector x (always shown)
+    parts.append(svg_text(18, 26, 'Weights w (two 2:4 groups)', 20, '700', C['compute'], 'start'))
+    parts.append(svg_text(520, 26, 'Dense: 8 MACs = 73', 19, '700', C['neutral'], 'end'))
+    # Group boxes
+    parts.append(sbox(18, 44, 244, 54, '#FFF8F0', C['compute'], 1.8, 6, '5,3'))
+    parts.append(sbox(276, 44, 244, 54, '#FFF8F0', C['compute'], 1.8, 6, '5,3'))
+    for i, wv in enumerate(w_vals):
+        gx = 28 + i * 58 + (16 if i >= 4 else 0)
+        nz = wv != 0
+        parts.append(sbox(gx, 52, 48, 38, C['compute_l'] if nz else '#F5F5F5', C['compute'] if nz else '#BBBBBB', 2.2 if nz else 1.4, 4, '' if nz else '4,3'))
+        parts.append(svg_text(gx + 24, 71, str(wv), 21, '700' if nz else '400', C['compute'] if nz else '#999999'))
+
+    parts.append(svg_text(18, 120, 'Input activations x', 20, '700', C['memory'], 'start'))
+    for i, xv in enumerate(x_vals):
+        gx = 28 + i * 58 + (16 if i >= 4 else 0)
+        hl = (step >= 2 and i in (0, 3, 5, 6))
+        parts.append(sbox(gx, 134, 48, 38, C['memory_l'] if hl else '#F3F6FA', C['memory'] if hl else '#8A96A8', 2.4 if hl else 1.4, 4))
+        parts.append(svg_text(gx + 24, 153, str(xv), 21, '700' if hl else '400', C['memory'] if hl else C['text']))
+        parts.append(svg_text(gx + 24, 188, f'x[{i}]', 19, '700' if hl else '400', C['memory'] if hl else C['neutral']))
+
+    # Step 2+: Packed values + 2-bit position tags + Hardware MUX
+    if step >= 2:
+        parts.append(sarr(528, 71, 562, 71, C['compute'], 2.8))
+        parts.append(svg_text(725, 26, 'Packed 2:4 values + 2-bit tags', 20, '700', C['compute'], 'middle'))
+        for idx, (pw, tag) in enumerate(zip(packed_w, meta_tags)):
+            px = 568 + idx * 80
+            parts.append(sbox(px, 44, 72, 36, C['compute_l'], C['compute'], 2.2, 5))
+            parts.append(svg_text(px + 36, 62, str(pw), 21, '700', C['compute']))
+            parts.append(sbox(px, 86, 72, 30, '#FFF4E5', '#C2741E', 1.5, 4))
+            parts.append(svg_text(px + 36, 101, tag, 19, '700', C['text']))
+
+        # Hardware 4:2 MUX box
+        parts.append(sarr(528, 153, 562, 153, C['memory'], 2.8))
+        parts.append(sbox(568, 130, 312, 46, C['memory_l'], C['memory'], 2.4, 6))
+        parts.append(svg_text(724, 153, '4:2 MUX selects x = [1, 4, 6, 7]', 19.5, '700', C['memory']))
+        # Arrow from tags to MUX
+        parts.append(sarr(724, 118, 724, 129, C['compute'], 2.0))
+
+    # Step 3: 4 Sparse MACs + sum = 73 + bottom takeaway banner
+    if step >= 3:
+        parts.append(sarr(725, 178, 725, 202, C['data'], 2.8))
+        parts.append(sbox(18, 206, 864, 66, '#F7FBF8', C['data'], 2.2, 7))
+        parts.append(svg_text(40, 239, '4 Sparse MACs:', 21, '700', C['data'], 'start'))
+        for idx, (pw, sx, pr) in enumerate(zip(packed_w, sel_x, prods)):
+            mx = 220 + idx * 126
+            parts.append(sbox(mx, 218, 114, 42, C['data_l'], C['data'], 1.8, 5))
+            parts.append(svg_text(mx + 57, 239, f'{pw}×{sx} = {pr}', 19, '700', C['text']))
+        parts.append(svg_text(738, 239, '→  Sum = 73', 22, '700', C['data'], 'start'))
+
+        parts.append(sbox(18, 288, 864, 54, C['data_l'], C['data'], 2.2, 8))
+        parts.append(svg_text(450, 315, 'Same sum (73 = 73) in half the MACs (4 vs. 8); fixed 2:4 pattern keeps tensor lanes full.', 20, '700', C['data']))
+
+    parts.append('</svg>')
+    return '\n'.join(parts)
+
+for k in (1, 2, 3):
+    (out / f'sparse24_hw_step{k}.svg').write_text(sparse24_hw_svg(k))
 print('figures written')

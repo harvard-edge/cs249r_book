@@ -1,0 +1,178 @@
+% Study sheet: Volume III, Chapter 3, Test-Time Compute.
+% Numbers: \val{...} from test_time_compute_studysheet_numbers.tex, written by test_time_compute_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{test_time_compute_studysheet_numbers}
+\sheetvolume{3}
+\sheetchapter{3}{Test-Time Compute}
+\sheetsources{Chapter's mlsysim scenarios (hypothetical rates and prices) and measured sampling data; assumed inputs marked.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+More tokens, candidates or checks at decision time can raise the \hl{chance} of an
+accepted answer; it never makes one correct. The runtime spends it as a \hl{budget with a stopping rule}, deciding how far
+a pass is trusted and when to stop. Every round lengthens the horizon.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Three axes, one budget.}{Depth lengthens one candidate, breadth samples several, feedback revises after a
+  check. Only a check adds a fact.}
+\idea{Coverage is not selection.}{Votes, scores and visible tests rank. Return only on a pass from a sealed suite
+  (one it cannot read or modify); else abstain.}
+\idea{A pass inherits the base rate.}{Rare valid candidates plus small false acceptance fill the passes
+  with broken ones; pool size does not change that share.}
+\idea{Search exploits its check.}{The top noisy score carries positive error, and a larger pool more likely holds a
+  loophole. Measure accuracy on selected candidates.}
+\idea{Revise along recorded dependencies.}{A refuted premise invalidates only its downstream artifacts; a missing
+  edge keeps stale ones alive.}
+\idea{Budgets end searches, not uncertainty.}{Stop in order: hard ceiling, a pass, then calibrated gain per dollar below
+  threshold. No pass: abstain or escalate.}
+\end{ideas}
+
+\vspace{10pt}
+\sheetsec{Three axes under one output ceiling}
+\begin{sheettable}{@{}l L L L@{}}
+\thead{Axis} & \thead{Critical path} & \thead{Extra input} & \thead{New fact?}\\ \midrule
+Depth & one long chain & none & no\\
+Breadth & longest candidate, given capacity & $(\CandidatePoolSize-1)\SequenceLength$: unshared prompt re-reads & no\\
+Feedback & sum of rounds and checks & grows with each candidate and report & yes\\
+\end{sheettable}
+\vspace{3pt}
+{\fontsize{8.6}{11}\selectfont\color{muted}$\SequenceLength$ is prompt length. Judge a policy that fits the deadline
+by cost per accepted task, charging every attempt and branch:\par}
+\vspace{4pt}
+{\centering$\CostPerAcceptedTask = \mathbb{E}[\AttemptCost]\,/\,\AcceptanceProbability$\par}
+\end{leftcol}%
+\begin{rightcol}
+\fcard{Availability of a pool}%
+  {\text{pass@}\CandidatePoolSize = 1-(1-\AttemptPassProbability)^{\CandidatePoolSize}}%
+  {Chance $\CandidatePoolSize$ independent candidates, each passing with $\AttemptPassProbability$,
+   hold a pass: a ceiling on what any selector returns.}%
+  {Compute per task, then average; unsolvable tasks stay at zero.}%
+  {\begin{tikzpicture}[sheet]
+     \foreach \yv in {0,50,100}{\draw[gridline] (34,{\yv*0.6}) -- (230,{\yv*0.6});
+       \node[small, anchor=east] at (31,{\yv*0.6}) {\yv\%};}
+     \foreach \kx/\kl in {0/1,49/10,98/100,147/{1,000},196/{10,000}}{\node[small, anchor=north] at ({34+\kx},-3) {\kl};}
+     \begin{scope}[xshift=34pt]
+       \edef\cov{\noexpand\draw[accent, line width=1.1pt] plot coordinates {\val{covcurve}};}\cov
+       \edef\vote{\noexpand\draw[muted, dashed, line width=1pt] plot coordinates {\val{votecurve}};}\vote
+     \end{scope}
+     \node[lab, anchor=south east] at (228,{\val{covmaxy}+2}) {pool holds a correct answer, \val{covmax}\%};
+     \node[lab, anchor=north east] at (228,{\val{votemaxy}-2}) {majority vote returns one, \val{votemax}\%};
+     \node[note, anchor=north] at (132,-12) {samples per problem (measured, competition math)};
+   \end{tikzpicture}}
+\fcard{Precision of a pass}%
+  {\VerifierPrecision = \frac{\ValidCandidateRate(1-\VerifierFalseRejectionRate)}{\ValidCandidateRate(1-\VerifierFalseRejectionRate) + (1-\ValidCandidateRate)\VerifierFalseAcceptanceRate}}%
+  {Valid share of passes, from valid rate $\ValidCandidateRate$, false rejection $\VerifierFalseRejectionRate$ and
+   false acceptance $\VerifierFalseAcceptanceRate$. The denominator is the pass rate $\VerifierPassProbability$.}%
+  {A pool selects with $1-(1-\VerifierPassProbability)^{\CandidatePoolSize}$; its first pass is valid
+   with $\VerifierPrecision$.}{}
+\fcard{Effective branching}%
+  {\EffectiveBranchingFactor = \SearchBranchingFactor\,(1-\ChildPruningProbability)}%
+  {Kept nodes propose $\SearchBranchingFactor$ children; a step check rejects each with
+   $\ChildPruningProbability$. Nodes generated to depth $\SearchDepth$:
+   $\SearchBranchingFactor(1+\EffectiveBranchingFactor+\dots+\EffectiveBranchingFactor^{\SearchDepth-1})$.}%
+  {No pruning: $\EffectiveBranchingFactor = \SearchBranchingFactor$. Below one ($\ChildPruningProbability > 1-1/\SearchBranchingFactor$)
+   the tree dies out; above one it grows, so ceilings must stop it.}{}
+
+\vspace{6pt}
+\sheetsec{Plan graph revision}
+{\centering
+\begin{tikzpicture}[sheet]
+  \node[hotbox, minimum width=66pt, minimum height=16pt] (p) at (36,30) {refuted premise};
+  \node[accbox, minimum width=66pt, minimum height=16pt] (a) at (122,30) {regenerate};
+  \node[accbox, minimum width=66pt, minimum height=16pt] (b) at (206,30) {regenerate};
+  \node[nbox, minimum width=66pt, minimum height=16pt] (c) at (122,2) {independent: keep};
+  \draw[arr] (p) -- (a);
+  \draw[arr] (a) -- (b);
+\end{tikzpicture}\par}
+\vspace{3pt}
+{\fontsize{8.6}{11}\selectfont\color{muted}Follow recorded edges from the refuted node; stale work that no
+recorded path reaches survives.\par}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{Halved false acceptance: $\val{validpass} \div \val{halfpassprob}$ = \val{halfprecision}\%. Doubled valid rate:
+  $\val{doublevalidpass} \div \val{doublepassprob}$ = \val{doubleprecision}\%. Two knobs of similar strength: buy the
+  cheaper; a bigger pool moves neither (precision card).}
+\ans{1}{Single: $\val{qaspend} \div \val{qapassfrac}$ = \$\val{qaeff}, but \val{qapass}\% misses the target. Breadth:
+  $\val{qbspend} \div \val{qbpassfrac}$ = \$\val{qbeff}. Feedback: $\val{qcspend} \div \val{qcpassfrac}$ = \$\val{qceff},
+  and its two rounds end by \val{qmaxsec}~s. Choose feedback, \val{qbovercs}$\times$ cheaper than breadth; \val{qcabstain}\% of
+  tasks end unaccepted, still counted (cost line).}
+\columnbreak
+\ans{2}{The complement of $\val{qmissfrac}^{\val{qpool}}$: \val{qpoolpass}\%. Mixed: half the tasks reach the complement of
+  $\val{qeasyfrac}^{\val{qpool}}$, half stay at zero: \val{qtrue}\% (pool card).}
+\ans{3}{(a) $\EffectiveBranchingFactor$ = \val{qkids} $\times$ \val{qkeepfrac} = \val{qeff}, above one: the expected frontier grows
+  (dying out needs over \val{qcritical}\% rejection). Expected nodes \val{qlevelone} + \val{qleveltwo} + \val{qlevelthree} =
+  \val{qnodes}, against \val{qfull} unpruned. Ceilings must stop it (branching card). (b) Regenerate A and B; keep C. Without the
+  A$\to$B edge, B survives stale (dependencies key idea).}
+\ans{4}{The ceiling: no new work. Nothing passed the sealed suite: report unresolved or escalate. The score
+  and visible tests only rank (budgets key idea).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{How far can a passing patch be trusted?}
+A policy generates \val{pool} candidates and returns the first that passes, in fixed order. \val{validrate}\% are
+valid; the check rejects \val{falsereject}\% of valid ones and passes \val{falseaccept}\% of broken ones.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\u{40}
+  \node[lab, anchor=east, align=right] at (56,7) {expected passes\\in \val{pool} draws};
+  \draw[hotbox] (60,0) rectangle ({60+\val{validcount}*\u},14);
+  \draw[nbox] ({60+\val{validcount}*\u},0) rectangle ({60+\val{passcount}*\u},14);
+  \node[note, anchor=north] at ({60+\val{validcount}*\u/2},-3) {\val{validcount} valid};
+  \node[note, anchor=north] at ({60+(\val{validcount}+\val{passcount})*\u/2},-3) {\val{invalidcount} broken};
+  \node[note, anchor=west] at ({64+\val{passcount}*\u},7) {\val{passcount}};
+\end{tikzpicture}\par}\vspace{6pt}
+\begin{steps}
+\item Pass rate: $\val{validfrac} \times \val{frkeep} + \val{validmiss} \times \val{fafrac} = \val{validpass} + \val{invalidpass}$
+  $=$ \res{$\VerifierPassProbability = \val{passprob}$}.
+\item Precision: $\val{validpass} \div \val{passprob}$ $=$ \res{\val{precision}\%}; \val{defect}\% of passes are broken.
+\item Any selection: $1-(1-\val{passprob})^{\val{pool}}$ $=$ \val{anyselect}\%. Defective return:
+  $\val{anyselectfrac} \times \val{defectfrac}$ $=$ \res{\val{wrongreturn}\% of tasks}.
+\end{steps}
+\takeaway{The pool almost always finds a pass; nearly a third of returns are broken.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{A stricter check or a better generator?}
+Same pool. Option one halves false acceptance to \val{halfaccept}\%; option two doubles the valid rate to
+\val{doublevalid}\% with the same check.\par\vspace{4pt}
+\textbf{Given:} option one's broken passes, $\val{validmiss} \times \val{halffrac} = \val{halfinvalid}$.\par
+\textbf{You:} find each precision, the stronger knob, and what a larger pool adds.\par\vspace{30pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``Let it reason longer; more tokens give a better diagnosis.''}%
+  {More tokens re-examine the prompt; only a check adds a fact. \val{answertokens} tokens at \val{tokenms} ms take \val{answersec} s, \val{proberatio}$\times$
+   the \val{probemillis} ms test that observes whether the waiter wakes.}{}
+\mistake{``The highest-scoring candidate has done the task.''}%
+  {With equal true quality, the top of \val{argpool} noisy scores carries about \val{argshift} standard deviations of error,
+   and a loophole in \val{exploitrate}\% of samples is in \val{exploitpresent}\% of pools. A score ranks; it does not accept.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item Under a \val{deadlinesec} s deadline, three repair policies spend per attempt: single call \$\val{qaspend},
+  accepted \val{qapass}\%; \val{breadthcount} in parallel \$\val{qbspend}, \val{qbpass}\%; feedback (up to two \val{roundsec} s
+  rounds) \$\val{qcspend}, \val{qcpass}\%. \assumed{} the service needs \val{qtarget}\% acceptance. Which policy, at what cost
+  per accepted repair, and what happens to the rest?
+\item \assumed{} one task passes at \val{qpass}\% per candidate. (a) pass@$\CandidatePoolSize$ for a pool of \val{qpool}?
+  (b) Mixed workload: half the tasks pass at \val{qeasy}\%, half never. What does the pool deliver?
+\item (a) \assumed{} each node proposes \val{qkids} children; a step check rejects \val{qreject}\%. Does the tree die out on
+  its own? Expected nodes to depth \val{qdepth}, against no pruning?
+  (b) A test refutes premise P. A was built from P, B from A, C independently. What is regenerated,
+  and what if the A$\to$B edge went unrecorded?
+\item A search reaches its token ceiling. No candidate passes the sealed suite; the best scores \val{qscore} on a
+  learned scorer and passes the visible tests. Which rule decides, and what does the runtime return?
+\end{qs}
+\end{rightcol}
+\end{document}

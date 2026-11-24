@@ -41,37 +41,45 @@ export function injectFeedback(shadowEle) {
 }
 
 export function openFeedback(shadowRoot) {
+    if (!shadowRoot) return;
     const openModalButton = shadowRoot.querySelector('#openModal-feedback');
     const closeModalButton = shadowRoot.querySelector('#closeModal');
     const modal = shadowRoot.querySelector('#myModal');
     const iframe = shadowRoot.querySelector('#feedback-iframe');
 
+    if (!openModalButton || !modal) return;
+
+    const handleKeydown = (e) => {
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+            closeModal();
+        }
+    };
+
     // Function to close modal
     const closeModal = () => {
         modal.classList.add('hidden');
+        document.removeEventListener('keydown', handleKeydown);
     };
 
     // Open modal
-    openModalButton.addEventListener('click', () => {
+    openModalButton.addEventListener('click', (e) => {
+        e.preventDefault();
         if (iframe && !iframe.getAttribute('src')) {
             iframe.src = "https://docs.google.com/forms/d/e/1FAIpQLSeK8RXgc6kbT1IbWVLjyUhwowp3x1ySbAjUQQqztdDs5ccmmQ/viewform?embedded=true";
         }
         modal.classList.remove('hidden');
+        document.removeEventListener('keydown', handleKeydown);
+        document.addEventListener('keydown', handleKeydown);
     });
 
     // Close with close button
-    closeModalButton.addEventListener('click', closeModal);
+    if (closeModalButton) {
+        closeModalButton.addEventListener('click', closeModal);
+    }
 
     // Close when clicking outside modal
     modal.addEventListener('click', (e) => {
         if (e.target === modal) {
-            closeModal();
-        }
-    });
-
-    // Close with Escape key
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
             closeModal();
         }
     });

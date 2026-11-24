@@ -117,7 +117,7 @@ def hook():
             ax.text((x + v / 2) / 1000, -0.34 if below else 0.36, lab.replace('\n', ' ') if below else lab, ha='center', va='top' if below else 'bottom', fontsize=10.5, color=C['text'])
             x += v
         ax.barh(0, reserve / 1000, left=limit / 1000, height=0.55, color='white', edgecolor=C['neutral'], hatch='///', lw=1)
-        n = {1: 0, 2: int(10.0), 3: 0, 4: overflow}[k]
+        n = {1: 0, 2: int(10.0), 3: int(10.0), 4: overflow}[k]
         for t in range(n):
             left = start_obs + t * obs
             over = left + obs > limit
@@ -125,7 +125,8 @@ def hook():
         ax.text((limit + reserve / 2) / 1000, 0.36, 'Output\nreserve 8K', ha='center', va='bottom', fontsize=10.5, color=C['neutral'])
         ax.plot([limit / 1000] * 2, [-0.36, 0.36], color=C['danger'], lw=1.8, ls='--')
         ax.annotate('', xy=(limit / 1000, -0.66), xytext=(start_obs / 1000, -0.66), arrowprops=dict(arrowstyle='<->', color='#b45309', lw=1.6, alpha=1.0 if k == 1 else 0.0))
-        texts = [(1, mid, -0.78, '81,000 tokens left for tool results; +4,000 per turn', '#b45309'), (2, (start_obs + 40000.0 / 2) / 1000 + 6, -0.72, 'Turn 10: 40,000 tokens of results', '#b45309'), (3, mid, 0.0, 'On which turn?', C['danger']), (4, mid, -0.72, 'Turn 21 needs 84,000 > 81,000 tokens', C['danger']), (4, mid, -1.08, 'Lasting 30 turns allows at most 2,700 per result', C['danger'])]
+        rem_mid = (start_obs + 40000.0 + limit) / 2000
+        texts = [(1, mid, -0.78, '81,000 tokens left for tool results; +4,000 per turn', '#b45309'), (2, (start_obs + 40000.0 / 2) / 1000 + 6, -0.72, 'Turn 10: 40,000 tokens of results', '#b45309'), (3, (start_obs + 40000.0 / 2) / 1000 + 6, -0.72, 'Turn 10: 40,000 tokens of results', '#b45309'), (3, rem_mid, 0.0, 'On which turn?', C['danger']), (4, mid, -0.72, 'Turn 21 needs 84,000 > 81,000 tokens', C['danger']), (4, mid, -1.08, 'Lasting 30 turns allows at most 2,700 per result', C['danger'])]
         for kk, xx, yy, tt, col in texts:
             ax.text(xx, yy, tt, ha='center', va='top' if yy < 0 else 'center', fontsize=14 if kk == 3 else 11, color=col, fontweight='bold', alpha=1.0 if kk == k else 0.0)
         ax.set_xlim(0, window_k)
@@ -383,7 +384,7 @@ def scope():
     s.text(731, 76, 'r17, this test, this schedule', size=18, anchor='middle')
     s.text(731, 116, 'not about r18 or other tests', size=18, anchor='middle', fill=V['bad_t'], weight='bold')
     s.rect(570, 182, 322, 140, V['sto_f'], V['sto_s'], sw=2.5, rx=8)
-    s.text(731, 216, 'Host gate, outside the prompt', size=19, anchor='middle', weight='bold', fill=V['sto_t'])
+    s.text(731, 216, 'Host check, outside the prompt', size=19, anchor='middle', weight='bold', fill=V['sto_t'])
     s.text(731, 246, 'sandbox, read-only mounts,', size=18, anchor='middle')
     s.text(731, 272, 'no production deploy:', size=18, anchor='middle')
     s.text(731, 302, 'enforces what may run', size=18, anchor='middle', fill=V['sto_t'], weight='bold')

@@ -36,7 +36,7 @@ export class DropdownHandler {
 
     // Combine the original prompt with the difficulty level
     // const newPrompt = `${selectedDifficulty}\n\n${originalPrompt}`;
-    const newPrompt = `$${originalPrompt}`;
+    const newPrompt = `${originalPrompt}`;
 
 
 

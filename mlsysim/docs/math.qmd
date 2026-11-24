@@ -13,7 +13,7 @@ import math
 from IPython.display import Markdown
 import mlsysim
 from mlsysim import Hardware, Models, Infrastructure, Systems, Literature, Q_
-from mlsysim.solvers import DistributedModel, ContinuousBatchingModel
+from mlsysim.solvers import DistributedModel, ContinuousBatchingModel, EconomicsModel
 from mlsysim.systems.types import Fleet
 from mlsysim.physics import (
     calc_ring_allreduce_time,
@@ -56,6 +56,12 @@ _eth100_bw_gbs = Systems.Fabrics.Ethernet_100G.bandwidth.to("GB/s").magnitude
 _ar_140_bw_s = (2 * 1023 / 1024) * (140.0 / _ndr_bw_gbs)
 _ar_140_lat_ms = (2 * 1023 * 2.0) / 1000.0
 _ar_140_tot_s = calc_ring_allreduce_time(Q_("140 GB"), 1024, Systems.Fabrics.InfiniBand_NDR.bandwidth, Q_("2 us")).to("s").magnitude
+_ar_140_eth_s = calc_ring_allreduce_time(Q_("140 GB"), 1024, Systems.Fabrics.Ethernet_100G.bandwidth, Q_("2 us")).to("s").magnitude
+_ar_eth_ndr_speedup = _ar_140_eth_s / _ar_140_tot_s
+_mfu_lo = float(Literature.Training.MfuLow)
+_mfu_hi = float(Literature.Training.MfuHigh)
+_fleet_lo_pct = int(round(_mfu_lo * 0.40 * 0.85 * 100))
+_fleet_hi_pct = int(round(_mfu_hi * 0.85 * 0.97 * 100))
 
 _bub_4_16_1 = calc_pipeline_bubble(4, 16, v_stages=1) * 100
 _bub_4_16_2 = calc_pipeline_bubble(4, 16, v_stages=2) * 100
@@ -106,6 +112,18 @@ _dgx_cost_k = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate.magnitude / 100
 _amort_yr = int(Infrastructure.Pricing.Capital.AcceleratorServiceLifeYears.rate)
 _cloud_gpu_hr = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.magnitude
 _h100_a100_flops_ratio = _h100_peak / _a100_peak
+_dgx_fleet = Fleet(name="1xDGX-H100", node=Systems.Nodes.DGX_H100, count=1, fabric=Systems.Fabrics.InfiniBand_NDR)
+_dgx_mult = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate.magnitude / (8 * Systems.Nodes.DGX_H100.accelerator.unit_cost.magnitude)
+_ec_dgx_80 = EconomicsModel().solve(_dgx_fleet, duration_days=365, mfu=0.80, amortization_years=_amort_yr, infrastructure_multiplier=_dgx_mult)
+_ec_dgx_20 = EconomicsModel().solve(_dgx_fleet, duration_days=365, mfu=0.20, amortization_years=_amort_yr, infrastructure_multiplier=_dgx_mult)
+_ec_dgx_0 = EconomicsModel().solve(_dgx_fleet, duration_days=365, mfu=0.0, amortization_years=_amort_yr, infrastructure_multiplier=_dgx_mult)
+_ec_dgx_100 = EconomicsModel().solve(_dgx_fleet, duration_days=365, mfu=1.0, amortization_years=_amort_yr, infrastructure_multiplier=_dgx_mult)
+_gpu_hrs_yr = 8 * 8760
+_onprem_80_k = _ec_dgx_80.tco_usd / 1000.0
+_cloud_80_k = (_cloud_gpu_hr * 0.80 * _gpu_hrs_yr) / 1000.0
+_onprem_rate_80 = _ec_dgx_80.tco_usd / (0.80 * _gpu_hrs_yr)
+_onprem_rate_20 = _ec_dgx_20.tco_usd / (0.20 * _gpu_hrs_yr)
+_breakeven_occ_pct = (_ec_dgx_0.tco_usd / (_cloud_gpu_hr * _gpu_hrs_yr - (_ec_dgx_100.tco_usd - _ec_dgx_0.tco_usd))) * 100.0
 
 _gpu_mttf_hr = Systems.Reliability.Gpu.mttf_hours
 _mtbf_1k_hr = _gpu_mttf_hr / 1000
@@ -115,13 +133,19 @@ _llama3_16k_gpus = Systems.Clusters.Meta_Llama3_16K_H100.total_accelerators
 _llama3_failures = int(Literature.TrainingRuns.Llama3_405B_UnexpectedInterruptions)
 _llama3_days = int(Literature.TrainingRuns.Llama3_405B_SnapshotDays)
 _tau_opt_min = calc_young_daly_interval(Q_("2 min"), Q_("180 min")).to("min").magnitude
-_prob_30d = calc_failure_probability(Q_("5 hour"), Q_("720 hour"))
+_prob_30d = calc_failure_probability(Q_(_mtbf_10k_hr, "hour"), Q_("720 hour"))
+_yd_w10 = (2.0 / 10.0 + 10.0 / (2.0 * 180.0)) * 100.0
+_yd_wopt = (2.0 / _tau_opt_min + _tau_opt_min / (2.0 * 180.0)) * 100.0
+_yd_w60 = (2.0 / 60.0 + 60.0 / (2.0 * 180.0)) * 100.0
+_yd_cost_opt_m = 10.0 * (_yd_wopt / 100.0)
+_wue_us = Infrastructure.Datacenters.US_Hyperscale.grid.wue
+_water_us_l = _it_kwh * _wue_us
 ```
 
 ::: {.callout-tip}
 ## How to read this page
 Each section corresponds to one MLSys·im solver. Click any solver name to jump to its API docs,
-or follow the **Slide Deck** links to the full lecture treatment with worked examples.
+or follow the **Textbook**, **Interactive Lab**, and **Slides** links to the full curriculum treatment (or browse the [Textbook & Chapter Map](curriculum-map.qmd)).
 :::
 
 ---
@@ -129,7 +153,7 @@ or follow the **Slide Deck** links to the full lecture treatment with worked exa
 ## 1. The Roofline Model (Single-Node Performance) {#sec-roofline}
 
 *Implemented in [`mlsysim.solvers.SingleNodeModel`](api/solvers.SingleNodeModel.qmd).*
-**Slide Deck:** [Hardware Acceleration (Vol I, Ch 11)]({{< var slides_latest >}}/vol1_11_hw_acceleration.pdf){target="_blank"}
+**Curriculum:** [Vol I, Ch 11: Hardware Acceleration](https://mlsysbook.ai/vol1/11_hw_acceleration/11_hw_acceleration.html) · [Lab 11](https://mlsysbook.ai/labs/vol1/lab_11_hw_accel/) · [Slides](https://mlsysbook.ai/slides/vol1.html#ch-11)
 
 ::: {.callout-note appearance="simple" icon=false}
 **Intuition:** Hardware has two speed limits: how fast it can compute (FLOP/s) and how fast it can feed data to the compute units (bytes/s). Actual throughput is set by whichever limit is reached first. This is why we take the *maximum* of two terms, not their sum.
@@ -143,8 +167,8 @@ $$
 
 | Symbol | Meaning | Typical Range |
 |:-------|:--------|:--------------|
-| $\eta$ | Achieved compute efficiency | 0.25–0.55 (training); ~0.35 (inference). See [Accuracy & Validation](accuracy.qmd). |
-| Dispatch\_Tax | Kernel-launch overhead (CUDA, driver) | 0.01–0.1 ms |
+| $\eta$ | Achieved compute efficiency | `{python} f"{_mfu_lo:.2f}–{_mfu_hi:.2f}"` (training); ~0.35 (inference). See [Accuracy & Validation](accuracy.qmd). |
+| Dispatch\_Tax | Per-step kernel/runtime launch tax (`hardware.dispatch_tax`) | 0.001–5.0 ms across silicon tiers (`0.01 ms` default on `HardwareNode`; per-layer `FRAMEWORK_LAYER_TAX_MS` defaults to `0.0 ms`) |
 
 ### 1.2 Arithmetic Intensity and the Ridge Point
 
@@ -154,16 +178,18 @@ $$
 I = \frac{\text{FLOPs}}{\text{Bytes Transferred}}
 $$
 
-The **ridge point** is the hardware's crossover intensity:
+The **ridge point** is the hardware's theoretical peak crossover intensity:
 
 $$
-I^* = \frac{\text{Peak\_FLOP/s}}{\text{Memory\_BW}}
+I^* = \frac{\text{Peak\_FLOP/s}}{\text{Memory\_BW}}, \qquad I^*_{\text{eff}}(\eta) = \frac{\eta \cdot \text{Peak\_FLOP/s}}{\text{Memory\_BW}}
 $$
+
+When `SingleNodeModel` evaluates a kernel at compute efficiency $\eta \in (0, 1]$, effective compute throughput scales to $\eta \cdot \text{Peak\_FLOP/s}$, shifting the operational compute-vs-memory crossover to $I^*_{\text{eff}}(\eta)$ (`I^*` corresponds to $\eta = 1$).
 
 | If... | Regime | Action |
 |:------|:-------|:-------|
-| $I > I^*$ | **Compute-bound** | Faster math units, lower precision, or fewer FLOPs |
-| $I < I^*$ | **Memory-bound** | Larger batch size, operator fusion, or higher memory bandwidth |
+| $I > I^*_{\text{eff}}(\eta)$ | **Compute-bound** | Faster math units, lower precision, or fewer FLOPs |
+| $I < I^*_{\text{eff}}(\eta)$ | **Memory-bound** | Larger batch size, operator fusion, or higher memory bandwidth |
 
 ::: {.callout-tip collapse="true"}
 ## Worked Example: Dense Layer on H100
@@ -185,7 +211,7 @@ Source: Slide deck worked example, Vol I Ch 11.
 ## 2. Distributed Training (3D/4D Parallelism) {#sec-distributed}
 
 *Implemented in [`mlsysim.solvers.DistributedModel`](api/solvers.DistributedModel.qmd).*
-**Slide Decks:** [Distributed Training (Vol II, Ch 6)]({{< var slides_latest >}}/vol2_06_distributed_training.pdf){target="_blank"} | [Collective Communication (Vol II, Ch 5)]({{< var slides_latest >}}/vol2_05_collective_communication.pdf){target="_blank"}
+**Curriculum:** [Vol II, Ch 6: Distributed Training](https://mlsysbook.ai/vol2/06_distributed_training/06_distributed_training.html) ([Lab 06](https://mlsysbook.ai/labs/vol2/lab_06_dist_train/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-06)) | [Vol II, Ch 5: Collective Communication](https://mlsysbook.ai/vol2/05_collective_communication/05_collective_communication.html) ([Lab 05](https://mlsysbook.ai/labs/vol2/lab_05_collective_communication/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-05))
 
 Real distributed training involves complex interactions between computation, communication, and scheduling. Empirical profiling requires access to expensive multi-GPU clusters and takes hours per configuration. MLSys·im decomposes the problem into independent overheads, each governed by a closed-form equation, so thousands of parallelism configurations can be evaluated in seconds.
 
@@ -216,7 +242,7 @@ An efficiency of 80% on 256 GPUs delivers the throughput of ~`{python} f"{int(ro
 
 ### 2.3 Ring All-Reduce (Data Parallelism) {#sec-allreduce}
 
-**Slide Deck:** [Collective Communication (Vol II, Ch 5)]({{< var slides_latest >}}/vol2_05_collective_communication.pdf){target="_blank"}
+**Curriculum:** [Vol II, Ch 5: Collective Communication](https://mlsysbook.ai/vol2/05_collective_communication/05_collective_communication.html) · [Lab 05](https://mlsysbook.ai/labs/vol2/lab_05_collective_communication/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-05)
 
 After each training step, every GPU must synchronize gradients. The standard algorithm is **ring all-reduce**, which arranges $N$ GPUs in a logical ring and passes gradient chunks in two phases (scatter-reduce, then all-gather).
 
@@ -238,10 +264,10 @@ $$
 MLSys·im also implements **tree all-reduce** (latency-optimal for small messages):
 
 $$
-T_{\text{tree}} = 2 \log_2(N) \cdot \alpha \;+\; 2 \log_2(N) \cdot \frac{M}{\beta}
+T_{\text{tree}} = 2 \lceil \log_2 N \rceil \cdot \alpha \;+\; 2 \lceil \log_2 N \rceil \cdot \frac{M}{\beta}
 $$
 
-The crossover point between ring and tree is approximately $M_{\text{cross}} \approx N \cdot \alpha \cdot \beta$. Below this size, tree wins (latency dominates); above it, ring wins (bandwidth dominates).
+Equating $T_{\text{ring}} = T_{\text{tree}}$ gives the exact crossover payload $M_{\text{cross}} = \frac{((N - 1) - \lceil \log_2 N \rceil) \cdot \alpha \cdot \beta}{\lceil \log_2 N \rceil - (N - 1)/N}$, which simplifies for large $N$ to $M_{\text{cross}} \approx \frac{N \cdot \alpha \cdot \beta}{\log_2 N}$ (`calc_ring_tree_crossover_size`). Below this size, tree wins (startup latency dominates); above it, ring wins (bandwidth dominates).
 
 ::: {.callout-tip collapse="true"}
 ## Worked Example: 140 GB Gradient Sync
@@ -252,12 +278,12 @@ A 70B-parameter model in FP16 produces a 140 GB gradient. On a 1,024-GPU cluster
 - **Latency term:** $2 \times 1023 \times 2\;\mu\text{s} \approx `{python} f"{_ar_140_lat_ms:.0f}"`$ ms (negligible)
 - **Total gradient synchronization time:** ~`{python} f"{_ar_140_tot_s:.1f}"` s, bandwidth-dominated as expected for large messages.
 
-Upgrading from 100 Gb Ethernet (~`{python} f"{_eth100_bw_gbs:.1f}"` GB/s) to NDR (~`{python} f"{_ndr_bw_gbs:.0f}"` GB/s) recovers 10–30% scaling efficiency.
+Upgrading from 100 Gb Ethernet (~`{python} f"{_eth100_bw_gbs:.1f}"` GB/s, ~`{python} f"{_ar_140_eth_s:.1f}"` s sync) to NDR (~`{python} f"{_ndr_bw_gbs:.0f}"` GB/s, ~`{python} f"{_ar_140_tot_s:.1f}"` s sync) cuts gradient synchronization time `{python} f"{_ar_eth_ndr_speedup:.1f}"`×.
 :::
 
 ### 2.4 Pipeline Parallelism Bubble {#sec-pipeline}
 
-**Slide Deck:** [Distributed Training (Vol II, Ch 6)]({{< var slides_latest >}}/vol2_06_distributed_training.pdf){target="_blank"}
+**Curriculum:** [Vol II, Ch 6: Distributed Training](https://mlsysbook.ai/vol2/06_distributed_training/06_distributed_training.html) · [Lab 06](https://mlsysbook.ai/labs/vol2/lab_06_dist_train/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-06)
 
 **Pipeline parallelism** splits a model's layers across $P$ stages. At the start of each batch, downstream stages sit idle while upstream stages produce output. This idle time is the **pipeline bubble**.
 
@@ -310,8 +336,8 @@ $$
 
 ## 3. Training Scaling Laws {#sec-scaling}
 
-*Used by [`mlsysim.physics.calc_transformer_training_flops`]({{< var github_repo >}}/blob/dev/mlsysim/mlsysim/physics/).*
-**Slide Deck:** [Training (Vol I, Ch 8)]({{< var slides_latest >}}/vol1_08_training.pdf){target="_blank"}
+*Used by [`mlsysim.physics.calc_transformer_training_flops`](api/physics.transformer.qmd).*
+**Curriculum:** [Vol I, Ch 8: Model Training](https://mlsysbook.ai/vol1/08_training/08_training.html) · [Lab 08](https://mlsysbook.ai/labs/vol1/lab_08_model_train/) · [Slides](https://mlsysbook.ai/slides/vol1.html#ch-08)
 
 The **6PD rule** estimates total training FLOPs for a Transformer:
 
@@ -369,25 +395,27 @@ Tensor, pipeline, and expert parallelism first shard the model states across mod
 ## 4. LLM Serving Lifecycle {#sec-serving}
 
 *Implemented in [`mlsysim.solvers.ServingModel`](api/solvers.ServingModel.qmd).*
-**Slide Decks:** [Model Serving (Vol I, Ch 13)]({{< var slides_latest >}}/vol1_13_model_serving.pdf){target="_blank"} | [Inference at Scale (Vol II, Ch 10)]({{< var slides_latest >}}/vol2_10_inference.pdf){target="_blank"}
+**Curriculum:** [Vol I, Ch 13: Model Serving](https://mlsysbook.ai/vol1/13_model_serving/13_model_serving.html) ([Lab 13](https://mlsysbook.ai/labs/vol1/lab_13_model_serving/) · [Slides](https://mlsysbook.ai/slides/vol1.html#ch-13)) | [Vol II, Ch 10: Serving at Scale](https://mlsysbook.ai/vol2/10_inference/10_inference.html) ([Lab 10](https://mlsysbook.ai/labs/vol2/lab_10_inference/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-10))[ | [Vol III, Ch 5: KV Cache Management](https://mlsysbook.ai/vol3/05_kv_cache/05_kv_cache.html)]{.mls-unreleased}
 
 LLM autoregressive inference has two physically distinct phases. Capacity planning depends on knowing which phase dominates.
 
 ### 4.1 Pre-fill Phase (Compute-Bound)
 
-The initial forward pass processes all prompt tokens in parallel:
+The initial forward pass processes all prompt tokens in parallel, combining linear projection work ($2 P S B$) with quadratic self-attention matrix products across $L$ layers of attention width $d_{\text{attn}}$:
 
 $$
-\text{TTFT} = \frac{2 \times P \times S \times B}{\text{Peak\_FLOP/s} \times \eta} + \text{Dispatch\_Tax}
+\text{TTFT} = \frac{\left(2 P S + c_{\text{attn}} L d_{\text{attn}} S^2\right) B}{\text{Peak\_FLOP/s} \times \eta} + \text{Dispatch\_Tax}
 $$
 
 | Symbol | Meaning |
 |:-------|:--------|
 | $P$ | Number of model parameters |
-| $S$ | Input sequence length |
+| $S$ | New prompt tokens processed ($S - S_{\text{cache}}$ when prefix caching is active) |
 | $B$ | Batch size |
+| $L, d_{\text{attn}}$ | Transformer layer count and query-attention width ($H \times d_{\text{head}}$) |
+| $c_{\text{attn}}$ | $2$ for causal autoregressive attention (`causal=True`, default); $4$ for full bidirectional attention (`causal=False`) |
 
-The factor of 2 counts both the multiply and the add in each multiply-accumulate (MAC) operation.
+The linear factor of 2 counts both the multiply and the add in each multiply-accumulate (MAC) operation; causal masking halves the $4 L d_{\text{attn}} S^2$ full-matrix $\mathbf{Q}\mathbf{K}^\top$ and $\mathbf{A}\mathbf{V}$ products over an uncached prompt (with cached prefix $S_{\text{cache}} > 0$, each new query also attends across the cached keys).
 
 ### 4.2 Decoding Phase (Compute and Memory Bounds) {#sec-decode}
 
@@ -578,30 +606,38 @@ $$
 C_{\text{total}} = C_{\text{training}} + C_{\text{serving}} \times T_{\text{deploy}} \times Q_{\text{rate}}
 $$
 
-A 70B model costing \$2M to train, serving 1M daily users at 50 requests/day, costs ~\$18M/year in inference, 9× the training cost in year one. This is why inference optimization (batching, quantization, speculative decoding) has outsized economic impact.
+As an illustrative example, a 70B model costing \$2M to train and serving 1M daily users at 50 requests/day ($18.25\text{B}$ requests/year) at an assumed \$0.001/request costs ~\$18.3M/year in inference — ~9× the training cost in year one. This is why inference optimization (batching, quantization, speculative decoding) has outsized economic impact.
 
 ---
 
 ## 5. Datacenter Sustainability {#sec-sustainability}
 
 *Implemented in [`mlsysim.solvers.SustainabilityModel`](api/solvers.SustainabilityModel.qmd).*
-**Slide Deck:** [Sustainable AI (Vol II, Ch 15)]({{< var slides_latest >}}/vol2_15_sustainable_ai.pdf){target="_blank"}
+**Curriculum:** [Vol II, Ch 15: Sustainable AI](https://mlsysbook.ai/vol2/15_sustainable_ai/15_sustainable_ai.html) · [Lab 15](https://mlsysbook.ai/labs/vol2/lab_15_sustainable_ai/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-15)
 
 ### 5.1 Total Energy
 
 $$
-E = \text{IT\_Power} \times \text{Hours} \times \text{PUE}
+P_{\text{chip}} = P_{\text{TDP}}\left(0.30 + 0.70 \cdot \text{MFU}\right), \qquad E_{\text{IT}} = N_{\text{chip}} P_{\text{chip}} \times \text{Hours}, \qquad E = E_{\text{IT}} \times \text{PUE}
 $$
 
-**Power Usage Effectiveness** (PUE) accounts for cooling and facility overhead. A PUE of 1.0 is theoretical perfect efficiency; hyperscale datacenters achieve 1.05–1.10 (liquid-cooled) to 1.4–1.6 (air-cooled). The industry average is `{python} f"{Infrastructure.Datacenters.Poland_Coal.pue:.2f}"`, meaning 37% of energy goes to cooling and power distribution, not computation.
+**Power Usage Effectiveness** (PUE) accounts for cooling and facility overhead, while energy proportionality models idle silicon draw (~30% of TDP) plus dynamic switching power (~70% of TDP scaled by MFU). A PUE of 1.0 is theoretical perfect efficiency; hyperscale datacenters achieve 1.05–1.12 (liquid-cooled) to 1.4–1.6 (air-cooled). A facility PUE of `{python} f"{Infrastructure.Datacenters.Poland_Coal.pue:.2f}"` means 37% of total facility energy goes to cooling and power distribution rather than computation.
 
 ### 5.2 Carbon Footprint
 
 $$
-C = E \times \text{Carbon\_Intensity}
+C = \frac{E \times \text{Carbon\_Intensity}}{1000} + C_{\text{embodied}}
 $$
 
-Where $C$ is in kg CO₂e and Carbon\_Intensity is in g CO₂e/kWh, sourced from regional grid data.
+Where operational carbon $C$ is in kg CO₂e, $E$ is in kWh, Carbon\_Intensity is in g CO₂e/kWh (divided by 1,000 for kg), and $C_{\text{embodied}}$ is hardware manufacturing carbon (kg CO₂e).
+
+### 5.3 Water Usage Effectiveness (WUE)
+
+$$
+W = E_{\text{IT}} \times \text{WUE}_{\text{site}}
+$$
+
+Per the Green Grid standard, site-based **Water Usage Effectiveness** ($\text{WUE}_{\text{site}}$, in liters/kWh) is normalized against **IT equipment energy** ($E_{\text{IT}}$), *not* PUE-inflated total facility energy ($E$), so cooling overhead is never double-counted. For example, `{python} f"{_it_kwh:,.0f}"` kWh of IT energy at a hyperscale $\text{WUE}_{\text{site}} = `{python} f"{_wue_us:.1f}"`$ L/kWh consumes **`{python} f"{_water_us_l:,.0f}"` L** of cooling water.
 
 ::: {.callout-tip collapse="true"}
 ## Worked Example: Training Carbon Footprint
@@ -624,10 +660,10 @@ Source: Sustainable AI slides (Vol II, Ch 15).
 ## 6. Total Cost of Ownership (TCO) {#sec-tco}
 
 *Implemented in [`mlsysim.solvers.EconomicsModel`](api/solvers.EconomicsModel.qmd).*
-**Slide Deck:** [Compute Infrastructure (Vol II, Ch 2)]({{< var slides_latest >}}/vol2_02_compute_infrastructure.pdf){target="_blank"}
+**Curriculum:** [Vol II, Ch 2: Compute Infrastructure](https://mlsysbook.ai/vol2/02_compute_infrastructure/02_compute_infrastructure.html) · [Lab 02](https://mlsysbook.ai/labs/vol2/lab_02_compute_infra/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-02)
 
 $$
-\text{TCO} = \underbrace{\frac{\text{Hardware\_Cost}}{\text{Depreciation\_Years}}}_{\text{CapEx (amortized)}} + \underbrace{E \times \text{Electricity\_Rate}}_{\text{OpEx (power)}} + \text{OpEx}_{\text{maintenance}}
+\text{TCO} = \underbrace{\frac{\text{Hardware\_Cost}}{\text{Depreciation\_Years}} \times \frac{\text{Duration\_Days}}{365}}_{\text{CapEx (prorated)}} + \underbrace{E \times \text{Electricity\_Rate}}_{\text{OpEx (power)}} + \underbrace{\text{Hardware\_Cost} \times r_{\text{maint}} \times \frac{\text{Duration\_Days}}{365}}_{\text{OpEx (maintenance)}}
 $$
 
 ::: {.callout-tip collapse="true"}
@@ -635,11 +671,11 @@ $$
 
 | Metric | On-Prem (H100 Node) | Cloud On-Demand |
 |:-------|:--------------------|:----------------|
-| Unit cost | \$`{python} f"{_dgx_cost_k:.0f}"`K (amortize over `{python} f"{_amort_yr}"` yr) | N/A |
-| Annual cost (80% util) | ~\$122K/node/yr | ~\$224K/node/yr |
-| Effective GPU-hour rate | ~\$2.40 | ~\$`{python} f"{_cloud_gpu_hr:.2f}"` |
+| Unit cost | \$`{python} f"{_dgx_cost_k:.0f}"`K (amortize over `{python} f"{_amort_yr}"` yr + 5%/yr maint.) | N/A |
+| Annual cost (80% util) | ~\$`{python} f"{_onprem_80_k:.0f}"`K/node/yr | ~\$`{python} f"{_cloud_80_k:.0f}"`K/node/yr |
+| Effective GPU-hour rate | ~\$`{python} f"{_onprem_rate_80:.2f}"` | ~\$`{python} f"{_cloud_gpu_hr:.2f}"` |
 
-**Break-even occupancy:** ~55%. Below 55% sustained occupancy, cloud is cheaper. At 20% occupancy, on-prem costs ~\$6/GPU-hour, which is more expensive than cloud on-demand.
+**Break-even occupancy:** ~`{python} f"{_breakeven_occ_pct:.0f}"`%. Below `{python} f"{_breakeven_occ_pct:.0f}"`% sustained occupancy, cloud is cheaper. At 20% occupancy, on-prem costs ~\$`{python} f"{_onprem_rate_20:.2f}"`/GPU-hour, which is more expensive than cloud on-demand.
 
 The right metric is **cost per useful TFLOP-hour**, not cost per GPU-hour. An H100 delivers `{python} f"{_h100_a100_flops_ratio:.1f}"`× the FP16 TFLOP/s of an A100 (or 6.3× comparing H100 FP8 to A100 FP16), so a higher sticker price may yield a lower effective cost.
 
@@ -651,7 +687,7 @@ Source: Compute Infrastructure slides (Vol II, Ch 2).
 ## 7. Cluster Reliability (The Young-Daly Model) {#sec-reliability}
 
 *Implemented in [`mlsysim.solvers.ReliabilityModel`](api/solvers.ReliabilityModel.qmd).*
-**Slide Deck:** [Fault Tolerance (Vol II, Ch 7)]({{< var slides_latest >}}/vol2_07_fault_tolerance.pdf){target="_blank"}
+**Curriculum:** [Vol II, Ch 7: Fault Tolerance](https://mlsysbook.ai/vol2/07_fault_tolerance/07_fault_tolerance.html) · [Lab 07](https://mlsysbook.ai/labs/vol2/lab_07_fault_tolerance/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-07)
 
 ::: {.callout-note appearance="simple" icon=false}
 **Intuition:** When training on thousands of GPUs for months, hardware failures are a statistical certainty. If a node fails, the job loses all progress since the last checkpoint. Checkpointing too often wastes time writing; checkpointing too rarely wastes time recomputing. The Young-Daly model finds the optimal balance.
@@ -685,13 +721,13 @@ $$
 
 ### 7.3 Wasted Compute Fraction
 
-The total overhead from checkpointing has two components:
+The first-order fraction of wall-clock time lost to checkpointing and rollback recovery has two components:
 
 $$
-\text{Waste} = \underbrace{\frac{\delta}{2\tau}}_{\text{checkpoint writes}} + \underbrace{\frac{\tau}{2M}}_{\text{lost work on failure}}
+\text{Waste}(\tau) = \underbrace{\frac{\delta}{\tau}}_{\text{checkpoint writes}} + \underbrace{\frac{\tau}{2M}}_{\text{lost work on failure}}
 $$
 
-At the optimal $\tau_{\text{opt}}$, both terms are equal, and waste is minimized.
+Setting $\frac{d}{d\tau}\text{Waste}(\tau) = -\frac{\delta}{\tau^2} + \frac{1}{2M} = 0$ yields $\tau_{\text{opt}} = \sqrt{2 \delta M}$, at which both terms equal $\sqrt{\frac{\delta}{2M}}$ and total waste is minimized at $\sqrt{\frac{2\delta}{M}}$.
 
 ::: {.callout-tip collapse="true"}
 ## Worked Example: Llama-3 Scale Checkpointing
@@ -700,22 +736,22 @@ At the optimal $\tau_{\text{opt}}$, both terms are equal, and waste is minimized
 
 $$\tau_{\text{opt}} = \sqrt{2 \times 2 \times 180} = \sqrt{720} \approx `{python} f"{_tau_opt_min:.0f}"`\text{ min}$$
 
-| Checkpoint Interval | Overhead |
+| Checkpoint Interval ($\tau$) | Write + Rollback Waste |
 |:-------------------|:---------|
-| 10 min (too frequent) | 17% |
-| **`{python} f"{_tau_opt_min:.0f}"` min (optimal)** | **7%** |
-| 60 min (too rare) | 15% |
+| 10 min (too frequent) | `{python} f"{_yd_w10:.1f}"`% |
+| **`{python} f"{_tau_opt_min:.0f}"` min (optimal)** | **`{python} f"{_yd_wopt:.1f}"`%** |
+| 60 min (too rare) | `{python} f"{_yd_w60:.1f}"`% |
 
-On a cluster costing \$10M/month, 7% overhead = \$700K/month. Async checkpointing (overlapping writes with computation) can reduce this to ~3%.
+On a cluster costing \$10M/month, `{python} f"{_yd_wopt:.1f}"`% synchronous waste equals ~\$`{python} f"{_yd_cost_opt_m:.1f}"`M/month. Asynchronous checkpointing (staging state to host DRAM in seconds so effective $\delta \ll 2$ min) cuts the checkpoint write stall dramatically.
 
-Source: Fault Tolerance slides (Vol II, Ch 7).
+Source: Fault Tolerance (Vol II, Ch 7) and Young (1974).
 :::
 
 ---
 
 ## 8. Failure Probability {#sec-failure-prob}
 
-*Implemented in [`mlsysim.physics.calc_failure_probability`]({{< var github_repo >}}/blob/dev/mlsysim/mlsysim/physics/).*
+*Implemented in [`mlsysim.physics.calc_failure_probability`](api/physics.reliability.qmd).*
 
 The probability of at least one failure during a job of duration $T$ follows an exponential model:
 
@@ -729,8 +765,8 @@ For a 30-day training run on a cluster with MTBF of `{python} f"{_mtbf_10k_hr:.0
 
 ## 9. Effective FLOPS (Fleet Goodput) {#sec-goodput}
 
-*Implemented in [`mlsysim.physics.calc_effective_flops`]({{< var github_repo >}}/blob/dev/mlsysim/mlsysim/physics/).*
-**Slide Deck:** [Performance Engineering (Vol II, Ch 9)]({{< var slides_latest >}}/vol2_09_performance_engineering.pdf){target="_blank"}
+*Implemented in [`mlsysim.physics.calc_effective_flops`](api/physics.performance.qmd).*
+**Curriculum:** [Vol II, Ch 9: Fleet Efficiency](https://mlsysbook.ai/vol2/09_performance_engineering/09_performance_engineering.html) · [Lab 09](https://mlsysbook.ai/labs/vol2/lab_09_perf_engineering/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-09)
 
 The actual useful computation delivered by a fleet after all overheads:
 
@@ -738,7 +774,15 @@ $$
 \text{Effective\_FLOP/s} = \text{Peak\_FLOP/s} \times \underbrace{\text{MFU}}_{\text{per-GPU}} \times \underbrace{\eta_{\text{scale}}}_{\text{comm overhead}} \times \underbrace{\frac{\text{Goodput}}{\text{Rawput}}}_{\text{failure waste}}
 $$
 
-Each factor in the cascade represents a distinct loss mechanism. Typical values for large-scale training: MFU ≈ 0.3–0.5, $\eta_{\text{scale}}$ ≈ 0.4–0.85, Goodput/Rawput ≈ 0.85–0.97. The compound effect means a fleet may deliver only 10–35% of its theoretical peak.
+Each factor in the cascade represents a distinct loss mechanism. Illustrative ranges for large-scale training: MFU ≈ `{python} f"{_mfu_lo:.2f}–{_mfu_hi:.2f}"`, $\eta_{\text{scale}}$ ≈ 0.40–0.85, Goodput/Rawput ≈ 0.85–0.97. Their product means a fleet delivers roughly `{python} f"{_fleet_lo_pct}–{_fleet_hi_pct}%"` of its theoretical peak.
+
+---
+
+## 10. Compression, Privacy & Cyber-Physical Extensions {#sec-extensions}
+
+- **Group Quantization** ([`CompressionModel`](api/solvers.CompressionModel.qmd), [Vol I, Ch 10](https://mlsysbook.ai/vol1/10_model_compression/10_model_compression.html)): With $b_{\text{scale}}$-bit group scales per $g$ weights, effective bitwidth is $b_{\text{eff}} = b_{\text{target}} + b_{\text{scale}} / g$, and compression against $b_0$-bit baseline weights is $b_0 / b_{\text{eff}}$.
+- **Subsampled Gaussian DP-SGD** ([`ResponsibleEngineeringModel`](api/solvers.ResponsibleEngineeringModel.qmd), [Vol I, Ch 15](https://mlsysbook.ai/vol1/15_responsible_engr/15_responsible_engr.html)): Under Poisson subsampling rate $q$ over $T$ steps for $(\varepsilon, \delta)$-DP, the first-order Gaussian noise multiplier is $\sigma = \frac{q\sqrt{2T\ln(1.25/\delta)}}{\varepsilon}$ [@abadi2016deep], while per-sample gradient clipping multiplies step latency by $1 + \text{clipping\_step\_overhead}$.
+- **Agentic & Embodied Physics** ([`mlsysim.physics.agents`](api/physics.agents.qmd), [`mlsysim.physics.robotics`](api/physics.robotics.stopping.qmd)): Closed-form equations for horizon success compounding ($p^H$), accepted-task economics, kinematic stopping envelopes ($d_{\text{stop}} = v \tau + \frac{v^2}{2 a_{\text{eff}}}$), phase-lag stability margins, and deterministic fieldbus cycle bounds.[ Covered in [Volume III: Agents](https://mlsysbook.ai/vol3/01_introduction/01_introduction.html) and [Volume IV: Physical AI](https://mlsysbook.ai/vol4/01_boundary/01_boundary.html).]{.mls-unreleased}
 
 ---
 

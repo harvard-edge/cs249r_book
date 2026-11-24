@@ -39,10 +39,28 @@ class ThemeManager {
             return 'dark';
         }
 
-        // Method 2: Check body classes
+        // Method 2: Check documentElement and body classes / data-bs-theme attributes
+        const docEl = document.documentElement;
         const body = document.body;
-        if (body && body.classList.contains("dark-mode")) {
+        if (
+            docEl?.classList?.contains("quarto-dark") ||
+            docEl?.classList?.contains("dark-mode") ||
+            docEl?.classList?.contains("dark") ||
+            docEl?.getAttribute?.("data-bs-theme") === "dark" ||
+            body?.getAttribute?.("data-bs-theme") === "dark" ||
+            body?.classList?.contains("quarto-dark") ||
+            body?.classList?.contains("dark-mode") ||
+            body?.classList?.contains("dark")
+        ) {
             return 'dark';
+        }
+        if (
+            docEl?.classList?.contains("quarto-light") ||
+            docEl?.getAttribute?.("data-bs-theme") === "light" ||
+            body?.getAttribute?.("data-bs-theme") === "light" ||
+            body?.classList?.contains("quarto-light")
+        ) {
+            return 'light';
         }
 
         // Method 3: Analyze actual page background luminance (takes priority over system preference)
@@ -75,22 +93,46 @@ class ThemeManager {
         return 'light';
     }
 
+    detectVolume() {
+        const normalize = (v) => {
+            const s = String(v || "").trim().toLowerCase();
+            return /^vol[1-4]$/.test(s) ? s : "";
+        };
+        const explicit = (typeof window !== 'undefined' && normalize(window.SocratiqWidgetVolume)) ||
+            normalize(document.documentElement?.dataset?.socratiqVolume) ||
+            normalize(document.body?.dataset?.socratiqVolume) ||
+            normalize(document.querySelector('script[data-volume]')?.dataset?.volume);
+        if (explicit) return explicit;
+        const themeColor = document.querySelector('meta[name="theme-color"]')?.content?.trim().toLowerCase();
+        if (themeColor === '#1f407a') return 'vol2';
+        if (themeColor === '#581c87') return 'vol3';
+        if (themeColor === '#065f46') return 'vol4';
+        if (themeColor === '#a51c30' || themeColor === '#8e1537') return 'vol1';
+        const pathMatch = location.pathname.match(/\/(vol[1-4])(\/|$)/i);
+        if (pathMatch) return pathMatch[1].toLowerCase();
+        return 'vol1';
+    }
+
     /**
      * Apply theme to host element and widget root
      */
     applyTheme() {
+        const currentVolume = this.detectVolume();
         if (this.hostElement?.setAttribute) {
             this.hostElement.setAttribute("data-socratiq-theme", this.currentTheme);
+            this.hostElement.setAttribute("data-socratiq-volume", currentVolume);
         }
 
         const widgetRoot = this.shadowRoot.querySelector?.('.socratiq-widget-root');
         if (widgetRoot?.setAttribute) {
             widgetRoot.setAttribute("data-socratiq-theme", this.currentTheme);
+            widgetRoot.setAttribute("data-socratiq-volume", currentVolume);
         } else {
             // If .socratiq-widget-root doesn't exist, try to find the main container
             const mainContainer = this.shadowRoot.querySelector('#widget-chat-container') || this.shadowRoot.querySelector('#collaborative-widget-host');
             if (mainContainer?.setAttribute) {
                 mainContainer.setAttribute("data-socratiq-theme", this.currentTheme);
+                mainContainer.setAttribute("data-socratiq-volume", currentVolume);
             }
         }
 
@@ -109,23 +151,34 @@ class ThemeManager {
      * Setup theme change observers
      */
     setupThemeObserver() {
-        // Observe changes in the class attribute of the body element
-        const bodyObserver = new MutationObserver((mutationsList) => {
+        const watchedAttributes = ['class', 'style', 'data-bs-theme', 'data-socratiq-volume'];
+        // Observe changes in theme/volume attributes on documentElement and body
+        const themeObserver = new MutationObserver((mutationsList) => {
             for (const mutation of mutationsList) {
-                if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+                if (mutation.type === 'attributes' && watchedAttributes.includes(mutation.attributeName)) {
                     const newTheme = this.detectTheme();
-                    if (newTheme !== this.currentTheme) {
-                        this.currentTheme = newTheme;
+                    const themeChanged = newTheme !== this.currentTheme;
+                    this.currentTheme = newTheme;
+                    if (themeChanged || mutation.attributeName === 'data-socratiq-volume') {
                         this.applyTheme();
                     }
                 }
             }
         });
 
-        bodyObserver.observe(document.body, {
-            attributes: true,
-            attributeFilter: ['class'],
-        });
+        if (document.documentElement) {
+            themeObserver.observe(document.documentElement, {
+                attributes: true,
+                attributeFilter: watchedAttributes,
+            });
+        }
+
+        if (document.body) {
+            themeObserver.observe(document.body, {
+                attributes: true,
+                attributeFilter: watchedAttributes,
+            });
+        }
 
         // Listen for system color scheme changes
         if (window.matchMedia) {

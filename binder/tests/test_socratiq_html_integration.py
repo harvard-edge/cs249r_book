@@ -17,6 +17,7 @@ STUDY_SRC = "/shared/assets/scripts/socratiq/study.js"
 READER_RESOURCE = "/shared/assets/scripts/socratiq/**"
 READER_ENDPOINT = "https://mlsysbook.ai/api/socratiq/ai/stream"
 GUIDE_SRC = "shared/frontmatter/socratiq/socratiq.qmd"
+GUIDE_LABEL = "AI Companion (SocratiQ)"
 
 
 class ScriptTagCollector(HTMLParser):
@@ -29,16 +30,22 @@ class ScriptTagCollector(HTMLParser):
             self.scripts.append(dict(attrs))
 
 
-def sidebar_hrefs(items):
-    """Collect guide links regardless of the volume's sidebar grouping."""
+def sidebar_items(items):
+    """Collect sidebar link entries regardless of the volume's sidebar grouping."""
     if isinstance(items, dict):
         if "href" in items:
-            yield items["href"]
+            yield items
         for value in items.values():
-            yield from sidebar_hrefs(value)
+            yield from sidebar_items(value)
     elif isinstance(items, list):
         for item in items:
-            yield from sidebar_hrefs(item)
+            yield from sidebar_items(item)
+
+
+def sidebar_hrefs(items):
+    """Collect guide links regardless of the volume's sidebar grouping."""
+    for item in sidebar_items(items):
+        yield item["href"]
 
 
 @pytest.mark.parametrize("volume", VOLUMES)
@@ -49,9 +56,14 @@ def test_html_config_loads_and_stages_socratiq_reader(volume):
 
     resources = config["project"].get("resources", [])
     assert READER_RESOURCE in resources
-    assert (books / GUIDE_SRC).is_file()
+    guide_path = books / GUIDE_SRC
+    assert guide_path.is_file()
+    assert f"# {GUIDE_LABEL} {{.unnumbered}}" in guide_path.read_text(encoding="utf-8")
     assert config["project"]["render"].count(GUIDE_SRC) == 1
-    assert list(sidebar_hrefs(config["website"]["sidebar"])).count(GUIDE_SRC) == 1
+    guide_entries = [
+        item for item in sidebar_items(config["website"]["sidebar"]) if item.get("href") == GUIDE_SRC
+    ]
+    assert guide_entries == [{"text": GUIDE_LABEL, "href": GUIDE_SRC}]
 
     # Quarto resolves leading-slash resource entries from the project root and
     # preserves their relative path under output-dir. Ensure the reader source

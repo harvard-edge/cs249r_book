@@ -1,0 +1,186 @@
+% Study sheet: Volume III, Chapter 2, The Foundation Model.
+% Numbers: \val{...} from foundation_model_studysheet_numbers.tex, written by foundation_model_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{foundation_model_studysheet_numbers}
+\sheetvolume{3}
+\sheetchapter{2}{The Foundation Model}
+\sheetsources{Numbers from mlsysim and the chapter's scenarios; times are per-token floors; assumed inputs marked.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+A model call returns a \hl{proposal}, not an action. The
+runtime sizes the request, reads \hl{how generation ended} before what it
+said, checks each property with its own evidence, and prices the call.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{A proposal is not an action.}{The model proposes; the inference service runs it and reports
+  status; the runtime validates, authorizes and executes.}
+\idea{Count what the model receives.}{Tokenize the whole serialized request (roles, tool schemas,
+  wrappers) with the model's tokenizer; reserve reply room.}
+\idea{Sampling is not correctness.}{Top-$\NucleusProbabilityMass$ keeps the likeliest tokens to mass $\NucleusProbabilityMass$ and renormalizes.
+  Only a recorded response replays.}
+\idea{Status before payload.}{Only a \texttt{COMPLETED} call enters the candidate
+  path. A truncated prefix can still parse; log it, never run or ``repair'' it.}
+\idea{Each check proves one property.}{Self-review re-samples
+  the same model; a fallible checker leaves defects among its passes.}
+\idea{Output and history set the cost.}{Each output token re-reads every weight. Re-sent history grows
+  with turns squared; prefix reuse keeps fresh prefill linear.}
+\end{ideas}
+
+\vspace{10pt}
+\sheetsec{What each check establishes}
+\begin{sheettable}{@{}l L L@{}}
+\thead{Check} & \thead{Establishes} & \thead{Leaves open}\\ \midrule
+Status \texttt{COMPLETED} & a whole candidate arrived & its content\\
+Schema or grammar mask & form and declared types & values, permission; a cut-off legal prefix\\
+Permission & operation and target are in the grant & that it serves the goal\\
+Tests & outcomes on the inputs run & untested cases (races)\\
+\end{sheettable}
+\vspace{3pt}
+{\fontsize{8.4}{10.4}\selectfont\color{muted}Not \texttt{COMPLETED} (\texttt{TRUNCATED}, \texttt{REFUSED}, a timeout): quarantine. On
+truncation raise $\OutputLimit$ or emit less; a timeout leaves the remote outcome and bill unknown.\par}
+
+\vspace{10pt}
+\fcard{Temperature}%
+  {\Pr(\VocabularyToken) \propto \exp\!\left(\OutputLogit_{t,\VocabularyToken} / \SamplingTemperature\right)}%
+  {Logit $\OutputLogit_{t,\VocabularyToken}$ of token $\VocabularyToken$ over temperature $\SamplingTemperature$,
+   normalized. Halving $\SamplingTemperature$ squares each weight, then renormalizes: sharper, not shown correct.}%
+  {}{}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Formulas you will use}
+\fcard{Admission with output headroom}%
+  {\SequenceLength \le \ContextWindow - \OutputLimit}%
+  {Prompt $\SequenceLength$ must leave reply allowance $\OutputLimit$ inside window
+   $\ContextWindow$; hidden reasoning tokens spend $\OutputLimit$ too.}%
+  {Shrinking $\OutputLimit$ to fit invites truncation.}{}
+\fcard{Per-token floors (one call, no batching)}%
+  {\PerTokenPrefillTime \approx \frac{2\Parameters}{\PeakRate}, \qquad
+   \PerTokenDecodeTime \ge \frac{\Parameters\,\ElementStorageSize}{\Bandwidth}}%
+  {Peak rate $\PeakRate$, memory bandwidth $\Bandwidth$, $\ElementStorageSize$ bytes per parameter; decode
+   reads all weights per output token. Reference: $\Parameters = \val{params}$B in 8-bit ($\ElementStorageSize$ = 1 B), \val{peak} TFLOP/s, \val{bw} TB/s gives
+   \val{tpre}~$\mu$s and \val{tdec}~ms; one output token $\approx$ \val{ratio} prompt tokens.}%
+  {Wall clock adds preparation, queueing and post-processing.}{}
+\fcard{Append-only history}%
+  {\PromptTokensSent = \TurnHorizon\BasePromptLength + \TurnAppendLength\,\frac{\TurnHorizon(\TurnHorizon-1)}{2}}%
+  {Over $\TurnHorizon$ turns: first prompt $\BasePromptLength$, $\TurnAppendLength$ appended per turn.
+   Prefix reuse cuts fresh prefill to $\BasePromptLength + (\TurnHorizon-1)\TurnAppendLength$.}%
+  {Reuse needs an identical token prefix.}%
+  {\begin{tikzpicture}[sheet]
+     \pgfmathsetmacro\sx{205/29}
+     \pgfmathsetmacro\sy{56/\val{sentshortk}}
+     \draw[dim] (24,0) -- (232,0);
+     \draw[dim] (24,0) -- (24,60);
+     \foreach \t in {1,10,20,30}{\draw[dim] ({24+(\t-1)*\sx},0) -- ({24+(\t-1)*\sx},-2.5);
+       \node[small, anchor=north] at ({24+(\t-1)*\sx},-4) {\t};}
+     \node[small, anchor=north] at (128,-13) {turn};
+     \node[small, anchor=south west] at (2,61) {thousand input tokens; $\BasePromptLength = \val{sbase}$, $\TurnAppendLength = \val{delta}$};
+     \edef\drawsent{\noexpand\draw[accent, line width=1.1pt, x=\sx pt, y=\sy pt, shift={(24pt,0)}]
+       plot coordinates {\val{curvesent}};}
+     \edef\drawfresh{\noexpand\draw[muted, line width=0.9pt, x=\sx pt, y=\sy pt, shift={(24pt,0)}]
+       plot coordinates {\val{curvefresh}};}
+     \begin{scope}[shift={({-\sx},0)}]\drawsent\drawfresh\end{scope}
+     \node[lab, anchor=east] at (210,57) {re-sent: \val{sentshortk}k};
+     \node[lab, anchor=south east] at (230,6) {fresh prefill with reuse: \val{freshshortk}k};
+   \end{tikzpicture}}
+\fcard{What a passing verdict leaves}%
+  {\Pr(\text{defective}\mid\text{pass}) = \frac{\VerifierFalseAcceptanceRate\,\CandidateDefectRate}
+   {\VerifierFalseAcceptanceRate\,\CandidateDefectRate + \Pr(\text{pass}\mid\text{valid})\,(1-\CandidateDefectRate)}}%
+  {Two different rates: defect rate $\CandidateDefectRate$; false-accept rate $\VerifierFalseAcceptanceRate = \Pr(\text{pass}\mid\text{defective})$,
+   the lever.}%
+  {Rerunning the same check is correlated: no new evidence.}{}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{Whole file: \val{ytfullpre} + \val{fulldec} = \val{ytfulltot} s, misses. Local edit: \val{ytdiffprompt}
+  $\times$ \val{tpre}~$\mu$s = \val{ytdiffpre} s; + \val{diffdec} = \val{ytdifftot} s, fits at the floors, \val{ytmargin} s spare. Prefill now
+  dominates the local edit: reuse the prefix.}
+\ans{1}{(a) Ceiling \val{qwin} $-$ \val{qres} = \val{qceil}; turn \val{qlast} sends \val{qlastprompt}, turn \val{qnext}
+  sends \val{qnextprompt}: fails at turn \val{qnext}. Half reserve (ceiling \val{qceilhalf}) buys one turn (fails at
+  \val{qnexthalf}) and invites \texttt{TRUNCATED} replies. (b) \val{qsent} re-sent, \val{qfresh} fresh (append-only card).}
+\columnbreak
+\ans{2}{(a) \val{qpa} $<$ \val{qtopp}, \val{qtwo} $<$ \val{qtopp}, \val{qmass} $\ge$ \val{qtopp}: keep three, renormalized
+  \val{qra}, \val{qrb}, \val{qrc}. (b) Weights squared: \val{qsqa} $\div$ \val{qsqsum} $\approx$ \val{qtopsharp}
+  (was \val{qpa}). Not shown: temperature sets spread, not truth; choose by measured pass rate (temperature card).}
+\ans{3}{(a) Status gate: quarantine, log, retry with a larger allowance or terser format; never close the
+  fragment. (b) Schema passes; permission rejects a path outside the workspace. (c) No: a mask gives form
+  only; both are legal strings.}
+\ans{4}{\val{qnum} $\div$ (\val{qnum} + \val{qvalid}) = \val{qpost}\% of passes are defective. Rerunning the
+  identical suite adds nothing (correlated); add a different check with lower $\VerifierFalseAcceptanceRate$.}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Does a whole-file edit fit a \val{deadline} s call deadline?}
+Start: \val{base} prompt tokens. A whole file adds \val{fullinstr} instruction tokens and
+emits \val{fullout}; a localized edit adds \val{diffinstr} and emits \val{diffout}. Floors: \val{tpre}~$\mu$s per
+prompt token, \val{tdec}~ms per output token.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\u{4.6}
+  \pgfmathsetmacro\fa{52+\val{barfullpre}*\u} \pgfmathsetmacro\fb{\fa+\val{barfulldec}*\u}
+  \pgfmathsetmacro\da{52+\val{bardiffpre}*\u} \pgfmathsetmacro\db{\da+\val{bardiffdec}*\u}
+  \pgfmathsetmacro\dl{52+\val{deadline}*\u}
+  \node[lab, anchor=east] at (48,27) {whole file};
+  \draw[accbox] (52,20) rectangle (\fa,34);
+  \draw[hotbox] (\fa,20) rectangle (\fb,34);
+  \node[lab, text=white, anchor=east] at ({\fb-3},27) {\val{fulltot} s, nearly all output};
+  \node[lab, anchor=east] at (48,5) {local edit};
+  \draw[accbox] (52,-2) rectangle (\da,12);
+  \draw[hotbox] (\da,-2) rectangle (\db,12);
+  \node[lab, anchor=west] at ({\db+4},5) {\val{difftot} s};
+  \draw[ink, dashed, line width=0.7pt] (\dl,-6) -- (\dl,40);
+  \node[note, anchor=south] at (\dl,41) {deadline \val{deadline} s};
+\end{tikzpicture}\par}\vspace{3pt}
+\begin{steps}
+\item Whole file: \val{fullprompt} $\times$ \val{tpre}~$\mu$s = \val{fullpre} s; \val{fullout} $\times$ \val{tdec}~ms
+  = \val{fulldec} s. Total \res{\val{fulltot} s}, past the deadline.
+\item Local edit: \val{diffprompt} $\times$ \val{tpre}~$\mu$s = \val{diffpre} s; \val{diffout} $\times$ \val{tdec}~ms
+  = \val{diffdec} s. Total \res{\val{difftot} s}, inside it at the floors (queueing adds more).
+\item Output is \val{fulloutshare}\% of the whole-file time: trimming the prompt cannot rescue it.
+\item Fitting is not accepting: \val{applies}\% of edits apply and \val{passes}\% of those pass, so
+  \res{\val{yieldpct}\%} of trials end accepted.
+\end{steps}
+\takeaway{Shrink what the model emits; judge formats by accepted repairs under one budget.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Common mistakes}
+\mistake{``Greedy decoding makes a served call reproducible.''}%
+  {It fixes the choice for given logits, but reduction order and serving changes alter
+   the logits. Replay recorded responses.}{}
+\mistake{``If a call fails, send it again.''}%
+  {An identical whole-file retry spends another \val{fulltot} s and misses again; the same limit can truncate again. Route on status.}{}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Same deadline, a \val{ytbase}-token prompt}
+\assumed{} the repository context grows to \val{ytbase} tokens; all else as above.\par\vspace{4pt}
+\textbf{Given:} whole-file prefill \val{ytfullprompt} $\times$ \val{tpre}~$\mu$s $=$ \val{ytfullpre} s.\par
+\textbf{You:} finish both totals. Which format still fits, and which term now dominates the local edit?\par\vspace{30pt}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} the front curve's agent (\val{sbase} tokens, \val{delta} appended per turn), a \val{qwin}-token
+  window, \val{qres} reserved. (a) At which turn does the prompt stop fitting? Does halving the reserve help
+  much? (b) Over \val{qturns} turns, how many tokens are re-sent, and how many need fresh prefill with reuse?
+\item \assumed{} unit-temperature probabilities \val{qpa}, \val{qpb}, \val{qpc}, \val{qpd}. (a) Which tokens survive
+  top-$\NucleusProbabilityMass$ with $\NucleusProbabilityMass = \val{qtopp}$, at what probabilities? (b) At $\SamplingTemperature = \val{qtau}$, no truncation: top token's probability? More likely correct?
+\item Which check stops each, and what next? (a) A call hits its output limit; the fragment
+  \mbox{\texttt{rm -rf /tmp/scratch}} parses. (b) A \texttt{COMPLETED} call, granted reads inside the workspace only, proposes
+  \texttt{read\_file("../../etc/passwd")}. (c) Would a grammar mask have prevented either?
+\item \assumed{} \val{qdef}\% of patches are defective; a test suite passes defective patches with
+  probability \val{qfa} and valid ones with \val{qva}. What share of passing patches is defective? Does rerunning
+  the identical suite help?
+\end{qs}
+\end{rightcol}
+\end{document}

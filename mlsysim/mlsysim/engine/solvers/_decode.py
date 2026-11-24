@@ -43,6 +43,7 @@ def decode_step(
     kv_bytes: Quantity,
     efficiency: float,
     query_tokens: int = 1,
+    layer_overhead_ms: float = FRAMEWORK_LAYER_TAX_MS,
 ) -> DecodeStep:
     """One step, optionally verifying several speculative query tokens at once.
 
@@ -54,7 +55,7 @@ def decode_step(
     -----
     Equation: T = max(F / (eta * peak), (W + KV) / BW) + T_layer.
     F adds linear work and both attention products over the supplied context.
-    The layer tax is an MLSysIM runtime assumption, not part of Roofline.
+    The layer tax defaults to zero for graph-captured execution.
 
     References
     ----------
@@ -73,4 +74,4 @@ def decode_step(
     )
     compute = ((linear + attention) / (peak * efficiency)).to("ms")
     memory = ((model.size_in_bytes(bytes_per_element) + kv_bytes) / hardware.memory.bandwidth).to("ms")
-    return DecodeStep(compute, memory, Q_(model.layers * FRAMEWORK_LAYER_TAX_MS, "ms"))
+    return DecodeStep(compute, memory, Q_(model.layers * layer_overhead_ms, "ms"))

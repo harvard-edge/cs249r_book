@@ -7,10 +7,10 @@ Every value is from the rendered chapter (Volume II, Introduction) unless noted:
     (a chosen scenario input); 200 Gb/s InfiniBand (25 GB/s): about 28 s,
     compute-time fraction 4.1 percent; 100 Gb/s Ethernet: 56 s, 2.1 percent.
   - Growth decomposition (Sec. 1.1, figure 1b): fitted here from MLSysIM's
-    copy of Epoch AI's notable-model records (146 runs, 2012 to 2024 that
-    report count and duration): compute 3.9x per year = count 1.6x x
-    duration 1.3x x delivered rate per accelerator 2.0x; count and duration
-    give 51 percent of the exponent.
+    copy of Epoch AI's notable-model records (132 standalone runs, 2012
+    through September 2026, that report count and duration): compute 4.0x
+    per year = count 1.7x x duration 1.4x x delivered rate per accelerator
+    1.7x; count and duration give 60 percent of the exponent.
   - Scaling law (Sec. 1.3.3, theorem 1.1): the parameter term A / N^alpha of
     the Hoffmann et al. (2022) parametric fit, A = 406.4, alpha = 0.34, read
     from MLSysIM's Chinchilla registry. Halving it needs 2^(1/0.34) = 7.7x
@@ -78,7 +78,25 @@ def hook(path, k, size=(3.4, 1.3), fs=11, stack=False):
 hook(out / 'hook_step1.svg', 1)
 hook(out / 'hook_step2.svg', 2)
 hook(out / 'hook_synth.svg', 2, size=(3.1, 1.8), fs=15, stack=True)
-g_compute, g_count, g_dur, g_rate = (3.929954488, 1.594722735, 1.262843216, 1.951429651)
+# Same fit as the chapter's TrainingComputeGrowth cell: standalone runs
+# (standalone_hw_valid == 1) carrying compute, count, and hours, 2012 through
+# the end of the Epoch snapshot; log-linear OLS slope per factor.
+import datetime as _dt
+from mlsysim.core.series_loader import load_series
+def _dec_year(s):
+    d = _dt.date.fromisoformat(s)
+    return d.year + (d.timetuple().tm_yday - 1) / 365.25
+_runs = [r for r in load_series('vol2/01_introduction/data/notable_model_training_runs.csv').entries
+         if r['training_compute_flop'] and '2012' <= r['date'][:4] <= '2026'
+         and r['hardware_quantity'] and r['training_time_hours'] and r['standalone_hw_valid'] == 1]
+def _annual(value):
+    return float(10 ** np.polyfit([_dec_year(r['date']) for r in _runs], np.log10([value(r) for r in _runs]), 1)[0])
+g_compute = _annual(lambda r: r['training_compute_flop'])
+g_count = _annual(lambda r: r['hardware_quantity'])
+g_dur = _annual(lambda r: r['training_time_hours'])
+g_rate = _annual(lambda r: r['training_compute_flop'] / (r['hardware_quantity'] * r['training_time_hours'] * 3600))
+fleet_share = (np.log(g_count) + np.log(g_dur)) / np.log(g_compute)
+assert len(_runs) == 132 and abs(g_count * g_dur * g_rate / g_compute - 1) < 1e-6, 'slide text quotes 132 runs'
 fig, ax = plt.subplots(figsize=(4.4, 2.1))
 rows = [('Training compute', g_compute, C['neutral']), ('Accelerator count', g_count, C1), ('Training duration', g_dur, C1), ('Rate per accelerator', g_rate, C['compute'])]
 for i, (lab, v, col) in enumerate(rows):
@@ -86,7 +104,7 @@ for i, (lab, v, col) in enumerate(rows):
     ax.barh(y, np.log10(v), color=col, height=0.6)
     ax.text(-0.005, y, lab, ha='right', va='center', fontsize=13, fontweight='bold', color=C['text'])
     ax.text(np.log10(v) + 0.01, y, f'{v:.1f}× per year', va='center', fontsize=13, fontweight='bold', color=col)
-ax.text(0, -0.95, 'blue bars together give 51% of the growth', color=C1, fontsize=12, fontweight='bold', ha='left', va='center')
+ax.text(0, -0.95, f'blue bars together give {round(fleet_share * 100)}% of the growth', color=C1, fontsize=12, fontweight='bold', ha='left', va='center')
 ax.set_xlim(0, 0.95)
 ax.set_ylim(-1.4, 3.5)
 ax.set_yticks([])
@@ -232,19 +250,27 @@ def coupling(path, k):
         for i, lab in enumerate(['GPU 0', 'GPU 1', 'GPU 2']):
             y = 3.95 - i * 0.98
             ax.text(7.3, y, lab, ha='right', va='center', fontsize=12, color=GRAY)
-            if i < 2:
-                lane(ax, y, 7.45, 8.6 + 0.3 * i, C1L, C1)
-                lane(ax, y, 8.6 + 0.3 * i, 10.7, '#e2e8f0', '#94a3b8', 'wait', GRAY, ls='--', lw=1)
+            if k == 2:
+                lane(ax, y, 7.45, 8.85 + 0.12 * (i % 2), C1L, C1)
             else:
-                lane(ax, y, 7.45, 10.7, REDL, RED, 'slow', RED, ls='--')
-        rbox(ax, 10.8, 1.65, 0.75, 2.6, C2L, C2, lw=1.6, r=0.05)
-        ax.text(11.175, 2.95, 'AllReduce', rotation=90, ha='center', va='center', fontsize=12, color=C2T, fontweight='bold')
+                if i < 2:
+                    lane(ax, y, 7.45, 8.6 + 0.3 * i, C1L, C1)
+                    lane(ax, y, 8.6 + 0.3 * i, 10.7, '#e2e8f0', '#94a3b8', 'wait', GRAY, ls='--', lw=1)
+                else:
+                    lane(ax, y, 7.45, 10.7, REDL, RED, 'slow', RED, ls='--')
+        ar_x = 9.05 if k == 2 else 10.8
+        rbox(ax, ar_x, 1.65, 0.75, 2.6, C2L, C2, lw=1.6, r=0.05)
+        ax.text(ar_x + 0.375, 2.95, 'AllReduce', rotation=90, ha='center', va='center', fontsize=12, color=C2T, fontweight='bold')
         ax.text(7.3, 1.05, 'update', ha='right', va='center', fontsize=12, color=GRAY)
-        lane(ax, 1.05, 10.8, 12.0, C1L, C1)
-        ax.text(9.2, 0.1, 'all wait for the slowest', ha='center', fontsize=12, color=RED, fontweight='bold')
+        lane(ax, 1.05, ar_x, ar_x + 1.2, C1L, C1)
+        if k == 2:
+            ax.text(9.1, 0.1, 'balanced step: AllReduce', ha='center', fontsize=12, color=C1T, fontweight='bold')
+        else:
+            ax.text(9.2, 0.1, 'all wait for the slowest', ha='center', fontsize=12, color=RED, fontweight='bold')
     sp.save(fig, path)
 coupling(out / 'coupling_step1.svg', 1)
 coupling(out / 'coupling_step2.svg', 2)
+coupling(out / 'coupling_step3.svg', 3)
 fig, ax = plt.subplots(figsize=(3.8, 1.45))
 for y, lab, v, col, txt in [(2, 'FP32 gradient', 700.0, C['memory'], '700 GB'), (1, 'ring, FP32', 1400.0, C['network'], '1,400 GB'), (0, 'ring, FP16', 700.0, C['network'], '700 GB')]:
     ax.barh(y, v, color=col, height=0.6)
@@ -286,20 +312,23 @@ def ci(path, k):
     y = np.maximum(1.0, x / BAL)
     ax.plot(x, y, color=C['text'], lw=3)
     ax.axvline(BAL, color=RED, lw=1.6, ls='--')
-    ax.text(BAL / 1.4, 150, 'fabric balance\n8.0×10$^{-5}$ B/FLOP\n(A100, one 200 Gb/s link)', color=RED, fontsize=10, fontweight='bold', va='top', ha='right')
-    ax.text(3e-07, 1.45, 'compute sets the step', color=C1, fontsize=10.5, fontweight='bold', ha='center')
-    ax.text(0.0015, 2.2, 'network\nsets the\nstep', color=C2T, fontsize=10.5, fontweight='bold', ha='left')
+    ax.text(BAL / 1.4, 165, 'fabric balance\n8.0×10$^{-5}$ B/FLOP\n(A100, 200 Gb/s)', color=RED, fontsize=10, fontweight='bold', va='top', ha='right')
+    ax.text(1.5e-06, 0.45, 'compute sets the step', color=C1, fontsize=10.5, fontweight='bold', ha='center', va='center')
+    ax.text(0.0014, 1.8, 'network\nsets the\nstep', color=C2T, fontsize=10.5, fontweight='bold', ha='left')
     if k >= 2:
         ax.plot([OURS], [max(1, OURS / BAL)], 'o', ms=11, color=C2, mec='white', mew=1.5, zorder=5)
-        ax.annotate('175B worker\n8.1×10$^{-5}$', (OURS, 1.0), xytext=(-60, 26), textcoords='offset points', fontsize=10, fontweight='bold', color=C2T, ha='right', arrowprops=dict(arrowstyle='-', color=C2T, lw=1))
+        ax.annotate('175B worker\n8.1×10$^{-5}$', (OURS, 1.05), xytext=(-22, 26), textcoords='offset points', fontsize=10, fontweight='bold', color=C2T, ha='right', va='bottom', arrowprops=dict(arrowstyle='-', color=C2T, lw=1.1))
     if k >= 3:
-        for lab, v, off in [('Alpha 10$^{-7}$', 1e-07, (0, -9)), ('Beta 10$^{-4}$', 0.0001, (10, -6))]:
+        for lab, v, off, ha, va in [
+            ('Alpha 10$^{-7}$', 1e-07, (0, 12), 'center', 'bottom'),
+            ('Beta 10$^{-4}$', 0.0001, (10, -8), 'left', 'center'),
+        ]:
             yy = max(1, v / BAL)
             ax.plot([v], [yy], 's', ms=10, color=C3, mec='white', mew=1.5, zorder=5)
-            ax.annotate(lab, (v, yy), xytext=off, textcoords='offset points', fontsize=10, fontweight='bold', color=C3T, ha='center' if off[0] == 0 else 'left', va='top' if off[0] == 0 else 'center')
+            ax.annotate(lab, (v, yy), xytext=off, textcoords='offset points', fontsize=10, fontweight='bold', color=C3T, ha=ha, va=va)
     ax.set_xscale('log')
     ax.set_yscale('log')
-    ax.set_ylim(0.28, 200)
+    ax.set_ylim(0.26, 200)
     ax.set_yticks([])
     ax.minorticks_off()
     ax.set_xlabel('bytes sent per local FLOP', fontsize=10)
@@ -323,7 +352,7 @@ ax.tick_params(labelsize=10)
 ax.text(-10, 1.55, 'GPUs', ha='right', va='bottom', fontsize=10, color=C['neutral'])
 sp.save(fig, out / 'llama_mfu.svg')
 
-def c3(path):
+def c3(path, k):
     fig, ax = plt.subplots(figsize=(5.9, 1.95))
     ax.set_xlim(0, 12)
     ax.set_ylim(0, 4.0)
@@ -331,14 +360,17 @@ def c3(path):
     cols = [('Compute', '$C_1$:  T$_{compute}$/N', 'kernel time, MFU,\nmemory counters', C1L, C1, C1T), ('Communication', '$C_2$:  T$_{comm}$(N)', 'link utilization,\ncollective timing', C2L, C2, C2T), ('Coordination', '$C_3$:  T$_{sync}$(N)', 'barrier waits,\nrecovery records', C3L, C3, C3T)]
     for i, (name, term, ev, fc, ec, tc) in enumerate(cols):
         x = 0.05 + i * 4.0
-        rbox(ax, x, 0.1, 3.9, 3.8, fc, ec, lw=2.0, r=0.12)
-        ax.text(x + 1.95, 3.4, name, ha='center', va='center', fontsize=12, fontweight='bold', color=tc)
-        ax.text(x + 1.95, 2.7, term, ha='center', va='center', fontsize=12, color=tc)
-        ax.plot([x + 0.3, x + 3.6], [2.25, 2.25], color=ec, lw=1)
-        ax.text(x + 1.95, 1.85, 'evidence', ha='center', va='center', fontsize=10, color=GRAY)
-        ax.text(x + 1.95, 1.0, ev, ha='center', va='center', fontsize=11.5, color=tc, fontweight='bold')
+        a = 1.0 if i < k else 0.0
+        p = FancyBboxPatch((x, 0.1), 3.9, 3.8, boxstyle='round,pad=0,rounding_size=0.12', fc=fc, ec=ec, lw=2.0, alpha=a)
+        ax.add_patch(p)
+        ax.text(x + 1.95, 3.4, name, ha='center', va='center', fontsize=12, fontweight='bold', color=tc, alpha=a)
+        ax.text(x + 1.95, 2.7, term, ha='center', va='center', fontsize=12, color=tc, alpha=a)
+        ax.plot([x + 0.3, x + 3.6], [2.25, 2.25], color=ec, lw=1, alpha=a)
+        ax.text(x + 1.95, 1.85, 'evidence', ha='center', va='center', fontsize=10, color=GRAY, alpha=a)
+        ax.text(x + 1.95, 1.0, ev, ha='center', va='center', fontsize=11.5, color=tc, fontweight='bold', alpha=a)
     sp.save(fig, path)
-c3(out / 'c3.svg')
+for k in (1, 2, 3):
+    c3(out / f'c3_step{k}.svg', k)
 
 def fl_bar(ax, x0, x1, y, fc, ec, text, tc):
     rbox(ax, x0, y - 0.4, x1 - x0, 0.8, fc, ec, lw=1.6, r=0.05)
@@ -368,20 +400,22 @@ def fleetlaw(path, k):
     sp.save(fig, path)
 fleetlaw(out / 'fleetlaw_step1.svg', 1)
 fleetlaw(out / 'fleetlaw_step2.svg', 2)
-fig, ax = plt.subplots(figsize=(5.8, 1.85))
-meas = [('GPT-3 run', int(20.0), '% of peak, run average', C['neutral']), ('Megatron-LM', int(52.0), '% of peak, 3,072 A100s', C['neutral']), ('Llama 3 405B', int(41.0), '% MFU, 16,384 H100s', C1), ('Llama 3 405B', int(90.0), '%+ effective training time', C['data'])]
-for i, (lab, v, m, col) in enumerate(meas):
-    y = len(meas) - 1 - i
-    ax.barh(y, v, color=col, height=0.6)
-    ax.text(-1.5, y, lab, ha='right', va='center', fontsize=13, fontweight='bold')
-    ax.text(v + 1.5, y, f'{v}{m}', va='center', fontsize=12.5, fontweight='bold', color=col)
-ax.set_xlim(0, 155)
-ax.set_ylim(-0.6, 3.6)
-ax.set_yticks([])
-ax.set_xticks([0, 25, 50, 75, 100])
-ax.spines['left'].set_visible(False)
-ax.set_xlabel('percent')
-sp.save(fig, out / 'measures.svg')
+meas = [('GPT-3 run', int(20.0), '% of peak, run average', C['neutral'], 1), ('Megatron-LM', int(52.0), '% of peak, 3,072 A100s', C['neutral'], 1), ('Llama 3 405B', int(41.0), '% MFU, 16,384 H100s', C1, 1), ('Llama 3 405B', int(90.0), '%+ effective training time', C['data'], 2)]
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 1.85))
+    for i, (lab, v, m, col, first) in enumerate(meas):
+        y = len(meas) - 1 - i
+        a = 1.0 if k >= first else 0.0
+        ax.barh(y, v, color=col, height=0.6, alpha=a)
+        ax.text(-1.5, y, lab, ha='right', va='center', fontsize=13, fontweight='bold', alpha=a)
+        ax.text(v + 1.5, y, f'{v}{m}', va='center', fontsize=12.5, fontweight='bold', color=col, alpha=a)
+    ax.set_xlim(0, 155)
+    ax.set_ylim(-0.6, 3.6)
+    ax.set_yticks([])
+    ax.set_xticks([0, 25, 50, 75, 100])
+    ax.spines['left'].set_visible(False)
+    ax.set_xlabel('percent')
+    sp.save(fig, out / f'measures_step{k}.svg')
 
 def anplot(path, k):
     fig, ax = plt.subplots(figsize=(3.9, 2.05))
@@ -409,4 +443,90 @@ def anplot(path, k):
     sp.save(fig, path)
 anplot(out / 'an_step1.svg', 1)
 anplot(out / 'an_step2.svg', 2)
+
+# Visual anchor for F3 Recall (C3 chips + 3.05 h failure interval)
+def _recall_c3_mttf():
+    fig, ax = plt.subplots(figsize=(4.2, 1.65))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 4.4)
+    ax.axis('off')
+    chips = [
+        ('Compute', 'C1', 0.1, C1L, C1, C1T),
+        ('Comm.', 'C2', 3.4, C2L, C2, C2T),
+        ('Coord.', 'C3', 6.7, C3L, C3, C3T),
+    ]
+    for name, tag, x, fc, ec, tc in chips:
+        rbox(ax, x, 2.55, 3.15, 1.55, fc, ec, lw=2.0, r=0.18)
+        ax.text(x + 1.575, 3.62, tag, ha='center', va='center', fontsize=15, fontweight='bold', color=tc)
+        ax.text(x + 1.575, 2.95, name, ha='center', va='center', fontsize=13.5, fontweight='bold', color=tc)
+    rbox(ax, 0.1, 0.15, 9.75, 1.95, REDL, RED, lw=1.8, r=0.16)
+    ax.text(4.975, 1.48, '50,000 h ÷ 16,384 GPUs = 3.05 h', ha='center', va='center', fontsize=13.0, fontweight='bold', color='#b91c1c')
+    ax.text(4.975, 0.68, '~7.9 interruptions/day (independent)', ha='center', va='center', fontsize=12.5, color='#334155')
+    sp.save(fig, out / 'recall_c3_mttf.svg')
+
+# Visual anchor for F15 CAP partition vote
+def _cap_partition():
+    fig, ax = plt.subplots(figsize=(3.5, 2.4))
+    ax.set_xlim(0, 8.2)
+    ax.set_ylim(0, 5.6)
+    ax.axis('off')
+    for i, (wx, wy) in enumerate([(1.3, 4.3), (1.3, 2.8), (1.3, 1.3)]):
+        rbox(ax, wx - 0.9, wy - 0.45, 1.8, 0.9, C1L, C1, lw=2.0, r=0.12)
+        ax.text(wx, wy, f'W{i}', ha='center', va='center', fontsize=13, fontweight='bold', color=C1T)
+    ax.plot([1.3, 1.3], [3.85, 3.25], color=C1, lw=2.2)
+    ax.plot([1.3, 1.3], [2.35, 1.75], color=C1, lw=2.2)
+    ax.plot([3.65, 3.65], [0.55, 5.1], color=RED, lw=2.6, ls='--')
+    ax.text(3.65, 5.35, 'partition', ha='center', va='center', fontsize=12.5, fontweight='bold', color=RED)
+    rbox(ax, 5.2, 2.35, 2.4, 0.95, REDL, RED, lw=2.2, ls='--', r=0.12)
+    ax.text(6.4, 2.82, 'W3 silent', ha='center', va='center', fontsize=13, fontweight='bold', color='#b91c1c')
+    ax.plot([2.25, 5.15], [2.82, 2.82], color=GRAY, lw=1.8, ls=':')
+    rbox(ax, 4.45, 3.9, 3.5, 0.9, C3L, C3, lw=1.6, r=0.12)
+    ax.text(6.2, 4.35, 'A: wait (consistent)', ha='center', va='center', fontsize=11.5, fontweight='bold', color=C3T)
+    rbox(ax, 4.45, 0.75, 3.5, 0.9, C2L, C2, lw=1.6, r=0.12)
+    ax.text(6.2, 1.2, 'B: proceed (available)', ha='center', va='center', fontsize=11.5, fontweight='bold', color=C2T)
+    sp.save(fig, out / 'cap_partition.svg')
+
+# Visual anchor for F24 PyTorch step timeline strip
+def _pytorch_step_strip():
+    fig, ax = plt.subplots(figsize=(3.1, 1.15))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 2.65)
+    ax.axis('off')
+    segs = [
+        (0.1, 3.4, C1L, C1, C1T, 'C1', 'fwd+bwd'),
+        (3.65, 3.9, C2L, C2, C2T, 'C2', 'AllReduce'),
+        (7.7, 2.2, C3L, C3, C3T, 'C3', 'barrier'),
+    ]
+    for x, w, fc, ec, tc, top, bot in segs:
+        rbox(ax, x, 0.52, w, 1.8, fc, ec, lw=2.0, r=0.14)
+        ax.text(x + w / 2, 1.75, top, ha='center', va='center', fontsize=15, fontweight='bold', color=tc)
+        ax.text(x + w / 2, 1.0, bot, ha='center', va='center', fontsize=13.5, fontweight='bold', color=tc)
+    ax.text(5.0, 0.14, 'one sync step (no overlap)', ha='center', va='center', fontsize=13, color=GRAY, fontweight='bold')
+    sp.save(fig, out / 'pytorch_step_strip.svg')
+
+# Visual anchor for F27 Diagnose step profile bar
+def _diagnose_profile():
+    fig, ax = plt.subplots(figsize=(3.4, 1.55))
+    ax.barh(0, 0.8, color=C1, height=0.55)
+    ax.barh(0, 1.0, left=0.8, color=C2, height=0.55)
+    ax.barh(0, 0.2, left=1.8, color=C3, height=0.55)
+    ax.text(0.4, 0, '0.8 s', ha='center', va='center', fontsize=14, fontweight='bold', color='white')
+    ax.text(1.3, 0, '1.0 s', ha='center', va='center', fontsize=14, fontweight='bold', color='white')
+    ax.text(0.4, 0.44, 'compute', ha='center', va='bottom', fontsize=13.5, fontweight='bold', color=C1T)
+    ax.text(1.3, 0.44, 'comm', ha='center', va='bottom', fontsize=13.5, fontweight='bold', color=C2T)
+    ax.text(1.9, 0.44, 'sync\n0.2 s', ha='center', va='bottom', fontsize=13, fontweight='bold', color=C3T, linespacing=0.95)
+    ax.text(1.0, -0.58, 'total = 2.0 s  (overlap = 0)', ha='center', va='top', fontsize=13.5, fontweight='bold', color=C['text'])
+    ax.set_xlim(0, 2.2)
+    ax.set_ylim(-0.95, 1.0)
+    ax.set_yticks([])
+    ax.set_xticks([0, 0.8, 1.8, 2.0])
+    ax.spines['left'].set_visible(False)
+    ax.set_xlabel('seconds per step', fontsize=13)
+    ax.tick_params(labelsize=12.5)
+    sp.save(fig, out / 'diagnose_profile.svg')
+
+_recall_c3_mttf()
+_cap_partition()
+_pytorch_step_strip()
+_diagnose_profile()
 print('figures written to', out)

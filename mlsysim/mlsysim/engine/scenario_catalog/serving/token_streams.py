@@ -68,7 +68,7 @@ Llama3_70BInt4KvBudgetH100 = Llama3_8BFp16ConversationsH100.variant(
 Llama3_8BInt4ChatServiceH100 = _st.SingleAcceleratorLlmServiceScenario(
     name="An 8-billion-parameter Llama 3 chat service on one H100 with 4-bit weights",
     description="1,000-token prompts and 256-token answers; AWQ 4-bit weights and a 16-bit cache; a 72 GiB "
-    "cache reserve; prefill admits 10,000 prompt tokens per second; $3 per H100-hour.",
+    "cache reserve; prefill admits 10,000 prompt tokens per second; $4 per H100-hour.",
     workload=_Models.Language.Llama3_8B,
     hardware=_Hardware.Cloud.H100,
     precision="int4",
@@ -78,7 +78,7 @@ Llama3_8BInt4ChatServiceH100 = _st.SingleAcceleratorLlmServiceScenario(
     prefill_efficiency=0.4,  # scenario assumption: share of peak in prefill
     kv_reserve=Q_(72, "GiB"),  # scenario assumption: memory set aside for the cache
     prefill_rate=Q_(10_000, "1/second"),  # scenario assumption: isolated prefill rate, prompt tokens
-    price=Q_(3.00, "dollar/hour"),  # scenario assumption: H100 SXM5 rental
+    price=Q_(4.00, "dollar/hour"),  # scenario assumption: H100 SXM5 rental, the chapter's one H100 price (was $3; 2026-11-20)
     ttft_target=Q_(200, "ms"),  # scenario assumption
     tpot_target=Q_(20, "ms"),  # scenario assumption
 )

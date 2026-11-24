@@ -52,10 +52,10 @@ Gpt2DecodeH100OverServerCpu = ResNet50InferenceH100OverServerCpu.variant(
 
 Gpt2DecodeH100OverServerCpuBandwidth = Gpt2DecodeH100OverServerCpu.variant(
     name="GPT-2 XL token generation with a bandwidth-set path gain",
-    description="Decode is bandwidth bound, so the path gain is the H100's memory bandwidth over the "
-    "reference CPU socket's.",
+    description="Decode is bandwidth bound, so the path gain is the H100's HBM bandwidth over the "
+    "server host-DRAM path (200 GB/s).",
     accelerated_rate=_Hardware.Cloud.H100.memory.bandwidth,
-    baseline_rate=_Hardware.Cloud.ReferenceCPU.memory.bandwidth,
+    baseline_rate=_Hardware.Tech.Storage.HostDram.bandwidth,
 )
 
 
@@ -243,6 +243,8 @@ DenseParametersVsBandwidthSince2014 = _st.ParameterBandwidthGrowthScenario(
         _Hardware.Cloud.TPUv6,
         _Hardware.Cloud.MI325X,
         _Hardware.Cloud.B200,
+        _Hardware.Cloud.TPUv7,  # added 2026-11-20: 2025 points (Ironwood, Blackwell Ultra)
+        _Hardware.Cloud.B300,
     ],
     dense_models=[
         _Models.Vision.AlexNet,

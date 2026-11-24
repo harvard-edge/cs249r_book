@@ -31,16 +31,16 @@ class FacilityCooling(Registry):
         metadata=Metadata(provenance=pc.NREL_ESIF_PUE, description="Warm-water liquid-cooled data center cooling profile (PUE 1.06, WUE 0.0)."),
     )
     BestAir = CoolingProfile(
-        name="Best Air-Cooled", pue=PUE_BEST_AIR, wue=WUE_EVAPORATIVE,
-        metadata=Metadata(provenance=pc.MICROSOFT_DESIGN_PUE_2022, description="Newest-generation hyperscale datacenter design cooling profile (PUE 1.12, WUE 1.8)."),
+        name="Best Air-Cooled", pue=PUE_BEST_AIR, wue=WUE_AIR_COOLED,
+        metadata=Metadata(provenance=pc.MICROSOFT_DESIGN_PUE_2022, description="Newest-generation hyperscale air-cooled datacenter design profile (PUE 1.12, WUE 0.5)."),
     )
     Typical = CoolingProfile(
         name="Industry Average (2022)", pue=PUE_TYPICAL, wue=WUE_EVAPORATIVE,
         metadata=Metadata(provenance=pc.UPTIME_PUE_2022, description="Global industry average datacenter cooling profile from Uptime Institute 2022 survey (PUE 1.55, WUE 1.8)."),
     )
     SimpleAir = CoolingProfile(
-        name="Simple Air-Cooled", pue=PUE_SIMPLE_AIR, wue=WUE_EVAPORATIVE,
-        metadata=Metadata(provenance=pc.LBNL_SMALL_SERVER_ROOMS_2013, description="Small air-conditioned server room cooling profile (PUE 1.5, WUE 1.8)."),
+        name="Simple Air-Cooled", pue=PUE_SIMPLE_AIR, wue=WUE_AIR_COOLED,
+        metadata=Metadata(provenance=pc.LBNL_SMALL_SERVER_ROOMS_2013, description="Small air-conditioned server room cooling profile (PUE 1.5, WUE 0.5)."),
     )
     Legacy = CoolingProfile(
         name="Industry Average (2023)", pue=PUE_LEGACY, wue=WUE_EVAPORATIVE,
@@ -67,7 +67,7 @@ class Datacenters(Registry):
         grid=Grids.Quebec,
         metadata=Metadata(
             provenance=Grids.Quebec.metadata.provenance,
-            description="Hyperscale campus powered by low-carbon Quebec hydroelectric grid (30 gCO2/kWh).",
+            description="Hyperscale campus powered by low-carbon Quebec hydroelectric grid (20 gCO2/kWh).",
         ),
     )
     Norway_Hydro = Datacenter(
@@ -75,7 +75,7 @@ class Datacenters(Registry):
         grid=Grids.Norway,
         metadata=Metadata(
             provenance=Grids.Norway.metadata.provenance,
-            description="Hyperscale campus powered by low-carbon Norwegian hydroelectric grid (30 gCO2/kWh).",
+            description="Hyperscale campus powered by low-carbon Norwegian hydroelectric grid (10 gCO2/kWh).",
         ),
     )
     US_Hyperscale = Datacenter(
@@ -83,7 +83,7 @@ class Datacenters(Registry):
         grid=Grids.US_Avg,
         metadata=Metadata(
             provenance=Grids.US_Avg.metadata.provenance,
-            description="Reference US hyperscale facility operating on US grid average carbon intensity (388 gCO2/kWh).",
+            description="Reference US hyperscale facility operating on US grid average carbon intensity (429 gCO2/kWh).",
         ),
     )
     EU_Average = Datacenter(
@@ -107,7 +107,7 @@ class Datacenters(Registry):
         grid=Grids.Iowa,
         metadata=Metadata(
             provenance=Grids.Iowa.metadata.provenance,
-            description="Hyperscale campus in Iowa with high wind generation share (450 gCO2/kWh).",
+            description="Illustrative high-carbon coal/gas reference site in Iowa (680 gCO2/kWh).",
         ),
     )
     Poland_Coal = Datacenter(
@@ -115,7 +115,7 @@ class Datacenters(Registry):
         grid=Grids.Poland,
         metadata=Metadata(
             provenance=Grids.Poland.metadata.provenance,
-            description="Datacenter operating on Poland coal-heavy electrical grid (700 gCO2/kWh).",
+            description="Datacenter operating on Poland coal-heavy electrical grid (820 gCO2/kWh).",
         ),
     )
 
@@ -164,3 +164,6 @@ class Infrastructure(Registry):
     Pricing = Pricing
     Capacity = Capacity
     AIR_COOLING_LIMIT_KW = AIR_COOLING_LIMIT_KW
+    WUE_AIR_COOLED = WUE_AIR_COOLED
+    WUE_EVAPORATIVE = WUE_EVAPORATIVE
+    WUE_LIQUID = WUE_LIQUID

@@ -164,7 +164,7 @@ def portrait(step):
     save(fig, f'portrait_step{step}')
 for s in (1, 2, 3):
     portrait(s)
-fig, ax = plt.subplots(figsize=(4.6, 2.4))
+fig, ax = plt.subplots(figsize=(4.6, 2.2))
 data = [('Ascending', 11.34975369, 'stop_up', GREEN), ('No bias', 19.86206897, 'stop_free', SLATE), ('Descending', 79.44827586, 'stop_down', RED)]
 for i, (lab, w, key, col) in enumerate(data):
     ax.barh(i, w, color=col, height=0.6)
@@ -267,9 +267,6 @@ def latch(step):
     f2 = f_on + 400000.0 * (v * t2 - 0.5 * acc * t2 ** 2)
     ax.plot((t_b + t2) * 1000.0, f2, color=GREEN, lw=3)
     ax.plot([(t_b + tstop) * 1000.0, 30], [f2[-1], f2[-1]], color=GREEN, lw=3)
-    tn = np.linspace(t_b, t_b + 0.006, 20)
-    ax.plot(tn * 1000.0, rate * tn, color=RED, lw=2, ls='--')
-    ax.text((t_b + 0.0062) * 1000.0, 104, 'no brake', color=RED, fontsize=11, fontweight='bold')
     ax.axvspan(t_trip * 1000.0, t_b * 1000.0, color=AMBER, alpha=0.18)
     ax.axhline(15.0, color=C['neutral'], ls=':', lw=1.5)
     ax.text(29.5, 15.0 + 3, 'tripwire 15 N', ha='right', fontsize=10.5, color=C['neutral'])
@@ -279,6 +276,10 @@ def latch(step):
     ax.plot([t_b * 1000.0], [f_on], 'o', color=GREEN, ms=9, mec='white', mew=1.5, zorder=5)
     ax.text(t_b * 1000.0 + 0.6, f_on - 14, '0.03 m/s: brake at 39 N', color='#047857', fontsize=11.5, fontweight='bold')
     if step >= 2:
+        tn = np.linspace(t_b, t_b + 0.006, 20)
+        ax.plot(tn * 1000.0, rate * tn, color=RED, lw=2.2, ls='--')
+        ax.text((t_b + 0.0062) * 1000.0, 104, 'no brake', color=RED, fontsize=11, fontweight='bold')
+    if step >= 3:
         r2 = 40000.0
         fo2 = 95.0
         tt2 = np.linspace(0, 15.0 / r2 + 0.002, 30)
@@ -291,7 +292,7 @@ def latch(step):
     ax.set_ylabel('Force on plate (N)', fontsize=11)
     ax.tick_params(labelsize=10)
     save(fig, f'latch_step{step}')
-for s in (1, 2):
+for s in (1, 2, 3):
     latch(s)
 b = []
 b.append(box(200, 30, 190, 280, 'white', GREEN, rx=4))
@@ -331,7 +332,10 @@ ax.bar(xs - 0.2, cvals, width=0.38, color=NAVY)
 ax.bar(xs + 0.2, nvals, width=0.38, color='#93C5FD')
 for x, c, n in zip(xs, cvals, nvals):
     ax.text(x - 0.2, c + 6, f'{c:.0f}', ha='center', fontsize=11, color=NAVY, fontweight='bold')
-    ax.text(x + 0.2, n + 6, f'{n:.0f}', ha='center', fontsize=11, color='#1D4ED8', fontweight='bold')
+    if 265 <= n <= 286:
+        ax.text(x + 0.2, n - 12, f'{n:.0f}', ha='center', va='top', fontsize=11, color='#1E3A8A', fontweight='bold')
+    else:
+        ax.text(x + 0.2, n + 6, f'{n:.0f}', ha='center', fontsize=11, color='#1D4ED8', fontweight='bold')
 ax.axhline(280.0, color=RED, ls='--', lw=2)
 ax.text(3.42, 280.0 + 12, 'set for\n280 N', color=RED, ha='left', va='bottom', fontsize=11, fontweight='bold')
 ax.set_xticks(xs)
@@ -360,7 +364,7 @@ ax.set_xlabel('Separation the arm must keep, before sensor and position margins 
 ax.tick_params(labelsize=10)
 save(fig, 'ssm')
 b = []
-rows = [('Model fidelity', 'observer: predicted vs measured'), ('Bounded push', 'observer against the force bound'), ('Torque available', 'current shunts, saturation flag'), ('Solver on time', 'watchdog and cycle counter'), ('Short tick', 'bus timestamps; 1.501 mm drift')]
+rows = [('Model fidelity', 'observer: predicted vs. measured'), ('Bounded push', 'observer against the force bound'), ('Torque available', 'current shunts, saturation flag'), ('Solver on time', 'watchdog and cycle counter'), ('Short tick', 'bus timestamps; 1.501 mm drift')]
 b.append(text(155, 30, 'Premise', 25, '#047857', weight='bold'))
 b.append(text(615, 30, 'Detector, every tick', 25, RED, weight='bold'))
 for i, (p, d) in enumerate(rows):
@@ -468,4 +472,39 @@ b.append(arrow(557, 130, 500, 250, RED, marker='ahr'))
 b.append(box(365, 252, 200, 66, SLATE_F, SLATE, rx=0))
 b.append(text(465, 294, 'drives', 25))
 svg('synthesis', 660, 330, b)
+def onset_clock(step):
+    spare_ms = 131.0075 / 1.3
+    rack_ms = 82.0 + spare_ms
+    fig, ax = plt.subplots(figsize=(4.4, 2.35))
+    ax.barh(1, 60.0, left=0, color=GREEN, height=0.52, edgecolor='white')
+    ax.barh(1, 22.0, left=60.0, color=SLATE, height=0.52, edgecolor='white')
+    ax.text(30.0, 1, '60', ha='center', va='center', fontsize=11.5, color='white', fontweight='bold')
+    ax.barh(1, spare_ms, left=82.0, color=GREEN_F, edgecolor=GREEN, ls='--', lw=1.4, height=0.52)
+    ax.text(82.0 + spare_ms / 2, 1, '+100.8 ms', ha='center', va='center', fontsize=11, color='#047857', fontweight='bold')
+    ax.axvline(rack_ms, color=RED, ls='--', lw=2.0)
+    ax.text(rack_ms + 4, 1.50, 'rack limit\n(+131.0 mm)', ha='left', va='top', fontsize=11, color=RED, fontweight='bold')
+    if step == 1:
+        ax.barh(0, 165.0, left=0, color=SLATE_F, edgecolor='#94A3B8', ls='--', lw=1.4, height=0.52)
+        ax.text(82.5, 0, '200 ms host stall: fits?', ha='center', va='center', fontsize=11, color=SLATE, fontweight='bold')
+    if step >= 2:
+        ax.barh(0, 60.0, left=0, color=BLUE, height=0.52, edgecolor='white')
+        ax.barh(0, 140.0, left=60.0, color=AMBER, height=0.52, edgecolor='white')
+        ax.barh(0, 22.0, left=200.0, color=SLATE, height=0.52, edgecolor='white')
+        ax.text(120.0, 0, '+140 ms', ha='center', va='center', fontsize=11.5, color='white', fontweight='bold')
+    if step >= 3:
+        ax.barh(0, 222.0 - rack_ms, left=rack_ms, color=RED_F, edgecolor=RED, hatch='///', lw=1.8, height=0.52, zorder=4)
+        ax.text(226.0, 0.0, '50.99 mm\noverrun', ha='left', va='center', fontsize=11.5, color=RED, fontweight='bold')
+    ax.set_yticks([0, 1])
+    ax.set_yticklabels(['Host OS\nstall', 'MCU\nlease'], fontsize=11.5, fontweight='bold')
+    ax.set_xlim(0, 285)
+    ax.set_ylim(-0.55, 1.62)
+    ax.set_xticks([0, 82, 183, 250])
+    ax.set_xticklabels(['0', '82', '183', '250'], fontsize=11)
+    ax.set_xlabel('Time from last renewal to braking (ms)', fontsize=11.5)
+    ax.spines['left'].set_visible(False)
+    ax.tick_params(axis='y', length=0)
+    save(fig, f'onset_clock_step{step}')
+
+for s in (1, 2, 3):
+    onset_clock(s)
 print('\nfigures written')

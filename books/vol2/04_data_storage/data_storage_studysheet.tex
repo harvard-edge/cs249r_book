@@ -1,0 +1,178 @@
+% Study sheet: Volume II, Chapter 4, Data Storage.
+% Numbers: \val{...} from data_storage_studysheet_numbers.tex, written by data_storage_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{data_storage_studysheet_numbers}
+\sheetvolume{2}
+\sheetchapter{4}{Data Storage}
+\sheetsources{Numbers from the mlsysim registry and the chapter's scenarios; all units decimal (GB = 10$^9$ bytes); assumed inputs are marked.}
+
+\begin{document}
+% ===================================================================== FRONT
+\frontside
+\begin{bigidea}
+The Fleet Law has no term for waiting on data: it assumes the \hl{next batch is already in
+accelerator memory}. Storage keeps it by staging data close enough, and keeps progress by saving
+state that \hl{can be restored}.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{The I/O wall.}{Faster compute against a fixed input path speeds training only up to the delivery
+  rate. Prefetching hides variation, never a sustained shortfall.}
+\idea{Size from demand, then the slowest stage.}{Batch bytes per compute time, checked at every
+  stage. GPUDirect Storage helps only if the host copy or its CPU time limits.}
+\idea{Small files are a metadata problem.}{Signature: metadata operations at their limit while data
+  servers idle. Packing thousands of samples per shard divides the opens.}
+\idea{Commit boundaries make state safe.}{Pause for the local write, publish the manifest last, keep
+  the old generation. Durability, availability, consistency: separate contracts.}
+\idea{Total delivery cost decides placement.}{Capacity is billed per byte stored, egress per byte read,
+  requests per operation. Data read often belongs close.}
+\idea{Serving reads differently.}{A rollout is a burst of whole-model reads from every replica; graph
+  retrieval is bound by random reads within a deadline.}
+\end{ideas}
+
+\vspace{16pt}
+\sheetsec{Bandwidth by tier vs.\ what a node needs}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\k{17}
+  \foreach \e in {-4,...,4}{\draw[gridline] ({100+(\e+4)*\k},-8) -- ({100+(\e+4)*\k},90);}
+  \foreach \e/\t in {-3/{1 MB/s}, 0/{1 GB/s}, 3/{1 TB/s}}{\node[small, anchor=north] at ({100+(\e+4)*\k},-10) {\t};}
+  \foreach \lab/\v/\y/\sty/\txt/\side/\dx in {%
+      {HBM, per accelerator}/\val{ladderhbm}/84/white/{\val{hbmbandwidth} TB/s}/east/-4,
+      {host DRAM, per node}/\val{ladderdram}/68/white/{\val{drambandwidth} GB/s}/east/-4,
+      {NVMe stripe, per node}/\val{ladderstripe}/52/white/{\val{stripebandwidth} GB/s}/west/4,
+      {file-system share, per node}/\val{ladderpfs}/36/white/{\val{pfsshare} GB/s}/west/4,
+      {image job needs, per node}/\val{ladderimage}/16/accent/{\val{imagenode} GB/s}/west/4,
+      {text job needs, per node}/\val{laddertext}/0/accent/{\val{textnode} MB/s}/west/4}{
+    \pgfmathsetmacro\x{100+(log10(\v)+4)*\k}
+    \node[lab, anchor=east] at (94,\y) {\lab};
+    \draw[dim] (100,\y) -- (236,\y);
+    \filldraw[fill=\sty, draw=accent, line width=0.6pt] (\x,\y) circle (2.4pt);
+    \node[note, fill=white, inner sep=1.2pt, anchor=\side] at (\x+\dx,\y) {\txt};}
+  \draw[dim, dashed] (100,26) -- (236,26);
+\end{tikzpicture}\par}
+\vspace{3pt}
+{\fontsize{8.4}{10.4}\selectfont\color{muted}Log scale; the chapter's jobs on \val{clusternodes} nodes sharing a
+\val{pfsaggregate} TB/s file system. Demand, not HBM, sets the feed.\par}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Formulas you will use}
+\fcard{Input demand and the service chain}%
+  {\begin{gathered}\RequiredInputBandwidth = \InputConsumerAcceleratorCount \, \TargetComputeTimeFraction \,
+   \frac{\BatchDataVolume}{\IronLawComputeTime}\\[2pt]
+   \InputPipelineServiceRate = \min_{\InputPipelineStageIndex} \InputStageServiceRate_{\InputPipelineStageIndex} \geq \RequiredInputBandwidth\end{gathered}}%
+  {Accelerators reading distinct batches $\times$ target busy fraction $\times$ batch bytes per compute
+   time. Every stage $\InputPipelineStageIndex$ must sustain it.}%
+  {Compare stages in output-equivalent bytes.}{}
+\fcard{Tier as a cache}%
+  {\mathbb{E}[\TieredRequestServiceTime] = \HotTierHitProbability\,\HotTierServiceTime
+   + (1-\HotTierHitProbability)\,\MissPathServiceTime}%
+  {Hit share $\HotTierHitProbability$ at hot time $\HotTierServiceTime$; misses take $\MissPathServiceTime$.
+   Delivered rate $\propto 1/\mathbb{E}[\TieredRequestServiceTime]$.}%
+  {\val{chhit}\% hits, misses \val{chmiss}$\times$ slower: $\val{chmean}\,\HotTierServiceTime$, about
+   1/\val{chfrac} of the all-hot rate.}{}
+\fcard{Prefetch depth}%
+  {\MinimumPrefetchBufferCount = \left\lceil \frac{\TailStepIoTime}{\IronLawComputeTime} \right\rceil}%
+  {Ready batches that cover a p99 read delay. Host memory $=$ depth $\times$ batch $\times$ accelerators per node.}%
+  {If reads are slower on average, an overlapped step takes the read time, the stall share is
+   (read $-$ compute)$\,/\,$read, and no depth fixes it.}{}
+\fcard{Checkpoint size and pause}%
+  {\text{bytes} = \val{bytesperparam}\,\Parameters, \qquad
+   \CheckpointWriteTime = \frac{\text{bytes} / \text{nodes}}{\text{local bandwidth}}}%
+  {16-bit weights (2 bytes), 32-bit master weights (4), two Adam moments (4 each).}%
+  {The pause is a barrier, a coordination cost in $\SynchronizationTime$; the background copy costs step
+   time only if it contends with collectives or input reads.}{}
+\end{rightcol}
+
+% ===================================================================== BACK
+\backside
+\begin{answers}
+\ans{Finish}{$\val{ckptgb} \div \val{sharebw}$ GB/s $=$ \val{directs} s, \val{directpct}\% of each
+  \val{intervals} s interval, \val{directratio}$\times$ the staged \val{writes} s pause. Staged, the copy
+  drains off the step (checkpoint card).}
+\ans{1}{$\val{qimages} \times \val{qkb}$ KB $=$ \val{qbatch} MB; $\val{qgpus} \times \val{qeta} \times
+  \val{qbatch} \div$ \val{qms} ms $=$ \val{qneed} GB/s. Share $\val{qnodes} \times \val{pershare} \approx
+  \val{qfair}$ GB/s suffices; decode, \val{qdecode} GB/s, is the minimum: not fed (demand card).}
+\ans{2}{$\val{hit} + \val{missshare} \times \val{missx} = \val{meanservice}\,\HotTierServiceTime$: about
+  \val{allhotpct}\% of the all-hot rate. Half the rate needs $\mathbb{E}[\TieredRequestServiceTime]$ of two
+  hot times: \val{halfhit}\% hits (cache card).}
+\columnbreak
+\ans{3}{$\lceil \val{pnine} / \val{pms} \rceil = \val{depth}$ ready batches; $\val{depth} \times \val{pmb}
+  \times \val{pgpus} = \val{pbuffer}$ MB per node. At \val{slowms} ms, stall \val{slowgap} $\div$ \val{slowms} $=$ \val{stallpct}\% at any depth (prefetch card).}
+\ans{4}{Metadata: operations at their limit while data servers idle; time lost waits on
+  input, not collectives. Pack into shards: \val{filesper}$\times$ fewer opens (small files idea). (b) \val{roreplicas} $\times$ \val{roweights} GB $=$ \val{rototal} GB: \val{roobjtime} s from
+  objects, \val{ropfstime} s from the file system: the shared tier's aggregate rate sets it (serving idea).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{How long does a 175B training job pause to save?}
+\val{params}B parameters, \val{clusternodes} nodes, each with \val{drivecount} NVMe drives at
+\val{drivebandwidth} GB/s; the shared file system absorbs \val{durablebw} TB/s; a save every
+\val{intervalmin} minutes.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\u{56}
+  \pgfmathsetmacro\a{70+\val{writes}*\u}
+  \pgfmathsetmacro\b{\a+\val{drains}*\u}
+  \node[lab, anchor=east] at (66,25) {training};
+  \node[lab, anchor=east] at (66,7) {shared copy};
+  \draw[nbox] (70,20) rectangle (234,30);
+  \draw[hotbox] (70,20) rectangle (\a,30);
+  \node[note, anchor=south west] at (70,31) {pause \val{writes} s};
+  \draw[accbox] (\a,2) rectangle (\b,12);
+  \node[lab] at ({(\a+\b)/2},7) {background, \val{drains} s};
+  \draw[accent, line width=1pt] (\b,-1) -- (\b,15);
+  \node[note, anchor=north east] at (\b+1,-2) {manifest last};
+\end{tikzpicture}\par}\vspace{3pt}
+\begin{steps}
+\item Size: \val{params}B $\times$ \val{bytesperparam} bytes $=$ \val{ckptgb} GB.
+\item Per node: \val{ckptgb} $\div$ \val{clusternodes} $=$ \val{shardgb} GB at \val{localbw} GB/s
+  $=$ \res{\val{writes} s pause} (\val{pausepct}\% of the interval).
+\item Background: \val{ckptgb} GB $\div$ \val{durablebw} TB/s $=$ \res{\val{drains} s} to drain, off the step.
+\end{steps}
+\takeaway{The pause ends at the local write; durability comes later.}
+\end{practicebox}
+
+\vspace{12pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{What if the save goes straight to a busy file system?}
+Same save, but \val{jobs} jobs share the file system, so this one gets
+\val{durablebw} TB/s $\div$ \val{jobs} $=$ \val{sharebw} GB/s.\par\vspace{4pt}
+\textbf{You:} find the pause when every byte goes straight to the file system, its share of the
+interval, and what staging changes.
+\end{practicebox}
+
+\vspace{12pt}
+\sheetsec{Common mistake}
+\mistake{``If a pipeline worker crashes, just replay its work.''}%
+  {Appending writes the row twice, double-counting the event in training. Write under a stable
+   key (data version, event ID) so a replay overwrites it.}{}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``HBM is \val{tierratio}$\times$ faster than an NVMe drive, so storage can never feed the accelerators.''}%
+  {That compares tiers, not demand: HBM serves reused weights and activations. The text job needs
+   only \val{textjob} MB/s for \val{textgpus} GPUs.}{}
+\mistake{``Object storage is the cheapest tier, so stream from it every epoch.''}%
+  {Egress is billed per byte read: a \val{corpustb} TB corpus read \val{epochs} times at \$\val{egress}/GB
+   costs \$\val{perrun} per run, against \$\val{storeyear} a year to store it.}{}
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} \val{qgpus} GPUs each read \val{qimages} images of \val{qkb} KB per \val{qms} ms step;
+  target \val{qeta}. Bandwidth needed? Its \val{qnodes} nodes get the per-node file-system share;
+  decoding sustains \val{qdecode} GB/s. Is it fed?
+\item \assumed{} \val{hitpct}\% of reads hit local NVMe and misses take \val{missx}$\times$ as long. What
+  share of the all-hot rate is delivered? What hit rate gives half?
+\item \assumed{} compute takes \val{pms} ms, file-system p99 reads \val{pnine} ms, decoded batches
+  \val{pmb} MB, \val{pgpus} GPUs per node. Depth and host memory? If reads average \val{slowms} ms, does a deeper queue help?
+\item A job moves from \val{shards} shards to \val{files} million single-image files on a \val{ratedbw} GB/s file
+  system and gets under one percent of it. Bandwidth or metadata? What evidence decides? The fix?
+  (b) \assumed{} a rollout loads the \val{roweights} GB weights into \val{roreplicas} replicas at once. Time
+  from an object store serving \val{roobject} GB/s in total? From the \val{ropfs} TB/s file system?
+\end{qs}
+\end{rightcol}
+\end{document}

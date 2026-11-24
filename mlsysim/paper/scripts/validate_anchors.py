@@ -8,7 +8,9 @@ the paper cannot disagree about what was run.
 B1 and B3 retain configured relative-error regression gates; these protect the
 selected calibrated scenarios, not a general accuracy guarantee. B4 reports an
 accounting comparison. B2 reports a weight-only bound alongside an unmatched
-request-average metric and has no decode-error gate. The script also checks
+request-average metric and has no decode-error gate. B2b compares the same kind
+of bound with a TTFT-excluded ITL and checks only that the bound holds: every
+16-bit weight-read floor must lie below its measured ITL. The script also checks
 accounting identities, layout recovery, and memory feasibility.
 
 Run from the mlsysim project root (the directory holding the ``mlsysim``
@@ -66,6 +68,15 @@ def main() -> int:
 
         a2 = ps.anchor_two()
         rows.append(("B2", f"Llama-2 70B TP={a2['tp']} weight floor", f"{a2['floor_ms']:.2f} ms", "request average only", "metric mismatch; no ITL error", "INFO"))
+
+        a2i = ps.anchor_two_itl()  # raises if any floor is not below its measured ITL
+        pri = a2i["primary"]
+        rows.append(("B2b", f"Llama-3.3 70B TP={pri['tp']} weight floor", f"{pri['floor_ms']:.2f} ms",
+                     f"{pri['itl_ms']:.2f} ms ITL", f"bound holds ({pri['gap_frac']:.1%} below)", "PASS"))
+        sweep = ", ".join(f"{q['gpu']} TP={q['tp']} {q['gap_frac']:.0%} ({q['residual_ms']:.1f} ms)"
+                          for q in a2i["sweep"].values())
+        notes.append(f"B2b: {len(a2i['points'])} 16-bit NIM rows all lie above their floors; "
+                     f"gap below ITL in NIM {a2i['later']['version']} at 1000/1000 tokens: {sweep}.")
 
         a3 = ps.anchor_three()
         gated_row("B3", "Llama 3 405B 16K H100 MFU", f"{a3['mfu']:.1%}", f"{a3['reported']:.1%}", a3["rel_error"])

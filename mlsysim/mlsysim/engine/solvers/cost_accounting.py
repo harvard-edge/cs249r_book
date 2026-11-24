@@ -305,11 +305,11 @@ class PrefixCacheBillModel(ForwardModel):
             output_cost=out_cost,
             total_uncached=total_nocache,
             total_cached=total_cache,
-            cache_ratio=float((total_nocache / total_cache).magnitude),
+            cache_ratio=float((total_nocache / total_cache).to_base_units().magnitude),
             cached_reread_cost=cached_reads,
-            reread_share=float((cached_reads / total_cache).to(_USD / _USD).magnitude),
+            reread_share=float((cached_reads / total_cache).to_base_units().magnitude),
             miss_cost=miss,
-            miss_share=float((miss / total_cache).magnitude),
+            miss_share=float((miss / total_cache).to_base_units().magnitude),
             per_turn_uncached=per_no,
             per_turn_cached=per_re,
         )
@@ -400,7 +400,7 @@ class CompactionPaybackModel(ForwardModel):
         summary_cost = first_keep + summary_tokens * p_out / 1_000_000
         upfront = summary_cost + first_comp - first_keep
         saving = (ctx_at - compact_to) * cs * p_in / 1_000_000
-        n_star = 1 + math.ceil((upfront / saving).magnitude)
+        n_star = 1 + math.ceil((upfront / saving).to_base_units().magnitude)
         keep_sum = rest * ctx_at + delta * rest * (rest - 1) // 2
         keep_cost = (rest * delta + cs * (keep_sum - rest * delta)) * p_in / 1_000_000
         comp_sum = rest * compact_to + delta * rest * (rest - 1) // 2

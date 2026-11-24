@@ -185,14 +185,15 @@ def crossover():
         save_plot(fig, f'crossover_step{step}')
 
 def tempe_bars():
-    rows = [('traveled during the 1 s suppression', 'tempe_supp_m', RED), ("full stop at the road's 0.92 g", 'tempe_brake_road_m', SLATE), ('full stop at the ADS cap, 0.71 g', 'tempe_brake_cap_m', GRAY)]
+    rows = [('traveled during the 1 s suppression', 'tempe_supp_m', RED), ("full stop at the road's 0.92 g", 'tempe_brake_road_m', SLATE), ('full stop at ADS cap, 7.0 m/s² (0.71 g)', 'tempe_brake_cap_m', GRAY)]
     fig, ax = plt.subplots(figsize=(5.6, 1.55))
-    fig.subplots_adjust(left=0.43, right=0.9, top=0.97, bottom=0.27)
+    fig.subplots_adjust(left=0.47, right=0.90, top=0.97, bottom=0.27)
     for i, (lab, key, col) in enumerate(rows):
         y = len(rows) - 1 - i
-        ax.barh(y, {'traveled during the 1 s suppression': 18.7, "full stop at the road's 0.92 g": 20.7, 'full stop at the ADS cap, 0.71 g': 26.6}[lab], color=col, height=0.62)
-        ax.text(-0.6, y, lab, ha='right', va='center', fontsize=9.5, color=INK, fontweight='bold')
-        ax.text({'traveled during the 1 s suppression': 18.7, "full stop at the road's 0.92 g": 20.7, 'full stop at the ADS cap, 0.71 g': 26.6}[lab] + 0.4, y, f"""{ {'traveled during the 1 s suppression': '18.7', "full stop at the road's 0.92 g": '20.7', 'full stop at the ADS cap, 0.71 g': '26.6'}[lab]} m""", ha='left', va='center', fontsize=9.5, color=col, fontweight='bold')
+        val = {'traveled during the 1 s suppression': 18.7, "full stop at the road's 0.92 g": 20.7, 'full stop at ADS cap, 7.0 m/s² (0.71 g)': 26.6}[lab]
+        ax.barh(y, val, color=col, height=0.62)
+        ax.text(-0.6, y, lab, ha='right', va='center', fontsize=9.2, color=INK, fontweight='bold')
+        ax.text(val + 0.4, y, f'{val:.1f} m', ha='left', va='center', fontsize=9.5, color=col, fontweight='bold')
     ax.set_yticks([])
     ax.set_xlim(0, 30)
     ax.set_xticks([0, 10, 20, 30])

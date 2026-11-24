@@ -158,9 +158,16 @@ def extract_compute_csv(
     ordered = sorted(candidates, key=lambda r: (r.get("Publication date") or "").strip())
     selected: list[dict[str, object]] = []
     for row in ordered:
+        model_name = row["Model"].strip()
+        base_model = bool((row.get("Base model") or "").strip())
+        notes_blob = " ".join(
+            (row.get(col) or "")
+            for col in ("Training time notes", "Training compute notes", "Compute cost notes", "Hardware utilization notes")
+        ).lower()
+        hw_valid = 0 if (base_model or PEAK_PRODUCT_WARNING in notes_blob or model_name == "IMPALA") else 1
         selected.append(
             {
-                "model": row["Model"].strip(),
+                "model": model_name,
                 "date": (row.get("Publication date") or "").strip(),
                 "domain": (row.get("Domain") or "").strip(),
                 "training_compute_flop": _format_optional_float(row.get("Training compute (FLOP)") or ""),
@@ -169,6 +176,7 @@ def extract_compute_csv(
                 "training_time_hours": _format_optional_float(row.get("Training time (hours)") or ""),
                 "mfu": _format_optional_float(row.get("Hardware utilization (MFU)") or ""),
                 "frontier": 1 if (row.get("Frontier model") or "").strip() == "True" else 0,
+                "standalone_hw_valid": hw_valid,
             }
         )
 
@@ -177,19 +185,37 @@ def extract_compute_csv(
 
     buf = io.StringIO(newline="")
     buf.write(
+        "# Figures: vol2:fig-training-compute-trend, vol2:fig-compute-trends, vol2:fig-ai-compute-growth, vol2:fig-frontier-training-energy\n"
         f"# Source: Epoch AI, Notable AI Models database (CC BY 4.0), snapshot {snapshot_date} (@epochai2026notable; @sevilla2022)\n"
+        f"# Locator: notable_ai_models.csv ({snapshot_date} snapshot, Publication date >= 2012-01-01)\n"
         f"# URL: {EPOCH_PAGE_URL}\n"
+        "# License: CC-BY-4.0\n"
         f"# Verified: {snapshot_date}\n"
         "# Epistemic: modeled (Epoch AI training-compute estimates and builder-disclosed FLOP counts)\n"
+        "# Method: scripted (filtered post-2012 training runs via extract_epoch_sustainability_data.py)\n"
         f"# Generator: {GENERATOR_CMD} --write-compute-csv\n"
         f"# Upstream-SHA256: {raw_sha256}\n"
         "# Computation: filter Publication date >= 2012-01-01 with non-empty Training compute (FLOP) or "
-        "Hardware quantity, ordered by publication date; @fig-ai-compute-growth filters rows with positive "
+        "Hardware quantity, ordered by publication date; fig-ai-compute-growth filters rows with positive "
         f"training_compute_flop (N={with_flop}, frontier n={n_frontier} where Frontier model == True) and fits "
-        "OLS + White HC3 95% confidence bounds on log2(training_compute_flop) vs. decimal publication year\n"
+        "OLS + White HC3 95% confidence bounds on log2(training_compute_flop) vs. decimal publication year; "
+        "standalone_hw_valid == 1 marks standalone runs (empty Base model) without peak-hardware-product or "
+        "actor-learner CPU-omission mismatches (OpenAI Five, IMPALA) for per-accelerator rate decomposition in fig-training-compute-trend\n"
+        "# Columns:\n"
+        "#   model: string [identifier] — Unique model or training run name in Epoch AI\n"
+        "#   date: date [ISO-8601 date] — Model publication or release date\n"
+        "#   domain: string [category] — Task domain or comma-separated domain list\n"
+        "#   training_compute_flop: number [FLOP] — Cumulative pretraining and post-training compute estimate\n"
+        "#   hardware_quantity: number [chips] — Number of primary training accelerators used\n"
+        "#   training_hardware: string [identifier] — Primary accelerator model used for training\n"
+        "#   training_time_hours: number [h] — Reported or estimated wall-clock training duration\n"
+        "#   mfu: number [ratio] — Reported model FLOPs utilization fraction on 0-1 scale\n"
+        "#   frontier: integer [flag] — Binary indicator for top-10 compute frontier at release\n"
+        "#   standalone_hw_valid: integer [flag] — Binary filter for standalone runs with matched hardware-duration scope\n"
         "# Notes: training_compute_flop follows Epoch AI's cumulative convention (summing parent pretraining and "
         "post-training FLOPs where applicable); hardware_quantity is accelerator count, training_time_hours is "
-        "wall-clock duration, mfu is reported model FLOPs utilization, and frontier is Epoch's release-date top-10 flag\n"
+        "wall-clock duration, mfu is reported model FLOPs utilization, frontier is Epoch's release-date top-10 flag, "
+        "and standalone_hw_valid (1 or 0) guards against dividing cumulative parent FLOPs by fine-tune-only chip-hours or learner-only GPU counts\n"
     )
     fieldnames = [
         "model",
@@ -201,6 +227,7 @@ def extract_compute_csv(
         "training_time_hours",
         "mfu",
         "frontier",
+        "standalone_hw_valid",
     ]
     writer = csv.DictWriter(buf, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
@@ -263,18 +290,31 @@ def extract_energy_csv(
 
     buf = io.StringIO(newline="")
     buf.write(
+        "# Figures: vol2:fig-frontier-training-energy\n"
         f"# Source: Epoch AI, Notable AI Models database (CC BY 4.0), snapshot {snapshot_date} (@epochai2026notable; @cottier2024rising)\n"
+        f"# Locator: notable_ai_models.csv ({snapshot_date} snapshot, standalone post-2016 runs with power draw and runtime)\n"
         f"# URL: {EPOCH_PAGE_URL}\n"
+        "# License: CC-BY-4.0\n"
         f"# Verified: {snapshot_date}\n"
         "# Epistemic: modeled (peak cluster power capacity integrated over wall-clock pretraining duration; Cottier et al. 2024 App. C)\n"
+        "# Method: scripted (filtered standalone pretraining runs via extract_epoch_sustainability_data.py)\n"
         f"# Generator: {GENERATOR_CMD}\n"
         f"# Upstream-SHA256: {raw_sha256}\n"
         "# Computation: filter Publication date >= 2016-01-01, Training power draw (W) > 0, Training time (hours) > 0, "
         f"Base model empty (excludes {len(excluded_base_models)} fine-tune/checkpoint rows), and no hardware-quantity * runtime warning "
-        "(excludes OpenAI Five); @fig-frontier-training-energy computes E_MWh = training_power_draw_w * training_time_hours / 1e6 "
+        "(excludes OpenAI Five); fig-frontier-training-energy computes E_MWh = training_power_draw_w * training_time_hours / 1e6 "
         "where training_power_draw_w = N_chips * TDP_W * 1.82 * PUE(t) for N_chips > 1 and TDP_W * PUE(t) for N_chips = 1, "
         f"fits OLS + White HC3 95% confidence bounds on log10(E_MWh) across standalone frontier runs (n={n_frontier}), "
         "and rounds modeled upper-bound callouts to 2 significant figures\n"
+        "# Columns:\n"
+        "#   model: string [identifier] — Standalone pretrained model name in Epoch AI\n"
+        "#   date: date [ISO-8601 date] — Model publication or release date\n"
+        "#   domain: string [category] — Primary task domain or comma-separated domain list\n"
+        "#   training_power_draw_w: number [W] — Modeled peak facility cluster power draw including PUE\n"
+        "#   training_time_hours: number [h] — Reported or estimated wall-clock pretraining duration\n"
+        "#   hardware_quantity: number [chips] — Number of primary accelerators in training cluster\n"
+        "#   training_hardware: string [identifier] — Primary accelerator model used for pretraining\n"
+        "#   frontier: integer [flag] — Binary indicator for Epoch AI frontier status at release\n"
         f"# Notes: standalone pretraining runs (N={len(selected)}, frontier n={n_frontier}); upper bounds omit Cottier et al. (2024) "
         "App. A.5 average-utilization derating and are contrasted against builder-based anchors at their stated accounting boundaries\n"
     )

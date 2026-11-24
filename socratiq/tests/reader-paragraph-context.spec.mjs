@@ -70,3 +70,28 @@ test('oversized paragraphs report an actionable error', async ({page}) => {
   });
   expect(error).toContain('Select a shorter passage');
 });
+
+test('captureParagraph captures li, figcaption, and blockquote inside main while rejecting nav/aside/controls', async ({page}) => {
+  await page.goto('/vol1/chapter/');
+  const result = await page.evaluate(async () => {
+    const {captureParagraph} = await import('/context.js');
+    document.querySelector('#bandwidth').insertAdjacentHTML(
+      'beforeend',
+      '<ul><li id="main-li">List item bandwidth bound</li><li id="ctrl-li">Button <button>Click</button></li></ul><figure><figcaption id="main-fig">Figure 1.1: Roofline</figcaption></figure><blockquote id="main-quote">Bandwidth limits operational intensity.</blockquote><nav><ul><li id="nav-li">Nav item</li></ul></nav><aside><blockquote id="aside-quote">Sidebar quote</blockquote></aside>'
+    );
+    return {
+      li: captureParagraph(document.getElementById('main-li'))?.quote || null,
+      figcaption: captureParagraph(document.getElementById('main-fig'))?.quote || null,
+      blockquote: captureParagraph(document.getElementById('main-quote'))?.quote || null,
+      ctrlLi: captureParagraph(document.getElementById('ctrl-li')),
+      navLi: captureParagraph(document.getElementById('nav-li')),
+      asideQuote: captureParagraph(document.getElementById('aside-quote')),
+    };
+  });
+  expect(result.li).toBe('List item bandwidth bound');
+  expect(result.figcaption).toBe('Figure 1.1: Roofline');
+  expect(result.blockquote).toBe('Bandwidth limits operational intensity.');
+  expect(result.ctrlLi).toBeNull();
+  expect(result.navLi).toBeNull();
+  expect(result.asideQuote).toBeNull();
+});

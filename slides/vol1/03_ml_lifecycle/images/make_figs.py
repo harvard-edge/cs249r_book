@@ -294,12 +294,25 @@ def roc_real(step):
         d.rectangle([x0, ytop, x20, y90], fill=(46, 125, 50, 40))
         _, ybot = roc_px(100, 70, k)
         xr, _ = roc_px(70, SENS_FLOOR, k)
-        for a, b in (((x0, y90), (xr, y90)), ((x20, ytop), (x20, ybot))):
-            n = 24
-            for i in range(0, n, 2):
-                p = (a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n)
-                q = (a[0] + (b[0] - a[0]) * (i + 1) / n, a[1] + (b[1] - a[1]) * (i + 1) / n)
-                d.line([p, q], fill=red, width=12)
+        # Horizontal floor at 90% sensitivity
+        n = 24
+        for i in range(0, n, 2):
+            p = (x0 + (xr - x0) * i / n, y90)
+            q = (x0 + (xr - x0) * (i + 1) / n, y90)
+            d.line([p, q], fill=red, width=12)
+        # Vertical floor at 80% specificity (FPR = 20%), paused across the two
+        # embedded JAMA operating-point labels so no dash crosses any letter.
+        _, y_lbl1_top = roc_px(SPEC_FLOOR, 97.7, k)
+        _, y_lbl1_bot = roc_px(SPEC_FLOOR, 95.4, k)
+        _, y_lbl2_top = roc_px(SPEC_FLOOR, 92.2, k)
+        _, y_lbl2_bot = roc_px(SPEC_FLOOR, 90.0, k)
+        dash_px, gap_px = 46, 36
+        for ya, yb in ((ytop, y_lbl1_top), (y_lbl1_bot, y_lbl2_top), (y_lbl2_bot, ybot)):
+            y = ya
+            while y < yb - 6:
+                y2 = min(y + dash_px, yb)
+                d.line([(x20, y), (x20, y2)], fill=red, width=12)
+                y += dash_px + gap_px
     if step >= 3:
         cx, cy = roc_px(*CLINIC_POINT, k)
         r = 34
@@ -338,8 +351,17 @@ def cost(step):
 for s in (1, 2, 3):
     cost(s)
 _cm = {'Minute': 1, 'Day': 1440, 'Week': 10080, 'Month': 43800.0, 'Quarter': 131400.0}
+_cad_rows = [
+    ('Minute', _cm['Minute'], 'danger', 'camera misconfigured'),
+    ('Day', _cm['Day'], 'memory', 'referral rate, confidence'),
+    ('Week', _cm['Week'], 'memory', 'labeled accuracy, drift tests'),
+    ('Month', _cm['Month'], 'neutral', 'population coverage'),
+    ('Quarter', _cm['Quarter'], 'neutral', 'architecture review'),
+]
 with sp.plt.rc_context({'xtick.labelsize': 14}):
-    sp.hbars(out / 'cadences.svg', [('Quarter', _cm['Quarter'], 'neutral', 'architecture review'), ('Month', _cm['Month'], 'neutral', 'population coverage'), ('Week', _cm['Week'], 'memory', 'labeled accuracy, drift tests'), ('Day', _cm['Day'], 'memory', 'referral rate, confidence'), ('Minute', _cm['Minute'], 'danger', 'camera misconfigured')], 'min', size=(5.4, 2.6), xlabel='How long each signal takes to trust (minutes, log scale)')
+    for s, nshow in ((1, 1), (2, 2), (3, 5)):
+        sp.hbars(out / f'cadences_step{s}.svg', _cad_rows, 'min', step=nshow, size=(5.4, 2.6),
+                 xlabel='How long each signal takes to trust (minutes, log scale)')
 
 def shrink_demo():
     from PIL import Image, ImageDraw
@@ -396,7 +418,7 @@ def contracts(step):
 for s in (1, 2, 3, 4):
     contracts(s)
 
-def gate(step):
+def release_check(step):
     p = svg_open(980, 430)
     p.append('<rect x="8" y="8" width="694" height="414" rx="12" fill="#FAFAFA" stroke="#999999" stroke-width="2"/>')
     p.append(text(28, 50, 'Release manifest, one model version', 25, C['text'], 'bold', 'start'))
@@ -417,9 +439,9 @@ def gate(step):
         y = 200
         p.append(line(706, y - 8, 736, y - 8, C['danger'], 4, 'r'))
         p.append(f'''<rect x="742" y="{y - 92}" width="232" height="214" rx="12" fill="{C['danger_l']}" stroke="{C['danger']}" stroke-width="3"/>''')
-        for j, (s_, wgt) in enumerate((('Gate halts.', 'bold'), ('Back to stage 2:', 'bold'), ('collect cataract', 'normal'), ('images, retrain', 'normal'), ('with lens-opacity', 'normal'), ('augmentation', 'normal'))):
+        for j, (s_, wgt) in enumerate((('Check halts.', 'bold'), ('Back to stage 2:', 'bold'), ('collect cataract', 'normal'), ('images, retrain', 'normal'), ('with lens-opacity', 'normal'), ('augmentation', 'normal'))):
             p.append(text(858, y - 58 + j * 32, s_, 21, C['danger'] if wgt == 'bold' else C['text'], wgt))
     save_svg(p, f'gate_step{step}.svg')
 for s in (1, 2, 3):
-    gate(s)
+    release_check(s)
 print('figures written')

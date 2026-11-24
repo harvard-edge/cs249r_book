@@ -54,7 +54,7 @@ def scalar_update(mean, variance, observation, observation_variance):
     if not all(math.isfinite(v) for v in (mean, variance, observation, observation_variance)):
         raise ValueError('Scalar update inputs must be finite')
     if variance <= 0 or observation_variance <= 0:
-        raise ValueError('Variances must be strictly positive')
+        raise ValueError('Variances must be positive')
     innovation = observation - mean
     innovation_variance = variance + observation_variance
     gain = variance / innovation_variance

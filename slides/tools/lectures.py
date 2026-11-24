@@ -23,7 +23,8 @@ Two outputs, both written at build time:
    in slides/volN.qmd: one row per chapter, grouped under the book's parts
    (the sections of the book's sidebar in the same HTML config),
    each lecture linking to its PDF, its PowerPoint file, and its source
-   folder, and each chapter row linking to the chapter in the book. Runs as
+   folder, and each chapter row linking to the chapter in the book and to
+   its study sheet (books/shared/studysheet/build.py names the sheet URL). Runs as
    the slides site's Quarto pre-render, so the page never carries a
    hand-typed deck list.
 
@@ -43,6 +44,8 @@ import json
 import re
 import sys
 from pathlib import Path
+
+import importlib.util
 
 import yaml
 
@@ -109,6 +112,15 @@ def book_chapters(vol: str) -> dict:
     return out
 
 
+def study_sheets(vol: str) -> dict:
+    """Map chapter folder -> study-sheet URL, from the sheet build's own manifest logic."""
+    spec = importlib.util.spec_from_file_location("studysheet_build",
+                                                  BOOKS / "shared" / "studysheet" / "build.py")
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
+    return {tex.parent.name: build.sheet_url(tex) for tex in build.sheets(vol)}
+
+
 def deck_info(deck: Path, tex: Path) -> dict:
     data = {}
     m = deck / "lecture_map.yml"
@@ -133,13 +145,16 @@ def deck_info(deck: Path, tex: Path) -> dict:
 
 def lecture_links(vol: str, deck: str) -> dict:
     name = f"{vol}_{deck}"
-    return {"pdf": f"{RELEASE}/{name}.pdf", "pptx": f"{RELEASE}/{name}.pptx",
-            "source": f"{SOURCE}/{vol}/{deck}"}
+    # notes: the student notes PDF (each slide with its notes below, without
+    # the instructor-only "In class" cues), released since 2026-11-23.
+    return {"pdf": f"{RELEASE}/{name}.pdf", "notes": f"{RELEASE}/{name}-student-notes.pdf",
+            "pptx": f"{RELEASE}/{name}.pptx", "source": f"{SOURCE}/{vol}/{deck}"}
 
 
 def volume(vol: str, slides_page: str) -> list:
     """The chapters of one volume in order, each with its book URL and lectures."""
     book = book_chapters(vol)
+    sheets = study_sheets(vol)
     by_num = {}
     for deck in sorted((ROOT / vol).iterdir()):
         tex = deck / f"{deck.name}.tex"
@@ -173,33 +188,50 @@ def volume(vol: str, slides_page: str) -> list:
                              "slides_url": f"{slides_page}#{lec_anchor}"})
         chapters.append({"num": n, "chapter": decks[0]["chapter"], "title": title,
                          "book_url": book.get(decks[0]["chapter"], ""),
+                         "sheet_url": sheets.get(decks[0]["chapter"], ""),
                          "anchor": anchor, "slides_url": f"{slides_page}#{anchor}",
                          "lectures": lectures})
     return chapters
 
 
 def link_html(lec: dict) -> str:
+    # 2026-11-23: three pills, ordered by what visitors open most: the deck to
+    # project, the deck with its notes to study or prepare, and PowerPoint to
+    # present. Source is a text link under the title (source_html).
     return (
         '<span class="lec-links">'
-        f'<a href="{lec["pdf"]}">PDF</a>'
-        f'<a href="{lec["pptx"]}">PowerPoint</a>'
-        f'<a href="{lec["source"]}">Source</a>'
+        f'<a href="{lec["pdf"]}" title="The deck for projection (PDF)">Slides</a>'
+        f'<a href="{lec["notes"]}" title="Each slide with its notes below, for study or preparation (PDF)">Slides + notes</a>'
+        f'<a href="{lec["pptx"]}" title="PowerPoint, with the speaker notes in presenter view">PowerPoint</a>'
         "</span>"
     )
 
 
+def source_html(lec: dict) -> str:
+    return f'<a class="ch-read" href="{lec["source"]}" title="LaTeX source and figure scripts">Source</a>'
+
+
+SEP = '<span class="ch-sep" aria-hidden="true">·</span>'
+
+
 def chapter_html(ch: dict) -> list:
     esc = html.escape
-    read = (f'<a class="ch-read" href="{ch["book_url"]}">Read the chapter</a>'
-            if ch["book_url"] else "")
+    meta_links = []
+    if ch["book_url"]:
+        meta_links.append(f'<a class="ch-read" href="{ch["book_url"]}">Read the chapter</a>')
+    if ch.get("sheet_url"):
+        meta_links.append(f'<a class="ch-read" href="{ch["sheet_url"]}">Study sheet</a>')
+    read = f'<span class="ch-meta">{SEP.join(meta_links)}</span>' if meta_links else ""
+
     rows = [f'  <div class="ch" id="{ch["anchor"]}"><div class="ch-num">{ch["num"]}</div>'
             '<div class="ch-body">']
     lectures = ch["lectures"]
     if len(lectures) == 1:
         lec = lectures[0]
         sub = f'<span class="lec-sub">{esc(lec["subtitle"])}</span>' if lec["subtitle"] else ""
+        read1 = f'<span class="ch-meta">{SEP.join(meta_links + [source_html(lec)])}</span>'
         rows.append(f'    <div class="lec" id="{lec["anchor"]}"><span class="lec-name">'
-                    f'<span class="ch-title">{esc(ch["title"])}</span>{sub}{read}</span>'
+                    f'<span class="ch-title">{esc(ch["title"])}</span>{sub}{read1}</span>'
                     f'{link_html(lec)}</div>')
     else:
         rows.append(f'    <div class="ch-head"><span class="ch-title">{esc(ch["title"])}</span>'
@@ -207,7 +239,8 @@ def chapter_html(ch: dict) -> list:
         for lec in lectures:
             sub = f'<span class="lec-sub">{esc(lec["subtitle"])}</span>' if lec["subtitle"] else ""
             rows.append(f'    <div class="lec lec-part" id="{lec["anchor"]}"><span class="lec-name">'
-                        f'<span class="part-tag">{lec["label"]}</span>{sub}</span>'
+                        f'<span class="part-tag">{lec["label"]}</span>{sub}'
+                        f'<span class="ch-meta">{source_html(lec)}</span></span>'
                         f'{link_html(lec)}</div>')
     rows.append("  </div></div>")
     return rows

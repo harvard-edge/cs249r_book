@@ -39,7 +39,8 @@ def test_age_baseline_is_canonical_and_only_named_stage_changes():
     assert sum(delayed['instrument']['y']) == pytest.approx(2 * sum(baseline['instrument']['y']))
     for x, a, b in zip(baseline['instrument']['x'], baseline['instrument']['y'], faster['instrument']['y']):
         assert b == pytest.approx(a / 2 if x == 'backbone' else a)
-    a = values(8, 'C', 'reference'); b = values(8, 'C', 'faster_path')
+    a = values(8, 'C', 'reference')
+    b = values(8, 'C', 'faster_path')
     assert a['empirical absolute residual quantile'] == b['empirical absolute residual quantile']
     assert quantity(b['unmodeled displacement'], 'm') < quantity(a['unmodeled displacement'], 'm')
 
@@ -80,7 +81,8 @@ def test_capture_replay_corrects_epoch_but_arrival_update_can_report_smaller_cov
 
 
 def test_understating_noise_shrinks_covariance_without_changing_estimate():
-    normal = values(9, 'A', 'correct_replay'); small = values(9, 'A', 'shrink_covariance')
+    normal = values(9, 'A', 'correct_replay')
+    small = values(9, 'A', 'shrink_covariance')
     assert normal['posterior present range'] == small['posterior present range']
     assert quantity(small['posterior present variance'], 'm^2') < quantity(normal['posterior present variance'], 'm^2')
     assert small['NEES (single scalar sample)'] > normal['NEES (single scalar sample)']
@@ -88,7 +90,8 @@ def test_understating_noise_shrinks_covariance_without_changing_estimate():
 
 
 def test_shared_bias_hides_from_innovations_and_missing_truth_prevents_nees():
-    normal = values(9, 'A', 'correct_replay'); biased = values(9, 'A', 'common_bias')
+    normal = values(9, 'A', 'correct_replay')
+    biased = values(9, 'A', 'common_bias')
     assert biased['NIS (single scalar innovation)'] == pytest.approx(normal['NIS (single scalar innovation)'])
     assert biased['NEES (single scalar sample)'] > normal['NEES (single scalar sample)']
     missing = values(9, 'A', 'no_truth')
@@ -106,10 +109,12 @@ def test_expired_history_refuses_update_and_preserves_predicted_covariance():
 
 
 def test_geometry_uses_capture_transform_and_error_grows_with_range():
-    capture = values(8, 'B', 'capture_chain'); arrival = values(8, 'B', 'arrival_transform')
+    capture = values(8, 'B', 'capture_chain')
+    arrival = values(8, 'B', 'arrival_transform')
     assert quantity(capture['nominal geometry residual'], 'm') == 0
     assert quantity(arrival['nominal geometry residual'], 'm') > 0
-    near = values(8, 'B', 'stale_calibration'); far = values(8, 'B', 'far_calibration')
+    near = values(8, 'B', 'stale_calibration')
+    far = values(8, 'B', 'far_calibration')
     assert quantity(far['nominal geometry residual'], 'm') == pytest.approx(2 * quantity(near['nominal geometry residual'], 'm'))
     clock = values(8, 'B', 'foreign_clock')
     assert quantity(clock['nominal geometry residual'], 'm') == 0

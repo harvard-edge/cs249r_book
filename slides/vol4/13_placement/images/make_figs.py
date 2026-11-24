@@ -72,13 +72,13 @@ def hook():
         ax.plot(t2, temp2, color=P['slate'], lw=2.5, alpha=a(k >= 3))
         ax.axhline(95.0, color=P['red'], lw=1.5, ls='--')
         ax.text(0.4, 95.0 - 4.5, 'trip 95 °C', color=P['red'], fontsize=11, fontweight='bold')
-        ax.axhline(85.0, color=P['green'], lw=1.5, ls='--', alpha=a(k >= 3))
-        ax.text(0.4, 85.0 - 4.5, 'clear 85 °C', color=P['green'], fontsize=11, fontweight='bold', alpha=a(k >= 3))
+        ax.axhline(85.0, color=P['green'], lw=1.5, ls='--')
+        ax.text(0.4, 85.0 - 4.5, 'clear 85 °C', color=P['green'], fontsize=11, fontweight='bold')
         ax.plot([t_trip], [95.0], 'o', ms=8, color=P['red'], alpha=a(k >= 2))
         ax.annotate('24.7 s: clock halved', (t_trip, 95.0), xytext=(-12, 5), textcoords='offset points', ha='right', fontsize=12, color=P['red_d'], fontweight='bold', alpha=a(k >= 2))
         ax.axvspan(t_trip, t_trip + rec, color=P['red_l'], lw=0, alpha=a(k >= 3) * 0.9)
         ax.text(t_trip + rec + 0.3, 58, '2.18 s\nafter stop', fontsize=12, color=P['red_d'], fontweight='bold', alpha=a(k >= 3))
-        ax.text(t_trip + 0.4, 66, '?', fontsize=20, color=P['red_d'], fontweight='bold', alpha=a(k == 2))
+        ax.text(t_trip + 0.8, 68, '?', fontsize=20, color=P['red_d'], fontweight='bold', alpha=a(k == 2))
         ax.set_xlim(0, t_end)
         ax.set_ylim(50, 104)
         ax.set_yticks([53, 75, 95])
@@ -89,9 +89,14 @@ def hook():
         bx.set_ylim(0, 1)
         bx.add_patch(Rectangle((0, 0.15), t_trip, 0.7, color=P['green_l'], ec=P['green']))
         bx.text(t_trip / 2, 0.5, 'every tick on time: 340 µs of 400', ha='center', va='center', fontsize=11, color=P['green_d'], fontweight='bold')
-        bx.add_patch(Rectangle((t_trip, 0.15), rec, 0.7, color=P['red_l'], ec=P['red'], alpha=a(k >= 2)))
-        bx.text(t_trip + rec / 2, 1.12, '590 µs', ha='center', va='bottom', fontsize=11, color=P['red_d'], fontweight='bold', alpha=a(k >= 2))
-        bx.add_patch(Rectangle((t_trip + rec, 0.15), t_end - t_trip - rec, 0.7, color=P['green_l'], ec=P['green'], alpha=a(k >= 3)))
+        if k == 2:
+            bx.add_patch(Rectangle((t_trip, 0.15), t_end - t_trip, 0.7, fc=P['red_l'], ec=P['red'], ls='--', alpha=0.55))
+            bx.text(t_trip + (t_end - t_trip) / 2, 1.12, '590 µs', ha='center', va='bottom', fontsize=11, color=P['red_d'], fontweight='bold')
+            bx.text(t_trip + (t_end - t_trip) / 2, 0.5, 'how long?', ha='center', va='center', fontsize=10.5, color=P['red_d'], fontweight='bold')
+        else:
+            bx.add_patch(Rectangle((t_trip, 0.15), rec, 0.7, color=P['red_l'], ec=P['red'], alpha=a(k >= 3)))
+            bx.text(t_trip + rec / 2, 1.12, '590 µs', ha='center', va='bottom', fontsize=11, color=P['red_d'], fontweight='bold', alpha=a(k >= 3))
+            bx.add_patch(Rectangle((t_trip + rec, 0.15), t_end - t_trip - rec, 0.7, color=P['green_l'], ec=P['green'], alpha=a(k >= 3)))
         bx.set_yticks([])
         bx.set_xticks([0, 10, 20, 30])
         bx.set_xlabel('Time (s)')
@@ -132,7 +137,7 @@ def badge(ax, x, y, s, shown, color):
 
 def board():
     for k in (1, 2, 3, 4):
-        fig, ax = canvas(5.9, 3.4, (0, 11.8), (0, 6.8))
+        fig, ax = canvas(5.9, 3.4, (-0.05, 12.05), (0, 6.8))
         box(ax, 0.1, 1.15, 7.3, 5.55, '', 'white', P['slate'], rad=0.12, lw=2)
         ax.text(0.3, 6.38, 'Application SoC: one die, one package', fontsize=13, fontweight='bold', color=P['slate'])
         box(ax, 0.3, 4.75, 1.65, 1.15, 'app\ncores', P['navy_l'], P['navy'], fs=12)
@@ -149,17 +154,17 @@ def board():
         for x, y0, w, lab in shared:
             box(ax, x, y0, w, 0.7, lab, P['red_l'], P['red'], fs=11, bold=False, lw=1.3)
         box(ax, 2.5, 0.35, 2.4, 0.6, 'LPDDR5 DRAM', P['red_l'], P['red'], fs=11, bold=False, lw=1.3)
-        box(ax, 8.15, 2.35, 3.75, 4.35, '', P['green_l'], P['green'], rad=0.12, lw=2, shown=k >= 4)
+        box(ax, 8.15, 2.35, 3.70, 4.35, '', P['green_l'], P['green'], rad=0.12, lw=2, shown=k >= 4)
         ax.text(8.3, 6.33, 'Safety MCU', fontsize=13, fontweight='bold', color=P['green_d'], alpha=a(k >= 4))
-        badge(ax, 11.55, 6.38, 'd', k >= 4, P['green'])
+        badge(ax, 11.50, 6.38, 'd', k >= 4, P['green'])
         for i, lab in enumerate(['lockstep cores', 'private memory', 'own clock', 'reset supervisor']):
-            box(ax, 8.35, 5.3 - i * 0.72, 3.35, 0.58, lab, 'white', P['green'], fs=11, bold=False, shown=k >= 4, lw=1.2)
+            box(ax, 8.35, 5.3 - i * 0.72, 3.30, 0.58, lab, 'white', P['green'], fs=11, bold=False, shown=k >= 4, lw=1.2)
         arrow(ax, 7.4, 1.65, 8.15, 2.55, P['slate'], shown=k >= 4)
         ax.text(7.5, 2.0, 'board link', fontsize=11, color=P['slate'], ha='right', fontweight='bold', alpha=0)
         box(ax, 8.6, 1.3, 2.7, 0.7, 'isolated rail, 2 s', P['green_l'], P['green'], fs=11, bold=False, shown=k >= 4, lw=1.3)
         box(ax, 0.1, -0.0 + 0.02, 11.6, 0.0, '', 'white', 'white', shown=False)
         ax.plot([5.3, 11.0], [0.65, 0.65], color=P['slate'], lw=0)
-        box(ax, 5.3, 0.35, 6.4, 0.6, 'battery and board supply: shared by all', P['slate_l'], P['slate'], fs=11, bold=False, lw=1.3)
+        box(ax, 5.3, 0.35, 6.55, 0.6, 'battery and board supply: shared by all', P['slate_l'], P['slate'], fs=11, bold=False, lw=1.3)
         save(fig, f'board_step{k}')
 
 def socmem():
@@ -184,30 +189,39 @@ def socmem():
     save(fig, 'socmem')
 
 def backlog():
-    labels = ['unloaded', '21 backlogs', '82 backlogs', '114 backlogs', '5, one channel']
-    rows = [('unloaded', 0, 0.0, 40.0), ('21 backlogs', 21, 39.46744118, 0.02007843137), ('82 backlogs', 82, 154.1109608, 0.02007843137), ('114 backlogs', 114, 214.2518235, 0.02007843137), ('5, one channel', 5, 141.9146569, 0.321254902)]
+    sense = 40.0
+    rows = [
+        ('unloaded', 0, 0.0, 0.0),
+        ('21 backlogs', 21, 39.46744118, 0.02007843137),
+        ('61 backlogs', 61, 114.64351961, 0.02007843137),
+        ('93 backlogs', 93, 174.78438235, 0.02007843137),
+        ('4, one channel', 4, 113.53172549, 0.321254902),
+    ]
     for k in range(1, 6):
         fig, ax = plt.subplots(figsize=(5.8, 2.7))
         for i, (lab, n, w, r) in enumerate(rows):
             yy = len(rows) - 1 - i
             show = i < k
-            mem = w + r
-            if n == 0:
-                ax.barh(yy, mem, height=0.6, color=P['petrol'], alpha=a(show))
-            else:
-                ax.barh(yy, mem, height=0.6, color=P['amber_l'], ec=P['amber'], hatch='///', alpha=a(show), lw=1)
-            ax.barh(yy, 95.0, left=mem, height=0.6, color=P['green'], alpha=a(show))
+            if w > 0:
+                ax.barh(yy, w, height=0.6, color=P['amber_l'], ec=P['amber'], hatch='///', alpha=a(show), lw=1)
+            ax.barh(yy, sense + r, left=w, height=0.6, color=P['petrol'], alpha=a(show))
+            ax.barh(yy, 95.0, left=w + sense + r, height=0.6, color=P['green'], alpha=a(show))
+            end = w + sense + r + 95.0
             ax.text(-12, yy, lab, ha='right', va='center', fontsize=12, fontweight='bold', color=P['text'], alpha=a(show))
-            ax.text(mem + 95.0 + 8, yy, f'{mem + 95.0:.0f}', va='center', fontsize=11, color=P['text'], alpha=a(show))
+            x_lab = end + 10
+            for x_line in (250.0, 310.0, 400.0):
+                if end <= x_line < end + 30:
+                    x_lab = x_line + 14
+            ax.text(x_lab, yy, f'{end:.0f}', va='center', fontsize=11, color=P['text'], alpha=a(show))
         for x, lab, c, ha, yo in ((40.0, '40', P['petrol'], 'center', 0.0), (250.0, 'WCET 250', P['slate'], 'center', 0.0), (400.0, 'deadline 400', P['red'], 'left', 0.0), (1000.0, 'next tick', P['slate'], 'right', 0.0)):
-            ax.axvline(x, color=c, lw=1.6, ls='--')
-            ax.text(x + (6 if ha == 'left' else -6 if ha == 'right' else 0), len(rows) - 0.35 + yo, lab, ha=ha, fontsize=11, color=c, fontweight='bold')
-        ax.axvspan(310.0, 400.0, color=P['gray_l'], lw=0)
+            ax.vlines(x, -0.6, len(rows) - 0.52, color=c, lw=1.6, ls='--')
+            ax.text(x + (10 if ha == 'left' else -10 if ha == 'right' else 0), len(rows) - 0.38 + yo, lab, ha=ha, va='bottom', fontsize=11, color=c, fontweight='bold')
+        ax.axvspan(310.0, 400.0, ymin=0.0, ymax=(len(rows) - 0.52 - (-0.6)) / (len(rows) + 0.15 - (-0.6)), color=P['gray_l'], lw=0, zorder=0)
         ax.set_xlim(0, 1010)
-        ax.set_ylim(-0.6, len(rows) + 0.05)
+        ax.set_ylim(-0.6, len(rows) + 0.15)
         ax.set_yticks([])
         ax.spines['left'].set_visible(False)
-        ax.set_xlabel('Time within one tick (µs); hatched: memory wait')
+        ax.set_xlabel('Time within one tick (µs); hatched: wait; teal: sense; green: eval', fontsize=11)
         fig.subplots_adjust(left=0.24, right=0.98, bottom=0.2, top=0.95)
         save(fig, f'backlog_step{k}')
 
@@ -371,7 +385,10 @@ def trace():
                 ax.bar(xs[i] - 0.2, cold[i], 0.38, color=P['blue_l'], ec=P['navy'])
                 ax.text(xs[i] - 0.2, cold[i] + 8, cold_txt[i], ha='center', fontsize=12, color=P['navy'])
             ax.bar(xs[i] + 0.2, hot[i], 0.38, color=P['red_l'], ec=P['red'], alpha=a(k >= 2))
-            ax.text(xs[i] + 0.2, hot[i] + 8, hot_txt[i], ha='center', fontsize=12, color=P['red_d'], fontweight='bold', alpha=a(k >= 2))
+            if 375.0 <= hot[i] <= 415.0:
+                ax.text(xs[i] + 0.2, hot[i] - 14, hot_txt[i], ha='center', va='top', fontsize=12, color=P['red_d'], fontweight='bold', alpha=a(k >= 2))
+            else:
+                ax.text(xs[i] + 0.2, hot[i] + 8, hot_txt[i], ha='center', fontsize=12, color=P['red_d'], fontweight='bold', alpha=a(k >= 2))
         ax.axhline(250.0, color=P['slate'], lw=1.8, ls='--')
         ax.text(1.42, 250.0 + 8, 'WCET', ha='left', fontsize=12, color=P['slate'], fontweight='bold')
         ax.axhline(400.0, color=P['red'], lw=1.8)

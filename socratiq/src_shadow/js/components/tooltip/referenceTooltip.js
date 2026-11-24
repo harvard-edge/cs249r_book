@@ -349,7 +349,7 @@ export class ReferenceTooltip {
       }
       
       .tooltip-action-btn {
-        background: #3b82f6;
+        background: #8e1537;
         border: none;
         border-radius: 6px;
         color: white;
@@ -364,7 +364,7 @@ export class ReferenceTooltip {
       }
       
       .tooltip-action-btn:not(:disabled):hover {
-        background: #2563eb;
+        background: #74132f;
       }
       .tooltip-action-btn:disabled {
         background: #e5e7eb;

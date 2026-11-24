@@ -10,7 +10,7 @@ Buolamwini 2019), Literature.TrainingRuns (Strubell et al. 2019), and the
 fairness Scenarios.* (credit service, its price and feedback loop, the
 evaluation budget, the shared threshold, the frontier, the proxy and goal).
 Figure-only values are layout: coordinates, axis limits, and the illustrative
-gate slices A, B, and D (slice C's interval is the evaluation budget's).
+check slices A, B, and D (slice C's interval is the evaluation budget's).
 The verification panel quotes the chapter quiz's recruiting-tool figures.
 
 The Patterson, DLRM TCO, fleet-share, lineage, and DP-SGD figures moved to
@@ -112,7 +112,7 @@ for k in (1, 2):
     ax.set_yticklabels(['1.00'])
     ax.set_xlabel('Optimization effort on clicks')
     ax.set_ylabel('Normalized value')
-    ax.text(0.0, -0.22, 'Illustrative (Systems Perspective 15.2)', transform=ax.transAxes, fontsize=9, color=C['neutral'])
+    ax.text(0.0, -0.22, 'Illustrative (Systems Perspective 15.2)', transform=ax.transAxes, fontsize=11, color=C['neutral'])
     sp.save(fig, out / f'proxy_goal_step{k}.svg')
 bar_steps('gender_shades', [('All faces (reported)', 10.0, 'neutral', '10.0%', 1), ('Lighter men', 0.8, 'memory', '0.8%', 2), ('Darker men', 0.7, 'memory', '0.7%', 2), ('Lighter women', 9.8, 'memory', '9.8%', 2), ('Darker women', 34.5, 'danger', '34.5%  (43×)', 2)], 2, (3.45, 2.05), 62, 'Face++ gender-classification error (%)')
 n = np.logspace(2, 5, 300)
@@ -156,9 +156,9 @@ for k in (1, 2):
     ax.set_axisbelow(True)
     ax.set_xlabel('Error on darker-skinned women (%)')
     sp.save(fig, out / f'raji_step{k}.svg')
-metrics = [('False positive rate', 44.85, 23.45, 1), ('False negative rate', 27.99, 47.72, 1), ('Precision (PPV)', 63.0, 59.0, 2), ('Base rate (derived)', 100 * 0.5143398268, 100 * 0.3936430318, 2)]
+metrics = [('False positive rate', 44.85, 23.45, 1), ('False negative rate', 27.99, 47.72, 1), ('Positive predictive\nvalue (PPV)', 63.0, 59.0, 2), ('Base rate (derived)', 100 * 0.5143398268, 100 * 0.3936430318, 2)]
 for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(3.45, 1.85))
+    fig, ax = plt.subplots(figsize=(3.85, 2.0))
     nm = len(metrics)
     for i, (name, b, w, first) in enumerate(metrics):
         y = nm - 1 - i
@@ -166,20 +166,21 @@ for k in (1, 2):
         a = 1.0 if on else 0.0
         ax.barh(y + 0.19, b, height=0.36, color=C['compute'], alpha=a)
         ax.barh(y - 0.19, w, height=0.36, color=C['memory'], alpha=a)
-        ax.text(b + 1.0, y + 0.19, f'{b:.0f}%', va='center', fontsize=10, color=C['compute'], fontweight='bold', alpha=a)
-        ax.text(w + 1.0, y - 0.19, f'{w:.0f}%', va='center', fontsize=10, color=C['memory'], fontweight='bold', alpha=a)
-        ax.text(-0.01, y, name, transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=10, fontweight='bold', color=C['text'], alpha=a)
-    ax.text(72, 3.15, 'Black', color=C['compute'], fontsize=10, fontweight='bold')
-    ax.text(72, 2.7, 'White', color=C['memory'], fontsize=10, fontweight='bold')
+        tag_b = f'{b:.0f}% Black' if i in (0, 2) else f'{b:.0f}%'
+        tag_w = f'{w:.0f}% White' if i in (0, 2) else f'{w:.0f}%'
+        ax.text(b + 1.2, y + 0.19, tag_b, va='center', fontsize=12, color=C['compute'], fontweight='bold', alpha=a)
+        ax.text(w + 1.2, y - 0.19, tag_w, va='center', fontsize=12, color=C['memory'], fontweight='bold', alpha=a)
+        ax.text(-0.01, y, name, transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=12, fontweight='bold', color=C['text'], alpha=a, linespacing=0.95)
     ax.axhline(1.5, color=C['grid'], lw=1, alpha=1.0 if k >= 2 else 0.0)
     ax.set_yticks([])
-    ax.set_xlim(0, 90)
+    ax.set_xlim(0, 102)
     ax.set_ylim(-0.6, nm - 0.4)
     ax.spines['left'].set_visible(False)
     ax.grid(axis='x', color=C['grid'], linewidth=0.6)
     ax.set_axisbelow(True)
     ax.set_xticks([0, 20, 40, 60, 80])
-    ax.set_xlabel('Percent')
+    ax.tick_params(axis='x', labelsize=11.5)
+    ax.set_xlabel('Percent', fontsize=12)
     sp.save(fig, out / f'compas_step{k}.svg')
 bar_steps('price', [('Before (TPR 60%)', 150.0, 'memory', '$150', 1), ('TPR raised to 90%', 75.0, 'danger', '$75   half the utility', 1)], 1, (4.4, 1.3), 260, 'Group B utility per applicant (US$)')
 q = np.arange(0, 9)
@@ -188,7 +189,7 @@ decay = np.array([3.0, 2.7, 2.43, 2.187, 1.9683, 1.77147, 1.594323, 1.4348907, 1
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.3, 2.05))
     ax.axhline(5.0, color=C['danger'], lw=1.6, ls='--')
-    ax.text(0.1, 5.0 - 0.15, 'Release gate: 5 points', color=C['danger'], fontsize=11, fontweight='bold', va='top')
+    ax.text(0.1, 5.0 - 0.15, 'Release limit: 5 points', color=C['danger'], fontsize=11, fontweight='bold', va='top')
     ax.plot(q, grow, '-o', color=C['compute'], lw=3, ms=6)
     ax.plot([6], [5.314683], 'o', ms=12, color=C['danger'], zorder=5)
     ax.annotate('Quarter 6: 5.3', (6, 5.314683), xytext=(-10, 10), textcoords='offset points', ha='right', fontsize=11, fontweight='bold', color=C['danger'])
@@ -288,16 +289,16 @@ g.text(140, 82, 'latency OK\nconfidence high\nuptime OK', 20, C['text'], first=2
 g.write('fanout', 2)
 g = Svg(900, 400)
 x0, x1 = (260, 660)
-GATE, SLICE_C = (5.0, 100 * 0.035)
+LIMIT, SLICE_C = (5.0, 100 * 0.035)
 
 def gx(v):
     return x0 + (x1 - x0) * v / 10.0
 g.add(1, f'''<line x1="{x0}" y1="330" x2="{x1}" y2="330" stroke="{C['neutral']}" stroke-width="2"/>''')
-for v in (0, GATE, 10):
+for v in (0, LIMIT, 10):
     g.text(gx(v), 355, f'{v:.0f}', 22, C['neutral'])
 g.text((x0 + x1) / 2, 388, 'TPR gap between groups (points)', 22, C['neutral'])
-g.add(1, f'''<line x1="{gx(GATE)}" y1="30" x2="{gx(GATE)}" y2="330" stroke="{C['danger']}" stroke-width="2.5" stroke-dasharray="8 5"/>''')
-g.text(gx(GATE), 18, 'Gate: 5 points', 22, C['danger'], 'bold')
+g.add(1, f'''<line x1="{gx(LIMIT)}" y1="30" x2="{gx(LIMIT)}" y2="330" stroke="{C['danger']}" stroke-width="2.5" stroke-dasharray="8 5"/>''')
+g.text(gx(LIMIT), 18, 'Limit: 5 points', 22, C['danger'], 'bold')
 slices = [('Slice A', 1.8, 0.8, 'PASS', 'data', 1, 70), ('Slice B', 8.0, 1.0, 'FAIL', 'danger', 1, 145), ('Slice C: few labels', SLICE_C, SLICE_C, 'INSUFFICIENT', 'compute', 2, 220), ('Slice D', 2.6, 1.0, 'PASS', 'data', 3, 295)]
 for name, v, h, verdict, ck, first, y in slices:
     g.text(10, y, name, 22, C['text'], 'bold', 'start', first=first)
@@ -335,28 +336,28 @@ for lab, a, b, gap, ck, first, y in rows:
 g.text(450, 400, 'Constructed example (chapter credit service). Both groups repay at 50%.', 18, C['neutral'])
 g.write('matrices', 4)
 g = Svg(520, 420)
-g.rect(170, 20, 180, 70, C['compute_l'], C['compute'])
-g.text(260, 55, 'Model decides', 21, C['text'], 'bold')
-g.rect(20, 165, 200, 70, C['data_l'], C['data'])
-g.text(120, 200, 'Approved', 21, C['text'], 'bold')
-g.rect(300, 165, 200, 70, '#F4F4F4', C['neutral'], dash='6 4')
-g.text(400, 200, 'Denied', 21, C['neutral'], 'bold')
-g.rect(20, 310, 200, 80, C['data_l'], C['data'])
-g.text(120, 350, 'Repayment\nobserved', 20, C['text'], 'bold')
-g.text(400, 340, 'No label:\nnever observed', 20, C['danger'], 'bold')
-g.line(230, 92, 140, 160, C['neutral'])
-g.line(290, 92, 380, 160, C['neutral'])
-g.line(120, 237, 120, 305, C['data'])
-g.line(400, 237, 400, 305, C['danger'], dash='6 5')
-g.line(222, 340, 262, 340, C['data'], arrow=False)
-g.line(262, 340, 262, 95, C['data'])
-g.text(270, 270, 'retrain', 18, C['data'], 'bold', 'start')
-g.write('censored_loop', 1)
+g.rect(170, 20, 180, 70, C['compute_l'], C['compute'], first=1)
+g.text(260, 55, 'Model decides', 21, C['text'], 'bold', first=1)
+g.rect(20, 165, 200, 70, C['data_l'], C['data'], first=1)
+g.text(120, 200, 'Approved', 21, C['text'], 'bold', first=1)
+g.rect(300, 165, 200, 70, '#F4F4F4', C['neutral'], dash='6 4', first=1)
+g.text(400, 200, 'Denied', 21, C['neutral'], 'bold', first=1)
+g.line(230, 92, 140, 160, C['neutral'], first=1)
+g.line(290, 92, 380, 160, C['neutral'], first=1)
+g.rect(20, 310, 200, 80, C['data_l'], C['data'], first=2)
+g.text(120, 350, 'Repayment\nobserved', 20, C['text'], 'bold', first=2)
+g.text(400, 340, 'No label:\nnever observed', 20, C['danger'], 'bold', first=2)
+g.line(120, 237, 120, 305, C['data'], first=2)
+g.line(400, 237, 400, 305, C['danger'], dash='6 5', first=2)
+g.line(222, 340, 262, 340, C['data'], arrow=False, first=3)
+g.line(262, 340, 262, 95, C['data'], first=3)
+g.text(270, 270, 'retrain', 18, C['data'], 'bold', 'start', first=3)
+g.write('censored_loop', 3)
 x_lo, x_hi = (150, 890)
 
 def ax_x(score):
     return x_lo + (x_hi - x_lo) * (1 - score)
-g = Svg(900, 330)
+g = Svg(900, 340)
 for grp, ck, y in (('A', 'memory', 95), ('B', 'danger', 200)):
     g.add(1, f'''<line x1="{x_lo}" y1="{y + 32}" x2="{x_hi}" y2="{y + 32}" stroke="{C['neutral']}" stroke-width="4"/>''')
     g.text(10, y + 32, f'Subgroup {grp}', 22, C['text'], 'bold', 'start')
@@ -365,14 +366,24 @@ for grp, ck, y in (('A', 'memory', 95), ('B', 'danger', 200)):
     for score in {'memory': [0.32, 0.25, 0.18, 0.11], 'danger': [0.65, 0.51, 0.44, 0.25]}[ck]:
         cx = ax_x(score)
         g.add(1, f'<path d="M{cx - 16},{y} H{cx + 16} M{cx},{y - 16} V{y + 16}" stroke="{C[ck]}" stroke-width="7"/>')
-for thr, key, first in ((0.7, 'acc_line1', 1), (0.37, 'acc_line2', 2)):
-    cx = ax_x(thr)
-    g.add(first, f'''<line x1="{cx}" y1="55" x2="{cx}" y2="260" stroke="{C['text']}" stroke-width="3" stroke-dasharray="8 6"/>''')
-    g.text(cx, 38, f"overall { {0.7: '75', 0.37: '81.25'}[thr]}%", 20, C['text'], 'bold', first=first)
-g.text(450, 290, 'Left of a line: approved.  Circle: would repay.  Cross: would default.', 19, C['neutral'])
-g.text(160, 322, 'At 75%: A errors 3, B errors 1', 20, C['memory'], 'bold', 'start', first=1, last=1)
-g.text(160, 322, f'At 81.25%: A errors {0}, B errors 3 (tripled)', 20, C['danger'], 'bold', 'start', first=2)
-g.write('threshold', 2)
+cx75 = ax_x(0.7)
+cx81 = ax_x(0.37)
+cxB = ax_x(0.55)
+g.add(1, f'''<line x1="{cx75}" y1="55" x2="{cx75}" y2="256" stroke="{C['neutral']}" stroke-width="2.5" stroke-dasharray="8 6"/>''')
+g.text(cx75, 34, 'shared 75%', 20, C['neutral'], 'bold', first=1)
+g.add(2, f'''<line x1="{cx81}" y1="55" x2="{cx81}" y2="256" stroke="{C['text']}" stroke-width="3" stroke-dasharray="8 6"/>''', last=2)
+g.text(cx81, 34, 'shared 81.25%', 20, C['text'], 'bold', first=2, last=2)
+# Step 3: split boundary (A stays at 0.37, B shifts to 0.55 -> 15/16 = 93.75%, B FPR = 0.25)
+g.add(3, f'''<line x1="{cx81}" y1="55" x2="{cx81}" y2="164" stroke="{C['memory']}" stroke-width="3.5" stroke-dasharray="8 5"/>''')
+g.text(cx81, 34, 'A cutoff', 20, C['memory'], 'bold', first=3)
+g.add(3, f'''<line x1="{cxB}" y1="164" x2="{cxB}" y2="256" stroke="{C['data']}" stroke-width="3.5" stroke-dasharray="8 5"/>''')
+g.line(cx81, 164, cxB + 6, 164, C['data'], first=3, sw=2.5)
+g.text((cxB + cx81) / 2, 144, 'B cutoff', 19, C['data'], 'bold', first=3)
+g.text(450, 288, 'Left of a line: approved.  Circle: would repay.  Cross: would default.', 19, C['neutral'])
+g.text(160, 322, 'At 75%: A errors 3, B errors 1 (12/16)', 20, C['memory'], 'bold', 'start', first=1, last=1)
+g.text(160, 322, 'At 81.25%: A errors 0, B errors 3 (tripled; 13/16)', 20, C['danger'], 'bold', 'start', first=2, last=2)
+g.text(160, 322, 'Split cutoffs: 93.75% (A: 0 err; B: 1 err, FPR 25%)', 20, C['data'], 'bold', 'start', first=3)
+g.write('threshold', 3)
 g = Svg(560, 470)
 g.rect(10, 10, 540, 105, C['data_l'], C['data'], first=1, sw=2.5)
 g.text(25, 34, 'Before training', 25, C['data'], 'bold', 'start', first=1)
@@ -399,18 +410,25 @@ g.text(280, y + 98, 'Legally restricted in US credit', 22, C['danger'], 'bold', 
 g.write('interventions', 3)
 xx = np.linspace(0, 0.18, 200)
 yy = np.array([0.85, 0.8517927802, 0.8535534199, 0.8552824951, 0.8569805718, 0.8586482057, 0.8602859426, 0.8618943185, 0.8634738597, 0.8650250833, 0.8665484968, 0.8680445988, 0.8695138791, 0.8709568183, 0.8723738889, 0.8737655544, 0.8751322705, 0.8764744844, 0.8777926353, 0.8790871546, 0.8803584661, 0.8816069858, 0.8828331222, 0.8840372767, 0.8852198434, 0.8863812092, 0.8875217543, 0.8886418519, 0.8897418687, 0.8908221646, 0.8918830931, 0.8929250015, 0.8939482308, 0.8949531158, 0.8959399855, 0.8969091628, 0.8978609648, 0.8987957031, 0.8997136836, 0.9006152068, 0.9015005676, 0.9023700558, 0.903223956, 0.9040625477, 0.9048861053, 0.9056948982, 0.9064891913, 0.9072692445, 0.9080353131, 0.9087876477, 0.9095264946, 0.9102520956, 0.9109646882, 0.9116645055, 0.9123517767, 0.9130267266, 0.9136895761, 0.9143405422, 0.9149798379, 0.9156076725, 0.9162242513, 0.9168297763, 0.9174244455, 0.9180084536, 0.9185819917, 0.9191452475, 0.9196984054, 0.9202416464, 0.9207751483, 0.9212990857, 0.92181363, 0.9223189497, 0.9228152101, 0.9233025736, 0.9237811998, 0.9242512453, 0.9247128638, 0.9251662066, 0.925611422, 0.9260486556, 0.9264780505, 0.9268997474, 0.9273138842, 0.9277205964, 0.9281200171, 0.9285122771, 0.9288975048, 0.9292758261, 0.929647365, 0.930012243, 0.9303705796, 0.930722492, 0.9310680953, 0.9314075027, 0.9317408254, 0.9320681722, 0.9323896505, 0.9327053654, 0.9330154202, 0.9333199163, 0.9336189536, 0.9339126298, 0.9342010409, 0.9344842816, 0.9347624443, 0.9350356202, 0.9353038986, 0.9355673674, 0.9358261128, 0.9360802195, 0.9363297705, 0.9365748477, 0.9368155312, 0.9370518997, 0.9372840307, 0.9375120001, 0.9377358825, 0.9379557512, 0.9381716781, 0.9383837339, 0.938591988, 0.9387965086, 0.9389973626, 0.9391946157, 0.9393883325, 0.9395785764, 0.9397654096, 0.9399488933, 0.9401290875, 0.9403060513, 0.9404798425, 0.940650518, 0.9408181337, 0.9409827444, 0.9411444039, 0.9413031653, 0.9414590804, 0.9416122004, 0.9417625752, 0.9419102541, 0.9420552855, 0.9421977167, 0.9423375945, 0.9424749646, 0.942609872, 0.9427423607, 0.9428724742, 0.9430002551, 0.9431257452, 0.9432489854, 0.9433700163, 0.9434888773, 0.9436056074, 0.9437202449, 0.9438328271, 0.9439433909, 0.9440519726, 0.9441586077, 0.944263331, 0.9443661769, 0.9444671789, 0.9445663703, 0.9446637833, 0.9447594499, 0.9448534015, 0.9449456687, 0.9450362817, 0.9451252703, 0.9452126635, 0.9452984899, 0.9453827776, 0.9454655543, 0.9455468469, 0.9456266822, 0.9457050862, 0.9457820845, 0.9458577025, 0.9459319648, 0.9460048957, 0.9460765192, 0.9461468585, 0.9462159369, 0.9462837768, 0.9463504005, 0.9464158298, 0.9464800861, 0.9465431905, 0.9466051635, 0.9466660254, 0.9467257963, 0.9467844955, 0.9468421425, 0.9468987559, 0.9469543544, 0.9470089561, 0.947062579, 0.9471152405, 0.9471669579, 0.9472177481, 0.9472676278])
-fig, ax = plt.subplots(figsize=(3.9, 3.0))
-ax.plot(xx, yy, color=C['neutral'], lw=2.5, ls='--')
-(xa, ya), (xb, yb), (xc, yc) = ((0.18, 0.9472676278), (0.05, 0.9132120559), (0.0, 0.85))
-for x, y, ck, lab, off, ha in ((xa, ya, 'danger', 'A: unconstrained', (-6, 10), 'left'), (xb, yb, 'data', 'B: 91% accuracy,\ndisparity 0.05', (-12, -36), 'right'), (xc, yc, 'memory', 'C: strict equality,\nlarge drop', (-28, -2), 'right')):
-    ax.plot([x], [y], 'o', ms=11, color=C[ck], zorder=5)
-    ax.annotate(lab, (x, y), xytext=off, textcoords='offset points', ha=ha, fontsize=11, fontweight='bold', color=C[ck])
-ax.set_xlim(0.2, -0.01)
-ax.set_ylim(0.83, 0.97)
-ax.set_xlabel('Disparity (lower is fairer)')
-ax.set_ylabel('Accuracy')
-ax.text(0.0, -0.3, 'Hypothetical (chapter figure 3)', transform=ax.transAxes, fontsize=9, color=C['neutral'])
-sp.save(fig, out / 'frontier.svg')
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(3.9, 3.0))
+    ax.plot(xx, yy, color=C['neutral'], lw=2.5, ls='--')
+    (xa, ya), (xb, yb), (xc, yc) = ((0.18, 0.9472676278), (0.05, 0.9132120559), (0.0, 0.85))
+    pts_f = [
+        (xa, ya, 'danger', 'A: unconstrained', (-6, 10), 'left', 1),
+        (xb, yb, 'data', 'B: 91% accuracy,\ndisparity 0.05', (-12, -36), 'right', 2),
+        (xc, yc, 'memory', 'C: strict equality,\nlarge drop', (-28, -2), 'right', 2),
+    ]
+    for x, y, ck, lab, off, ha, st in pts_f:
+        if k >= st:
+            ax.plot([x], [y], 'o', ms=11, color=C[ck], zorder=5)
+            ax.annotate(lab, (x, y), xytext=off, textcoords='offset points', ha=ha, fontsize=11, fontweight='bold', color=C[ck])
+    ax.set_xlim(0.2, -0.01)
+    ax.set_ylim(0.83, 0.97)
+    ax.set_xlabel('Disparity (lower is fairer)')
+    ax.set_ylabel('Accuracy')
+    ax.text(0.0, -0.3, 'Hypothetical (chapter figure 3)', transform=ax.transAxes, fontsize=10.5, color=C['neutral'])
+    sp.save(fig, out / f'frontier_step{k}.svg')
 fig, ax = plt.subplots(figsize=(4.6, 1.9))
 for i, (label, v, ck, txt) in enumerate((('One car, lifetime', 57.0, 'neutral', '57 t'), ('Search, estimated', 284.0, 'compute', '284 t'), ('Search, measured', 1, 'data', '???'))):
     y = 2 - i

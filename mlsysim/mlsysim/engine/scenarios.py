@@ -743,6 +743,11 @@ class Scenarios(Registry):
     CandidateSweep50 = _sustainability_sustainability.CandidateSweep50
     ReferenceItLoadAnnualWater = _sustainability_sustainability.ReferenceItLoadAnnualWater
     CarbonPricedRegionPlacement = _sustainability_sustainability.CarbonPricedRegionPlacement
+    EveningReleaseTimeShift = _sustainability_sustainability.EveningReleaseTimeShift
+    EveningReleaseNoSlack = _sustainability_sustainability.EveningReleaseNoSlack
+    EveningReleaseShortSlack = _sustainability_sustainability.EveningReleaseShortSlack
+    EveningReleaseCapacityLimited = _sustainability_sustainability.EveningReleaseCapacityLimited
+    EveningReleaseCostlyStandby = _sustainability_sustainability.EveningReleaseCostlyStandby
     KaplanTenPercentLowerLoss = _sustainability_sustainability.KaplanTenPercentLowerLoss
     Lab64A100TrainingFootprint = _sustainability_sustainability.Lab64A100TrainingFootprint
     TenMillionQueriesAgainstLab64Training = _sustainability_sustainability.TenMillionQueriesAgainstLab64Training
@@ -807,7 +812,7 @@ class Scenarios(Registry):
     Rank128Factorization4096 = _optimization_compression.Rank128Factorization4096
     ResNet50Conv256FusionH100 = _optimization_compression.ResNet50Conv256FusionH100
     WearableMobileNetV2SparseFlash = _optimization_compression.WearableMobileNetV2SparseFlash
-    PrunedInt8PaperVsMeasured = _optimization_compression.PrunedInt8PaperVsMeasured
+    PrunedInt8PaperVsRealized = _optimization_compression.PrunedInt8PaperVsRealized
     IrregularSparsityLatencyTrace = _optimization_compression.IrregularSparsityLatencyTrace
     BertBaseMobileCompression = _optimization_compression.BertBaseMobileCompression
     ModelFifthOfRequestLatency = _optimization_compression.ModelFifthOfRequestLatency

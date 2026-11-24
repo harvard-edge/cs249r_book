@@ -13,7 +13,7 @@ Every one of those kernels rests on the ideas you implemented in Module 17: bloc
 **`01_custom_kernels.py`** has two parts.
 
 1. **Part A, the pass gate: YOUR Module 17 kernels.** `tiled_matmul`, `fused_gelu`, `im2col`, `im2col_conv2d`, and `col2im` run on many shapes, including sizes that are not a multiple of the tile, stride 2, and padding. Each must match a NumPy reference within float32 tolerance.
-2. **Part B, context: bundled native kernels.** The same GEMM and bias + GELU run on the kernels that ship with TinyTorch in `tinytorch/extensions/` (C++ SIMD when a compiler is available; Apple Metal MPS or OpenAI Triton when the hardware is present). The script prints measured timings next to yours. These kernels are reference points, not your work, and they never decide the result.
+2. **Part B, context: bundled native kernels.** The same GEMM and bias + GELU run on the kernels that ship with TinyTorch in `tinytorch/extensions/` (C++ SIMD when a compiler is available; Apple Metal MPS, hand-written CUDA, or OpenAI Triton when the hardware is present). The script prints measured timings next to yours. These kernels are reference points, not your work, and they never decide the result.
 
 ## Required Modules
 
@@ -24,7 +24,7 @@ Every one of those kernels rests on the ideas you implemented in Module 17: bloc
 | **Module 09** | Convolutions | The `Conv2d` reference that im2col must reproduce |
 | **Module 14** | Profiling | Latency and memory measurement |
 | **Module 17** | Acceleration | YOUR tiled matmul, fused GELU, and im2col lowering |
-| Optional | C++ compiler, Apple GPU, or CUDA + Triton | Native reference points in Part B |
+| Optional | C++ compiler, Apple GPU, CUDA toolkit (nvcc), or CUDA + Triton | Native reference points in Part B |
 
 ## Running the Milestone
 

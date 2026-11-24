@@ -103,25 +103,35 @@ def admit(k):
     text, image = (6000.0, 2048.0)
     reserve, half = (1024.0, 512.0)
     window = 8192.0
-    rows = [('Text only', [(text, '6,000', C['memory']), (reserve, '1,024', C['neutral'])], '1,168 to spare', False), ('+ image', [(text, '', C['memory']), (image, '2,048', C['compute']), (reserve, '1,024', C['neutral'])], '880 over', True), ('+ image,\nhalf reserve', [(text, '', C['memory']), (image, '2,048', C['compute']), (half, '512', C['neutral'])], '368 over', True)]
+    rows = [
+        ('Text only', [(text, '6,000', C['memory']), (reserve, '1,024', C['neutral'])], '1,168 to spare', False),
+        ('+ image', [(text, '6,000', C['memory']), (image, '2,048', C['compute']), (reserve, '1,024', C['neutral'])], '880 over', True),
+        ('+ image,\nhalf reserve', [(text, '6,000', C['memory']), (image, '2,048', C['compute']), (half, '512', C['neutral'])], '368 over', True),
+    ]
+    ax.plot([window, window], [-0.48, 2.38], color=C['danger'], lw=2, ls='--', zorder=2)
     for i, (lab, segs, msg, over) in enumerate(rows):
         y = 2 - i
         vis = i < k
         x = 0
         for w, t, c in segs:
-            ax.barh(y, w, left=x, color=c, height=0.6, alpha=1 if vis else 0)
-            if t:
-                ax.text(x + w / 2, y, t, ha='center', va='center', fontsize=10.5, color='white', fontweight='bold', alpha=1 if vis else 0)
+            ax.barh(y, w, left=x, color=c, height=0.58, alpha=1 if vis else 0, zorder=3)
+            if t and vis:
+                if t == '1,024' and i == 1:
+                    ax.text(x + w + 160, y, '+1,024  (880 over)', ha='left', va='center', fontsize=10.5, color=C['danger'], fontweight='bold', zorder=5)
+                elif t == '512' and i == 2:
+                    ax.text(x + w + 160, y, '+512  (368 over)', ha='left', va='center', fontsize=10.5, color=C['danger'], fontweight='bold', zorder=5)
+                else:
+                    ax.text(x + w / 2, y, t, ha='center', va='center', fontsize=10.5, color='white', fontweight='bold', zorder=5)
             x += w
-        ax.text(-150, y, lab, ha='right', va='center', fontsize=12, fontweight='bold', color=C['text'], alpha=1)
-        ax.text(max(x, window) + 150, y, msg, va='center', fontsize=12, fontweight='bold', color=C['danger'] if over else C['data'], alpha=1 if vis else 0)
-    ax.axvline(window, color=C['danger'], lw=2, ls='--')
-    ax.text(window, 2.55, 'window 8,192', ha='center', fontsize=11, color=C['danger'], fontweight='bold')
-    ax.text(0, 2.55, 'prompt', fontsize=11, color=C['memory'], fontweight='bold')
-    ax.text(1500, 2.55, 'image', fontsize=11, color=C['compute'], fontweight='bold')
-    ax.text(2900, 2.55, 'output reserve', fontsize=11, color=C['neutral'], fontweight='bold')
-    ax.set_xlim(0, 11600)
-    ax.set_ylim(-0.5, 2.85)
+        ax.text(-150, y, lab, ha='right', va='center', fontsize=11.5, fontweight='bold', color=C['text'], alpha=1 if vis else 0)
+        if i == 0 and vis:
+            ax.text(window + 160, y, msg, va='center', fontsize=11.5, fontweight='bold', color=C['data'], zorder=5)
+    ax.text(window, 2.52, 'window 8,192', ha='center', va='bottom', fontsize=11, color=C['danger'], fontweight='bold', zorder=5)
+    ax.text(0, 2.52, 'prompt', va='bottom', fontsize=11, color=C['memory'], fontweight='bold')
+    ax.text(1500, 2.52, 'image', va='bottom', fontsize=11, color=C['compute'], fontweight='bold')
+    ax.text(2900, 2.52, 'output reserve', va='bottom', fontsize=11, color=C['neutral'], fontweight='bold')
+    ax.set_xlim(0, 12400)
+    ax.set_ylim(-0.5, 2.95)
     ax.set_yticks([])
     ax.spines['left'].set_visible(False)
     ax.set_xlabel('Tokens (scenario values, Ch. 2.3)')
@@ -189,18 +199,62 @@ ax.text(235, 95, 'COMPLETED\nrm -rf /tmp/scratch/cache_dir', ha='center', va='to
 ax.text(640, 95, 'TRUNCATED\nrm -rf /tmp/scratch', ha='center', va='top', fontsize=12, color=V['bad_t'], fontweight='bold', family='monospace', linespacing=1.4)
 ax.set_ylim(15, 360)
 save(fig, 'rmrf.svg')
-fig, ax = plt.subplots(figsize=(5.8, 1.9))
-cap, rej = (4096, 96)
-ax.barh(0, rej, color=C['danger'], height=0.5)
-ax.barh(0, cap - rej, left=rej, color=C['neutral_l'], height=0.5, hatch='//', edgecolor=C['neutral'])
-ax.text(rej + 60, 0.45, 'rejected at step 96', fontsize=11, color=C['danger'], fontweight='bold')
-ax.text(rej + (cap - rej) / 2 + 60, 0, '4,000 steps (84.3 s at 21.075 ms) skipped if the cancel is honored', ha='center', va='center', fontsize=10, color=C['text'], fontweight='bold', bbox=dict(fc='white', ec='none', pad=2))
-ax.set_xlim(0, cap)
-ax.set_ylim(-0.5, 0.8)
-ax.set_yticks([])
-ax.spines['left'].set_visible(False)
-ax.set_xlabel('Decode step (output allowance 4,096)')
-sp.save(fig, out / 'stream.svg')
+def cancel(k):
+    fig, ax = canvas(9.0, 4.3, phys=6.0)
+    ax.text(25, 405, 'Streamed output allowance: 4,096 tokens', ha='left', va='center', fontsize=13, color=V['ink'], fontweight='bold')
+    box(ax, 25, 330, 125, 52, V['bad_l'], V['bad'], 'tok 1..96', V['bad_t'], fs=12.5)
+    rem_txt = 'remaining 4,000 decode steps' if k == 1 else ('4,000 steps still pending on service' if k == 2 else '4,000 steps = 84.3 s at 21.075 ms floor')
+    box(ax, 150, 330, 725, 52, V['st_l'], V['st'], rem_txt, V['gray'], fs=12, bold=False, ls='--')
+    box(ax, 25, 218, 325, 78, V['bad_l'], V['bad'], '1. Stream validator\nspots invalid key at step 96', V['bad_t'], fs=11.5)
+    arrow(ax, 88, 330, 88, 296, V['bad'])
+    a2 = 1.0 if k >= 2 else 0.0
+    a3 = 1.0 if k >= 3 else 0.0
+    box(ax, 388, 218, 487, 78, V['rt_l'], V['rt'], '2. Local host guarantee (immediate)\nStatus = REJECTED; drop; send cancel', V['rt_t'], fs=11.5, alpha=a2)
+    arrow(ax, 350, 257, 388, 257, V['rt'], alpha=a2)
+    ax.text(450, 178, '3. Remote decode savings depend on whether the service honors cancel', ha='center', va='center', fontsize=12, color=V['ink'], fontweight='bold', alpha=a3)
+    arrow(ax, 228, 160, 228, 138, V['ctx'], alpha=a3)
+    arrow(ax, 672, 160, 672, 138, V['bad'], alpha=a3)
+    box(ax, 25, 22, 405, 114, V['ctx_l'], V['ctx'], 'Honored cancel\nStops decode at step 96\nSpares 4,000 steps (84.3 s)', V['ctx_t'], fs=12, alpha=a3)
+    box(ax, 470, 22, 405, 114, V['bad_l'], V['bad'], 'Unhonored cancel\nFinishes decode through 4,096\nStill occupies GPU and bills tail', V['bad_t'], fs=12, ls='--', alpha=a3)
+    ax.set_ylim(10, 430)
+    save(fig, f'cancel_step{k}.svg')
+for k in (1, 2, 3):
+    cancel(k)
+
+def first_token(k):
+    fig, ax = canvas(9.0, 4.3, phys=5.8)
+    ax.add_patch(mp.FancyBboxPatch((122, 232), 766, 118, boxstyle='round,pad=0,rounding_size=8', fc='#f0f9ff', ec='#bae6fd', lw=1.4))
+    ax.text(60, 291, 'Inference\nservice', ha='center', va='center', fontsize=12.5, color=V['model_t'], fontweight='bold')
+    ax.add_patch(mp.FancyBboxPatch((122, 84), 766, 106, boxstyle='round,pad=0,rounding_size=8', fc='#faf5ff', ec='#ddd6fe', lw=1.4))
+    ax.text(60, 137, 'Client /\nruntime', ha='center', va='center', fontsize=12.5, color=V['rt_t'], fontweight='bold')
+    box(ax, 134, 105, 104, 64, V['rt_l'], V['rt'], 'Send\nrequest', V['rt_t'], fs=11.5)
+    arrow(ax, 186, 169, 240, 256, V['gray'], lw=2.0)
+    ax.text(165, 212, 'transit', ha='center', va='center', fontsize=11.5, color=V['gray'], fontweight='bold')
+    box(ax, 206, 256, 84, 70, V['st_l'], V['st'], 'Queue', V['ink'], fs=11.5)
+    box(ax, 298, 256, 174, 70, V['model_l'], V['model'], 'Prompt prefill\n(tok 1 logits)', V['model_t'], fs=11.5)
+    ax.plot([298, 298, 472, 472], [366, 380, 380, 366], color=V['model'], lw=2.2)
+    ax.text(385, 402, 'Server prefill', ha='center', va='center', fontsize=12.5, color=V['model_t'], fontweight='bold')
+    a2 = 1.0 if k >= 2 else 0.0
+    a3 = 1.0 if k >= 3 else 0.0
+    box(ax, 480, 256, 98, 70, V['tool_l'], V['tool'], 'Sample\ntok 1', V['tool_t'], fs=11.5, alpha=a2)
+    arrow(ax, 529, 256, 576, 169, V['tool'], lw=2.0, alpha=a2)
+    ax.text(612, 212, 'deliver', ha='center', va='center', fontsize=11.5, color=V['tool_t'], fontweight='bold', alpha=a2)
+    box(ax, 528, 105, 114, 64, V['tool_l'], V['tool'], 'Receive\ntok 1', V['tool_t'], fs=11.5, alpha=a2)
+    ax.plot([134, 134, 642, 642], [70, 56, 56, 70], color=V['rt'], lw=2.2, alpha=a2)
+    ax.text(388, 30, 'Client TTFT (transit + queue + prefill + sample)', ha='center', va='center', fontsize=11.5, color=V['rt_t'], fontweight='bold', alpha=a2)
+    box(ax, 588, 256, 102, 70, V['model_l'], V['model'], 'Decode\ntok 2', V['model_t'], fs=11.5, alpha=a3)
+    ax.text(712, 291, '...', ha='center', va='center', fontsize=15, color=V['model_t'], fontweight='bold', alpha=a3)
+    box(ax, 734, 256, 140, 70, V['model_l'], V['model'], 'Decode\ntok K', V['model_t'], fs=11.5, alpha=a3)
+    ax.plot([588, 588, 874, 874], [366, 380, 380, 366], color=V['model'], lw=2.2, alpha=a3)
+    ax.text(731, 402, 'K - 1 decode passes', ha='center', va='center', fontsize=12.5, color=V['model_t'], fontweight='bold', alpha=a3)
+    arrow(ax, 639, 256, 742, 169, V['ctx'], lw=1.9, ls='--', alpha=a3)
+    arrow(ax, 804, 256, 782, 169, V['ctx'], lw=1.9, ls='--', alpha=a3)
+    box(ax, 672, 105, 204, 64, V['ctx_l'], V['ctx'], 'Buffered chunk\n(tok 2..K)', V['ctx_t'], fs=11.5, alpha=a3)
+    ax.text(774, 34, 'chunk arrival !=\nper-step timing', ha='center', va='center', fontsize=11.5, color=V['ctx_t'], fontweight='bold', alpha=a3)
+    ax.set_ylim(4, 426)
+    save(fig, f'first_token_step{k}.svg')
+for k in (1, 2, 3):
+    first_token(k)
 layers = [('Syntax and schema', 'parser, validator', 'fields and types', 'permission, values'), ('Authorization', 'grant check', 'target in the grant', 'serves the goal'), ('Static analysis', 'compiler, linter', 'analyzed properties', 'runtime behavior'), ('Behavioral tests', 'sandboxed run', 'exercised inputs', 'untested inputs')]
 
 def ladder(k):

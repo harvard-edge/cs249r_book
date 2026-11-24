@@ -205,21 +205,8 @@ function removeStopWords(text) {
     return input.replace(/\s+/g, ' ').replace(/\n+/g, '\n').trim();
   }
  
-  function extractInnerText(htmlString) {
-    // Create a new div element
-    const tempDiv = document.createElement('div');
-    
-    // Assign the HTML content to the div
-    tempDiv.innerHTML = htmlString;
-    
-    // Use the textContent property to get the text inside the div
-    return tempDiv.textContent || tempDiv.innerText || "";
-  }
-
   export function getTopics(text){
-    let cleaned = extractInnerText(text) // is this slow
-
-     cleaned = cleanText(text)
+    let cleaned = cleanText(text)
 
     cleaned = cleanSpacesText(cleaned)
 

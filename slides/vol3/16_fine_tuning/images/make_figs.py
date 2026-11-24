@@ -162,7 +162,7 @@ def swe_tokens():
     ax.set_ylim(0, 387195.5 * 1.25)
     ax.tick_params(axis='y', labelsize=13)
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v / 1000:.0f}k'))
-    ax.text(0.5, 387195.5 * 0.62, '102×', ha='center', fontsize=22, fontweight='bold', color=C['danger'])
+    ax.text(0.88, 387195.5 * 0.62, 'median ratio:\n102×', ha='center', va='center', fontsize=17, fontweight='bold', color=C['danger'])
     ax.set_title('500 SWE-agent runs, median 27 calls', fontsize=14)
     sp.save(fig, out / 'swe_tokens.svg')
 triangle()
@@ -247,7 +247,7 @@ def occupancy():
 occupancy()
 
 def blockmask(step):
-    s = Svg(640, 360)
+    s = Svg(640, 396)
     n, s1 = (8, 5)
     cell = 32
 
@@ -281,8 +281,11 @@ def blockmask(step):
     s.text(166, 351, '−∞', 22, INK, anchor='start')
     s.rect(240, 334, 20, 20, '#fca5a5')
     s.text(266, 351, 'cross-example', 22, INK, anchor='start')
+    if step >= 3:
+        s.rect(20, 362, 600, 30, '#dcfce7', '#16a34a', rx=6, sw=1.8)
+        s.text(320, 383, 'Row softmax isolates ex. 2: max |Δ| = 0', 21, '#15803d', bold=True)
     s.save(f'blockmask_step{step}.svg')
-for k in (1, 2):
+for k in (1, 2, 3):
     blockmask(k)
 
 def offcorpus():
@@ -410,19 +413,22 @@ def distill():
 distill()
 
 def loramem():
-    full, frozen, total = (128.0, 16.0, 16.13421773)
-    fig, ax = plt.subplots(figsize=(5.4, 3.6))
-    ax.bar(0, full, color=C['compute'], width=0.55)
-    ax.bar(1, frozen, color=C['neutral'], width=0.55)
-    ax.bar(1, 0.134217728, bottom=frozen, color=C['compute'], width=0.55)
-    ax.text(0, full + 3, '128 GB', ha='center', fontsize=15, fontweight='bold', color=C['compute'])
-    ax.text(1, total + 3, '16.13 GB', ha='center', fontsize=15, fontweight='bold', color=C['text'])
-    ax.text(1.35, frozen / 2, 'frozen base\n2 B/param', fontsize=13, color=C['neutral'], va='center', fontweight='bold')
-    ax.text(0.35, 95, '16 B per\ntrained param', fontsize=13, color=C['compute'], fontweight='bold')
+    full, frozen, adapter, total = (128.0, 16.0, 0.134217728, 16.13421773)
+    fig, ax = plt.subplots(figsize=(5.7, 3.8))
+    ax.bar(0, full, color=C['compute'], width=0.52)
+    ax.bar(1, frozen, color=C['neutral'], width=0.52)
+    ax.bar(1, adapter, bottom=frozen, color=C['compute'], width=0.52, edgecolor=C['compute'], lw=1.2)
+    ax.text(0, full + 3.5, '128 GB', ha='center', fontsize=15.5, fontweight='bold', color=C['compute'])
+    ax.text(1, total + 3.5, '16.13 GB\n(12.6%)', ha='center', va='bottom', fontsize=14.5, fontweight='bold', color=C['text'])
+    ax.text(0.32, 92, 'trainable state\n128 GB (16 B/param)', fontsize=13.5, color=C['compute'], fontweight='bold', va='center')
+    ax.annotate('trainable state:\n0.13 GB (16 B/param)', xy=(1.26, frozen + 0.5), xytext=(1.42, 56),
+                fontsize=13, color=C['compute'], fontweight='bold', va='center',
+                arrowprops=dict(arrowstyle='->', color=C['compute'], lw=1.6, connectionstyle='arc3,rad=-0.12'))
+    ax.text(1.34, frozen / 2 + 2.2, 'frozen base:\n16.0 GB (2 B/param)', fontsize=13, color=C['neutral'], va='center', fontweight='bold')
     ax.set_xticks([0, 1])
-    ax.set_xticklabels(['full\nfine-tuning', 'LoRA run\n(0.10% trained)'], fontsize=14)
-    ax.set_xlim(-0.5, 2.1)
-    ax.set_ylim(0, 145)
+    ax.set_xticklabels(['full\nfine-tuning', 'LoRA run\n(0.10% trained)'], fontsize=14, fontweight='bold')
+    ax.set_xlim(-0.48, 2.52)
+    ax.set_ylim(0, 146)
     ax.set_ylabel('Parameter state (GB)', fontsize=14)
     ax.tick_params(axis='y', labelsize=13)
     sp.save(fig, out / 'loramem.svg')

@@ -1,4 +1,5 @@
 import uFuzzy from '@leeoniya/ufuzzy';
+import { escapeSidebarText } from './utils/sidebar-text.js';
 
 export class SpacedRepetitionInnerSearchModal {
   constructor(modalHandler) {
@@ -111,7 +112,7 @@ export class SpacedRepetitionInnerSearchModal {
         const highlightedQuestion = uFuzzy.highlight(
           card.question,
           info.ranges[i],
-          (part, matched) => matched ? `<mark class="bg-yellow-100 dark:bg-yellow-900/30">${part}</mark>` : part
+          (part, matched) => matched ? `<mark class="bg-yellow-100 dark:bg-yellow-900/30">${escapeSidebarText(part)}</mark>` : escapeSidebarText(part)
         );
 
         return `
@@ -363,7 +364,7 @@ export class SpacedRepetitionInnerSearchModal {
     if (!flashcardList) return;
 
     // Get current theme for flashcard rendering
-    const hostElement = this.shadowRoot.host;
+    const hostElement = this.modalHandler.shadowRoot.host;
     const currentTheme = hostElement?.getAttribute('data-socratiq-theme') || 'light';
     const isDark = currentTheme === 'dark';
     
@@ -387,9 +388,9 @@ export class SpacedRepetitionInnerSearchModal {
                         color: ${isDark ? '#e6edf3' : '#1f2328'} !important;"
                  data-card-index="${index}">
               <div class="p-4 space-y-2">
-                <div id="question-${index}" class="min-h-[60px]"></div>
+                <div id="question-${index}" class="min-h-[60px]">${escapeSidebarText(card.question)}</div>
                 <hr class="editor-separator" />
-                <div id="answer-${index}" class="min-h-[60px]"></div>
+                <div id="answer-${index}" class="min-h-[60px]">${escapeSidebarText(card.answer)}</div>
                 
                 <!-- Review buttons -->
                 <div class="grid grid-cols-2 xs:flex gap-2 mt-4">
@@ -405,7 +406,7 @@ export class SpacedRepetitionInnerSearchModal {
                   <div class="flex flex-wrap gap-1 mt-3">
                     ${card.tags.map(tag => `
                       <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                        #${tag}
+                        #${escapeSidebarText(tag)}
                       </span>
                     `).join('')}
                   </div>
@@ -416,45 +417,6 @@ export class SpacedRepetitionInnerSearchModal {
         }).join('')}
       </div>
     `;
-
-    // Initialize ink-mde editors for the filtered cards
-    matchedCards.forEach((card, index) => {
-      const questionEditor = ink(
-        this.modalHandler.shadowRoot.querySelector(`#question-${index}`),
-        {
-          doc: card.question,
-          interface: {
-            toolbar: false,
-            attribution: false,
-            readonly: false,
-          },
-          hooks: {
-            afterUpdate: (doc) => {
-              card.question = doc;
-              this.modalHandler.storageHandler.saveToLocalStorage();
-            },
-          },
-        }
-      );
-
-      const answerEditor = ink(
-        this.modalHandler.shadowRoot.querySelector(`#answer-${index}`),
-        {
-          doc: card.answer,
-          interface: {
-            toolbar: false,
-            attribution: false,
-            readonly: false,
-          },
-          hooks: {
-            afterUpdate: (doc) => {
-              card.answer = doc;
-              this.modalHandler.storageHandler.saveToLocalStorage();
-            },
-          },
-        }
-      );
-    });
 
     // Reattach event listeners
     const cardElements = flashcardList.querySelectorAll("[data-card-index]");

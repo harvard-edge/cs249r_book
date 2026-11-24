@@ -21,7 +21,7 @@ Scenarios.* quantities. Where each figure's inputs live:
     targets: Scenarios.TeacherSoftTargetsT4.
   - Fusion: Scenarios.ResNet50Conv256FusionH100.
   - Waterfall, paper against realized, Amdahl: Scenarios.MobileNetV2Blur-
-    PipelinePhone, PrunedInt8PaperVsMeasured, ModelFifthOfRequestLatency.
+    PipelinePhone, PrunedInt8PaperVsRealized, ModelFifthOfRequestLatency.
   - Break-even axis: CSR and COO from physics.memory; the 80 to 90 percent
     band for unstructured kernels is the chapter's (Sec. 10.4.2), unsourced.
   - MLP share: physics.transformer.calc_transformer_block_weights.
@@ -99,8 +99,9 @@ def bars(path, rows, shown, log=False, xlim=None, xlabel=None, size=sp.SIZE, vli
 def svg(path, w, h, body):
     Path(path).write_text(f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" font-family="{FONT}">\n<rect width="{w}" height="{h}" fill="white"/>\n{body}</svg>\n')
 
+import html
 def text(x, y, s, size=22, color=C['text'], weight='normal', anchor='start'):
-    return f'<text x="{x}" y="{y}" font-size="{size}" fill="{color}" font-weight="{weight}" text-anchor="{anchor}">{s}</text>\n'
+    return f'<text x="{x}" y="{y}" font-size="{size}" fill="{color}" font-weight="{weight}" text-anchor="{anchor}">{html.escape(str(s), quote=False)}</text>\n'
 
 def box(x, y, w, h, fill, stroke, sw=2, rx=6, dash=None):
     d = f' stroke-dasharray="{dash}"' if dash else ''
@@ -363,29 +364,141 @@ for k in (1, 2):
     msg = 'Dense: 16 multiply-accumulates' if k == 1 else 'Sparse: 6 products + 6 column indices'
     body += text(20, 360, msg, 26, C['compute'] if k == 1 else C['memory'], 'bold')
     svg(out / f'spmv_step{k}.svg', 600, 380, body)
-fig, ax = plt.subplots(figsize=(5.8, 2.6))
-ax.axvspan(80, 90, color=C['danger_l'])
-ax.text(85, 1.85, 'unstructured kernel\ncan lose to dense\nuntil 80 to 90%', ha='center', va='center', fontsize=12, fontweight='bold', color=C['danger'])
-for x, lab, ck, y in ((50.0, 'CSR bytes: 50%', 'memory', 1.05), (66.7, 'COO bytes: 66.7%', 'memory', 0.5), (50, '2:4 pattern: exactly 50%,\nhardware path', 'data', -1.05)):
-    ax.plot([x], [0], 'o', ms=10, color=C[ck], zorder=5)
-    ax.plot([x, x], [0, y - 0.2 if y > 0 else y + 0.35], color=C[ck], lw=1.2)
-    ax.text(x, y, lab, ha='center', va='center', fontsize=12, fontweight='bold', color=C[ck])
-ax.axhline(0, color=C['text'], lw=1.5)
-ax.set_xlim(0, 100)
-ax.set_ylim(-1.6, 2.6)
-ax.set_yticks([])
-for side in ('left', 'bottom'):
-    ax.spines[side].set_visible(False)
-ax.set_xticks([0, 25, 50, 75, 100])
-ax.set_xticklabels(['0%', '25%', '50%', '75%', '100%'])
-ax.tick_params(axis='x', length=0, pad=-6)
-ax.set_xlabel('Share of weights that are zero')
-sp.save(fig, out / 'breakeven.svg')
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.6))
+    a2 = 1.0 if k >= 2 else 0.0
+    ax.axvspan(80, 90, color=C['danger_l'], alpha=a2)
+    ax.text(85, 1.85, 'unstructured kernel\ncan lose to dense\nuntil 80 to 90%', ha='center', va='center', fontsize=12, fontweight='bold', color=C['danger'], alpha=a2)
+    for x, lab, ck, y, req in ((50.0, 'CSR bytes: 50%', 'memory', 1.05, 1), (66.7, 'COO bytes: 66.7%', 'memory', 0.45, 1), (50.0, '2:4 pattern: exactly 50%,\nhardware path', 'data', -1.05, 2)):
+        a = 1.0 if k >= req else 0.0
+        ax.plot([x], [0], 'o', ms=10, color=C[ck], zorder=5, alpha=a)
+        ax.plot([x, x], [0, y - 0.2 if y > 0 else y + 0.35], color=C[ck], lw=1.2, alpha=a)
+        ax.text(x, y, lab, ha='center', va='center', fontsize=12, fontweight='bold', color=C[ck], alpha=a)
+    ax.axhline(0, color=C['text'], lw=1.5)
+    ax.set_xlim(0, 100)
+    ax.set_ylim(-1.6, 2.6)
+    ax.set_yticks([])
+    for side in ('left', 'bottom'):
+        ax.spines[side].set_visible(False)
+    ax.set_xticks([0, 25, 50, 75, 100])
+    ax.set_xticklabels(['0%', '25%', '50%', '75%', '100%'])
+    ax.tick_params(axis='x', length=0, pad=-6)
+    ax.set_xlabel('Share of weights that are zero')
+    sp.save(fig, out / f'breakeven_step{k}.svg')
+
+# 3-step Block-Sparse GEMM diagram matching vol1:fig-block-sparse-gemm (§10.2.1 / §10.4.2)
+# 3x3 grid of 3x3 dense tiles (all stored weights = 1), 6 nonzero tiles at (0,0),(0,1),(1,0),(1,2),(2,1),(2,2)
+# X0=[1,2,3] (sum 6), X1=[4,5,6] (sum 15), X2=[7,8,9] (sum 24) -> Y0=[21,21,21], Y1=[30,30,30], Y2=[39,39,39]
+BS_COORDS = [(0, 0), (0, 1), (1, 0), (1, 2), (2, 1), (2, 2)]
+for step in (1, 2, 3):
+    body = ''
+    # Left: 3x3 grid of 3x3 tiles (each tile 54x54 with 6px gap)
+    body += text(115, 28, 'W: 3×3 grid of 3×3 tiles', 21, C['text'], 'bold', 'middle')
+    gx0, gy0, ts, gap = 22, 46, 56, 7
+    for r in range(3):
+        for c in range(3):
+            x = gx0 + c * (ts + gap)
+            y = gy0 + r * (ts + gap)
+            nz = (r, c) in BS_COORDS
+            hl = (step == 2 and (r, c) == (1, 2))
+            if hl:
+                fc, ec, sw = C['compute_l'], C['compute'], 3.2
+            elif nz:
+                fc, ec, sw = C['memory_l'], C['memory'], 2.2
+            else:
+                fc, ec, sw = '#F7F7F7', '#BBBBBB', 1.5
+            body += box(x, y, ts, ts, fc, ec, sw, 4, None if nz else '5,3')
+            # Draw subtle 3x3 inner sub-grid lines on nonzero tiles
+            if nz:
+                for d in (1, 2):
+                    lx = x + d * ts / 3
+                    ly = y + d * ts / 3
+                    body += f'<line x1="{lx:.1f}" y1="{y}" x2="{lx:.1f}" y2="{y + ts}" stroke="{ec}" stroke-width="0.7" opacity="0.45"/>\n'
+                    body += f'<line x1="{x}" y1="{ly:.1f}" x2="{x + ts}" y2="{ly:.1f}" stroke="{ec}" stroke-width="0.7" opacity="0.45"/>\n'
+                body += text(x + ts / 2, y + ts / 2 + 7, f'({r},{c})', 19, ec, 'bold', 'middle')
+            else:
+                body += text(x + ts / 2, y + ts / 2 + 7, '0', 20, '#AAAAAA', 'normal', 'middle')
+    body += text(115, 256, '6 dense tiles; 3 empty', 20, C['neutral'], 'bold', 'middle')
+
+    # Arrow -> Packed tiles + coordinate index
+    body += arrow(222, 138, 258, 138, C['neutral'], 3)
+    body += text(364, 28, 'Packed tiles + 6 coords', 21, C['memory'], 'bold', 'middle')
+    px0, py0, pts = 268, 48, 48
+    for idx, (r, c) in enumerate(BS_COORDS):
+        col_i, row_i = idx % 2, idx // 2
+        tx = px0 + col_i * 58
+        ty = py0 + row_i * 60
+        hl = (step == 2 and (r, c) == (1, 2))
+        fc = C['compute_l'] if hl else C['memory_l']
+        ec = C['compute'] if hl else C['memory']
+        body += box(tx, ty, pts, pts, fc, ec, 3.0 if hl else 2.0, 4)
+        body += text(tx + pts / 2, ty + pts / 2 + 7, f'{r},{c}', 19, ec, 'bold', 'middle')
+        # Coordinate index badge column to the right
+        ix = 398
+        iy = 48 + idx * 30
+        body += box(ix, iy, 68, 25, C['compute_l'] if hl else '#FFF4E5', C['compute'] if hl else '#D9822B', 2.4 if hl else 1.4, 3)
+        body += text(ix + 34, iy + 18, f'({r},{c})', 18, C['compute'] if hl else C['text'], 'bold', 'middle')
+    body += text(364, 256, '1 coord per 9 weights', 20, C['memory'], 'bold', 'middle')
+
+    # Step 2+: Activation X slices and dense tile multiply -> Output Y blocks
+    if step >= 2:
+        body += text(536, 28, 'Input X', 21, C['text'], 'bold', 'middle')
+        x_slices = [('X0', '[1,2,3]', 0), ('X1', '[4,5,6]', 1), ('X2', '[7,8,9]', 2)]
+        for name, vals_s, ci in x_slices:
+            yy = 48 + ci * 64
+            hl = (step == 2 and ci == 2)
+            body += box(484, yy, 104, 54, C['compute_l'] if hl else '#F3F6FA', C['compute'] if hl else '#7A869A', 2.8 if hl else 1.8, 5)
+            body += text(536, yy + 22, name, 20, C['compute'] if hl else C['text'], 'bold', 'middle')
+            body += text(536, yy + 44, vals_s, 18, C['text'], 'normal', 'middle')
+
+        # Multiply connector
+        body += arrow(594, 138, 634, 138, C['compute'] if step == 2 else C['data'], 3)
+        body += text(614, 122, '×', 26, C['compute'] if step == 2 else C['data'], 'bold', 'middle')
+
+        # Output Y blocks
+        body += text(758, 28, 'Output Y (all-1 tiles)', 21, C['data'], 'bold', 'middle')
+        if step == 2:
+            y_rows = [
+                ('Y0', '6 + 15 = 21', False),
+                ('Y1', '6 + 24 = 30', True),
+                ('Y2', 'pending...', False),
+            ]
+        else:
+            y_rows = [
+                ('Y0', '[21, 21, 21]', False),
+                ('Y1', '[30, 30, 30]', False),
+                ('Y2', '[39, 39, 39]', False),
+            ]
+        for ri, (name, val_s, hl) in enumerate(y_rows):
+            yy = 48 + ri * 64
+            fc = C['compute_l'] if hl else (C['data_l'] if step == 3 or ri < 2 else '#F7F7F7')
+            ec = C['compute'] if hl else (C['data'] if step == 3 or ri < 2 else '#BBBBBB')
+            body += box(642, yy, 234, 54, fc, ec, 2.8 if hl else 2.0, 5)
+            body += text(678, yy + 34, name, 21, ec, 'bold', 'middle')
+            body += text(784, yy + 34, val_s, 20, C['text'], 'bold' if (hl or step == 3) else 'normal', 'middle')
+        if step == 2:
+            body += text(758, 256, 'W(1,2) × X2 adds +24 to Y1', 19, C['compute'], 'bold', 'middle')
+        else:
+            body += text(758, 256, '54 vs. 81 MACs (3 skipped)', 19, C['data'], 'bold', 'middle')
+
+    # Step 3: Green takeaway banner
+    if step >= 3:
+        body += box(22, 284, 854, 54, C['data_l'], C['data'], 2.2, 8)
+        body += text(449, 318, 'Dense 3×3 inner tiles amortize index cost and keep SIMD / tensor lanes busy.', 21, C['data'], 'bold', 'middle')
+
+    svg(out / f'blocksparse_step{step}.svg', 900, 354, body)
 mlp_rows = [dict(label='MLP block', value=8.0, color='compute', text='8d²: about two thirds'), dict(label='Q, K, V, O projections', value=4.0, color='memory', text='4d²: just under a third'), dict(label='LayerNorm', value=0.05, color='neutral', text='almost none')]
 bars(out / 'mlpshare.svg', mlp_rows, [1, 1, 1], xlim=(0, 14), size=(5.0, 1.9), xticks=[(0, '0'), (4.0, '4d²'), (8.0, '8d²')], xlabel='Multiply-accumulates per token, per layer')
 import datetime as dt
 from mlsysim.core.units import SEC_PER_DAY, SEC_PER_YEAR_LEAP
-_rows, _front, _bar = ([{'model': 'GPT-J-6B', 'date': '2021-08-05', 'parameters': 6000000000.0, 'mmlu': 0.251, 'shots': 5.0, 'source': 'XGen-7B Technical Report'}, {'model': 'GPT-J-6B', 'date': '2021-08-05', 'parameters': 6000000000.0, 'mmlu': 0.257, 'shots': 0.0, 'source': 'XGen-7B Technical Report'}, {'model': 'Gopher 280B', 'date': '2021-12-08', 'parameters': 280000000000.0, 'mmlu': 0.6, 'shots': 5.0, 'source': 'LLaMA: Open and Efficient Foundation Language Models'}, {'model': 'GPT-3 175B', 'date': '2022-01-27', 'parameters': 175000000000.0, 'mmlu': 0.439, 'shots': 5.0, 'source': 'LLaMA: Open and Efficient Foundation Language Models'}, {'model': 'Chinchilla 70B', 'date': '2022-03-29', 'parameters': 70000000000.0, 'mmlu': 0.675, 'shots': 5.0, 'source': 'LLaMA: Open and Efficient Foundation Language Models'}, {'model': 'PaLM 62B', 'date': '2022-04-04', 'parameters': 62000000000.0, 'mmlu': 0.537, 'shots': 5.0, 'source': 'LLaMA: Open and Efficient Foundation Language Models'}, {'model': 'PaLM 540B', 'date': '2022-04-04', 'parameters': 540000000000.0, 'mmlu': 0.693, 'shots': 5.0, 'source': 'LLaMA: Open and Efficient Foundation Language Models'}, {'model': 'OPT-13B', 'date': '2022-05-11', 'parameters': 13000000000.0, 'mmlu': 0.251, 'shots': 5.0, 'source': 'XGen-7B Technical Report'}, {'model': 'OPT-13B', 'date': '2022-05-11', 'parameters': 13000000000.0, 'mmlu': 0.244, 'shots': 0.0, 'source': 'XGen-7B Technical Report'}, {'model': 'LLAMA 1 7B', 'date': '2023-02-24', 'parameters': 7000000000.0, 'mmlu': 0.351, 'shots': 5.0, 'source': 'Llama 2: Open Foundation and Fine-Tuned Chat Models'}, {'model': 'LLAMA 1 13B', 'date': '2023-02-24', 'parameters': 13000000000.0, 'mmlu': 0.469, 'shots': 5.0, 'source': 'Llama 2: Open Foundation and Fine-Tuned Chat Models'}, {'model': 'LLAMA 1 33B', 'date': '2023-02-24', 'parameters': 33000000000.0, 'mmlu': 0.578, 'shots': 5.0, 'source': 'Llama 2: Open Foundation and Fine-Tuned Chat Models'}, {'model': 'LLaMA 1 33B    ', 'date': '2023-02-24', 'parameters': 33000000000.0, 'mmlu': 0.568, 'shots': 5.0, 'source': 'Mixtral of Experts'}, {'model': 'LLAMA 1 65B', 'date': '2023-02-24', 'parameters': 65000000000.0, 'mmlu': 0.634, 'shots': 5.0, 'source': 'Llama 2: Open Foundation and Fine-Tuned Chat Models'}, {'model': 'LLaMA 7B', 'date': '2023-02-24', 'parameters': 7000000000.0, 'mmlu': 0.356, 'shots': 5.0, 'source': 'Qwen Technical Report'}, {'model': 'LLaMA 7B', 'date': '2023-02-24', 'parameters': 7000000000.0, 'mmlu': 0.351, 'shots': 5.0, 'source': 'LLaMA: Open and Efficient Foundation Language Models'}, {'model': 'LLaMA 13B', 'date': '2023-02-24', 'parameters': 13000000000.0, 'mmlu': 0.477, 'shots': 5.0, 'source': 'Qwen Technical Report'}, {'model': 'LLaMA 13B', 'date': '2023-02-24', 'parameters': 13000000000.0, 'mmlu': 0.469, 'shots': 5.0, 'source': 'LLaMA: Open and Efficient Foundation Language Models'}, {'model': 'LLaMA 33B', 'date': '2023-02-24', 'parameters': 33000000000.0, 'mmlu': 0.587, 'shots': 5.0, 'source': 'Qwen Technical Report'}, {'model': 'LLaMA 33B', 'date': '2023-02-24', 'parameters': 33000000000.0, 'mmlu': 0.578, 'shots': 5.0, 'source': 'LLaMA: Open and Efficient Foundation Language Models'}, {'model': 'LLaMA 65B', 'date': '2023-02-24', 'parameters': 65000000000.0, 'mmlu': 0.634, 'shots': 5.0, 'source': 'LLaMA: Open and Efficient Foundation Language Models'}, {'model': 'LLaMA-7B', 'date': '2023-02-24', 'parameters': 7000000000.0, 'mmlu': 0.351, 'shots': 5.0, 'source': 'Baichuan 2: Open Large-scale Language Models'}, {'model': 'LLaMA-7B', 'date': '2023-02-24', 'parameters': 7000000000.0, 'mmlu': 0.351, 'shots': 5.0, 'source': 'XGen-7B Technical Report'}, {'model': 'LLaMA-7B', 'date': '2023-02-24', 'parameters': 7000000000.0, 'mmlu': 0.32, 'shots': 0.0, 'source': 'XGen-7B Technical Report'}, {'model': 'Llama-7B', 'date': '2023-02-24', 'parameters': 7000000000.0, 'mmlu': 0.352, 'shots': 2.0, 'source': 'Textbooks Are All You Need II: phi-1.5 technical report'}, {'model': 'LLaMA-13B', 'date': '2023-02-24', 'parameters': 13000000000.0, 'mmlu': 0.463, 'shots': 5.0, 'source': 'Baichuan 2: Open Large-scale Language Models'}, {'model': 'Falcon 40B', 'date': '2023-03-15', 'parameters': 40000000000.0, 'mmlu': 0.569, 'shots': 5.0, 'source': 'Falcon2-11B Technical ReportFalcon2-11B Technical Report'}, {'model': 'Falcon 40B', 'date': '2023-03-15', 'parameters': 40000000000.0, 'mmlu': 0.554, 'shots': 5.0, 'source': 'Llama 2: Open Foundation and Fine-Tuned Chat Models'}, {'model': 'Falcon 40B', 'date': '2023-03-15', 'parameters': 40000000000.0, 'mmlu': 0.554, 'shots': 5.0, 'source': 'Qwen Technical Report'}, {'model': 'Cerebras-GPT-13B', 'date': '2023-03-20', 'parameters': 13000000000.0, 'mmlu': 0.262, 'shots': 5.0, 'source': 'XGen-7B Technical Report'}, {'model': 'Cerebras-GPT-13B', 'date': '2023-03-20', 'parameters': 13000000000.0, 'mmlu': 0.246, 'shots': 0.0, 'source': 'XGen-7B Technical Report'}, {'model': 'Dolly-v2-12B', 'date': '2023-04-11', 'parameters': 12000000000.0, 'mmlu': 0.262, 'shots': 5.0, 'source': 'XGen-7B Technical Report'}, {'model': 'Dolly-v2-12B', 'date': '2023-04-11', 'parameters': 12000000000.0, 'mmlu': 0.254, 'shots': 0.0, 'source': 'XGen-7B Technical Report'}, {'model': 'Falcon 7B', 'date': '2023-04-24', 'parameters': 7000000000.0, 'mmlu': 0.35, 'shots': 5.0, 'source': 'Falcon2-11B Technical Report'}, {'model': 'Falcon 7B', 'date': '2023-04-24', 'parameters': 7000000000.0, 'mmlu': 0.262, 'shots': 5.0, 'source': 'Llama 2: Open Foundation and Fine-Tuned Chat Models'}, {'model': 'Falcon 7B', 'date': '2023-04-24', 'parameters': 7000000000.0, 'mmlu': 0.262, 'shots': 5.0, 'source': 'Qwen Technical Report'}, {'model': 'Falcon-7B', 'date': '2023-04-24', 'parameters': 7000000000.0, 'mmlu': 0.2603, 'shots': 5.0, 'source': 'Baichuan 2: Open Large-scale Language Models'}, {'model': 'Falcon-7B', 'date': '2023-04-24', 'parameters': 7000000000.0, 'mmlu': 0.269, 'shots': 2.0, 'source': 'Textbooks Are All You Need II: phi-1.5 technical report'}, {'model': 'Falcon-7B', 'date': '2023-04-24', 'parameters': 7000000000.0, 'mmlu': 0.269, 'shots': 5.0, 'source': 'XGen-7B Technical Report'}, {'model': 'Falcon-7B', 'date': '2023-04-24', 'parameters': 7000000000.0, 'mmlu': 0.239, 'shots': 0.0, 'source': 'XGen-7B Technical Report'}, {'model': 'Redpajama-7B', 'date': '2023-05-04', 'parameters': 7000000000.0, 'mmlu': 0.263, 'shots': 5.0, 'source': 'XGen-7B Technical Report'}, {'model': 'Redpajama-7B', 'date': '2023-05-04', 'parameters': 7000000000.0, 'mmlu': 0.258, 'shots': 0.0, 'source': 'XGen-7B Technical Report'}, {'model': 'MPT 7B', 'date': '2023-05-05', 'parameters': 7000000000.0, 'mmlu': 0.308, 'shots': 5.0, 'source': 'Qwen Technical Report'}, {'model': 'MPT 7B', 'date': '2023-05-05', 'parameters': 7000000000.0, 'mmlu': 0.268, 'shots': 5.0, 'source': 'Llama 2: Open Foundation and Fine-Tuned Chat Models'}, {'model': 'MPT-7B', 'date': '2023-05-05', 'parameters': 7000000000.0, 'mmlu': 0.2793, 'shots': 5.0, 'source': 'Baichuan 2: Open Large-scale Language Models'}, {'model': 'MPT-7B', 'date': '2023-05-05', 'parameters': 7000000000.0, 'mmlu': 0.268, 'shots': 2.0, 'source': 'Textbooks Are All You Need II: phi-1.5 technical report'}, {'model': 'MPT-7B', 'date': '2023-05-05', 'parameters': 7000000000.0, 'mmlu': 0.267, 'shots': 5.0, 'source': 'XGen-7B Technical Report'}, {'model': 'MPT-7B', 'date': '2023-05-05', 'parameters': 7000000000.0, 'mmlu': 0.274, 'shots': 0.0, 'source': 'XGen-7B Technical Report'}, {'model': 'Baichuan 1-7B', 'date': '2023-06-01', 'parameters': 7000000000.0, 'mmlu': 0.423, 'shots': 5.0, 'source': 'Baichuan 2: Open Large-scale Language Models'}, {'model': 'OpenLLaMA-7B', 'date': '2023-06-07', 'parameters': 7000000000.0, 'mmlu': 0.299, 'shots': 5.0, 'source': 'XGen-7B Technical Report'}, {'model': 'OpenLLaMA-7B', 'date': '2023-06-07', 'parameters': 7000000000.0, 'mmlu': 0.286, 'shots': 0.0, 'source': 'XGen-7B Technical Report'}, {'model': 'MPT 30B', 'date': '2023-06-22', 'parameters': 30000000000.0, 'mmlu': 0.479, 'shots': 5.0, 'source': 'Qwen Technical Report'}, {'model': 'MPT 30B', 'date': '2023-06-22', 'parameters': 30000000000.0, 'mmlu': 0.469, 'shots': 5.0, 'source': 'Llama 2: Open Foundation and Fine-Tuned Chat Models'}, {'model': 'ChatGLM2 6B', 'date': '2023-06-24', 'parameters': 6000000000.0, 'mmlu': 0.479, 'shots': 5.0, 'source': 'Qwen Technical Report'}, {'model': 'XGen-7B', 'date': '2023-06-27', 'parameters': 7000000000.0, 'mmlu': 0.363, 'shots': 5.0, 'source': 'XGen-7B Technical Report'}, {'model': 'XGen-7B', 'date': '2023-06-27', 'parameters': 7000000000.0, 'mmlu': 0.321, 'shots': 0.0, 'source': 'XGen-7B Technical Report'}, {'model': 'InternLM 7B', 'date': '2023-07-05', 'parameters': 7000000000.0, 'mmlu': 0.51, 'shots': 5.0, 'source': 'Qwen Technical Report'}, {'model': 'Baichuan 1-13B-Base', 'date': '2023-07-11', 'parameters': 13000000000.0, 'mmlu': 0.516, 'shots': 5.0, 'source': 'Baichuan 2: Open Large-scale Language Models'}, {'model': 'Llama 2 (7B)', 'date': '2023-07-18', 'parameters': 7000000000.0, 'mmlu': 0.458, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Llama 2 (13B)', 'date': '2023-07-18', 'parameters': 13000000000.0, 'mmlu': 0.554, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Llama 2 (70B)', 'date': '2023-07-18', 'parameters': 70000000000.0, 'mmlu': 0.695, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'LLAMA 2 7B', 'date': '2023-07-18', 'parameters': 7000000000.0, 'mmlu': 0.453, 'shots': 5.0, 'source': 'Llama 2: Open Foundation and Fine-Tuned Chat Models'}, {'model': 'LLaMA 2 7B     ', 'date': '2023-07-18', 'parameters': 7000000000.0, 'mmlu': 0.444, 'shots': 5.0, 'source': 'Mixtral of Experts'}, {'model': 'LLAMA 2 13B', 'date': '2023-07-18', 'parameters': 13000000000.0, 'mmlu': 0.548, 'shots': 5.0, 'source': 'Llama 2: Open Foundation and Fine-Tuned Chat Models'}, {'model': 'LLaMA 2 13B    ', 'date': '2023-07-18', 'parameters': 13000000000.0, 'mmlu': 0.556, 'shots': 5.0, 'source': 'Mixtral of Experts'}, {'model': 'LLAMA 2 34B', 'date': '2023-07-18', 'parameters': 34000000000.0, 'mmlu': 0.626, 'shots': 5.0, 'source': 'Llama 2: Open Foundation and Fine-Tuned Chat Models'}, {'model': 'LLaMA 2 34B', 'date': '2023-07-18', 'parameters': 34000000000.0, 'mmlu': 0.626, 'shots': 5.0, 'source': 'Qwen Technical Report'}, {'model': 'LLAMA 2 70B', 'date': '2023-07-18', 'parameters': 70000000000.0, 'mmlu': 0.689, 'shots': 5.0, 'source': 'Llama 2: Open Foundation and Fine-Tuned Chat Models'}, {'model': 'LLaMA 2 70B', 'date': '2023-07-18', 'parameters': 70000000000.0, 'mmlu': 0.698, 'shots': 5.0, 'source': 'Qwen Technical Report'}, {'model': 'LLaMA 2 70B    ', 'date': '2023-07-18', 'parameters': 70000000000.0, 'mmlu': 0.699, 'shots': 5.0, 'source': 'Mixtral of Experts'}, {'model': 'LLaMA 2-7B', 'date': '2023-07-18', 'parameters': 7000000000.0, 'mmlu': 0.4573, 'shots': 5.0, 'source': 'Baichuan 2: Open Large-scale Language Models'}, {'model': 'LLaMA 2-13B', 'date': '2023-07-18', 'parameters': 13000000000.0, 'mmlu': 0.5509, 'shots': 5.0, 'source': 'Baichuan 2: Open Large-scale Language Models'}, {'model': 'LLaMA-2 7B', 'date': '2023-07-18', 'parameters': 7000000000.0, 'mmlu': 0.453, 'shots': 5.0, 'source': 'Gemma: Open Models Based on Gemini Research and Technology'}, {'model': 'LLaMA-2 13B', 'date': '2023-07-18', 'parameters': 13000000000.0, 'mmlu': 0.548, 'shots': 5.0, 'source': 'Gemma: Open Models Based on Gemini Research and Technology'}, {'model': 'LLaMA-2 13B', 'date': '2023-07-18', 'parameters': 13000000000.0, 'mmlu': 0.548, 'shots': 5.0, 'source': 'Nemotron-4 15B Technical Report'}, {'model': 'LLaMA-2 34B', 'date': '2023-07-18', 'parameters': 34000000000.0, 'mmlu': 0.626, 'shots': 5.0, 'source': 'Nemotron-4 15B Technical Report'}, {'model': 'Llama2-7B', 'date': '2023-07-18', 'parameters': 7000000000.0, 'mmlu': 0.453, 'shots': 2.0, 'source': 'Textbooks Are All You Need II: phi-1.5 technical report'}, {'model': 'LLaMA2-Chat 13B', 'date': '2023-07-18', 'parameters': 13000000000.0, 'mmlu': 0.509, 'shots': 0.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'LLaMA2-Chat 13B', 'date': '2023-07-18', 'parameters': 13000000000.0, 'mmlu': 0.473, 'shots': 5.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'LLaMA2-Chat 70B', 'date': '2023-07-18', 'parameters': 70000000000.0, 'mmlu': 0.594, 'shots': 0.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'LLaMA2-Chat 70B', 'date': '2023-07-18', 'parameters': 70000000000.0, 'mmlu': 0.599, 'shots': 5.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'StableBeluga2 70B', 'date': '2023-07-20', 'parameters': 70000000000.0, 'mmlu': 0.686, 'shots': 5.0, 'source': 'Qwen Technical Report'}, {'model': 'Baichuan 2-13B-Base', 'date': '2023-09-06', 'parameters': 13000000000.0, 'mmlu': 0.5917, 'shots': 5.0, 'source': 'Baichuan 2: Open Large-scale Language Models'}, {'model': 'Baichuan-2 13B', 'date': '2023-09-06', 'parameters': 13000000000.0, 'mmlu': 0.592, 'shots': 5.0, 'source': 'Nemotron-4 15B Technical Report'}, {'model': 'Baichuan2-Chat 13B', 'date': '2023-09-06', 'parameters': 13000000000.0, 'mmlu': 0.551, 'shots': 0.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'Baichuan2-Chat 13B', 'date': '2023-09-06', 'parameters': 13000000000.0, 'mmlu': 0.501, 'shots': 5.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'Falcon-180B', 'date': '2023-09-06', 'parameters': 180000000000.0, 'mmlu': 0.706, 'shots': 5.0, 'source': 'The Falcon Series of Open Language Models'}, {'model': 'InternLM-Chat 20B', 'date': '2023-09-17', 'parameters': 20000000000.0, 'mmlu': 0.556, 'shots': 0.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'InternLM-Chat 20B', 'date': '2023-09-17', 'parameters': 20000000000.0, 'mmlu': 0.574, 'shots': 5.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'Baichuan 2-7B-Base', 'date': '2023-09-20', 'parameters': 7000000000.0, 'mmlu': 0.5416, 'shots': 5.0, 'source': 'Baichuan 2: Open Large-scale Language Models'}, {'model': 'Qwen-Chat 14B', 'date': '2023-09-24', 'parameters': 14000000000.0, 'mmlu': 0.64, 'shots': 0.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'Qwen-Chat 14B', 'date': '2023-09-24', 'parameters': 14000000000.0, 'mmlu': 0.65, 'shots': 5.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'Mistral 7B', 'date': '2023-09-27', 'parameters': 7000000000.0, 'mmlu': 0.625, 'shots': 5.0, 'source': 'Mixtral of Experts'}, {'model': 'Mistral 7B', 'date': '2023-09-27', 'parameters': 7000000000.0, 'mmlu': 0.601, 'shots': 5.0, 'source': 'Nemotron-4 15B Technical Report'}, {'model': 'Mistral 7b             ', 'date': '2023-09-27', 'parameters': 7000000000.0, 'mmlu': 0.617, 'shots': 5.0, 'source': 'Phi-3 Technical Report: A Highly Capable Language Model Locally on Your Phone'}, {'model': 'Mistral v0.1 (7B)', 'date': '2023-09-27', 'parameters': 7000000000.0, 'mmlu': 0.566, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Qwen 7B', 'date': '2023-09-28', 'parameters': 7000000000.0, 'mmlu': 0.45, 'shots': 5.0, 'source': 'Qwen Technical Report'}, {'model': 'QWEN 14B', 'date': '2023-09-28', 'parameters': 14000000000.0, 'mmlu': 0.663, 'shots': 5.0, 'source': 'Nemotron-4 15B Technical Report'}, {'model': 'Qwen 14B', 'date': '2023-09-28', 'parameters': 14000000000.0, 'mmlu': 0.534, 'shots': 5.0, 'source': 'Qwen Technical Report'}, {'model': 'DS-Coder-1.3B-Base', 'date': '2023-11-02', 'parameters': 1300000000.0, 'mmlu': 0.258, 'shots': None, 'source': 'Qwen2.5-Coder Technical Report'}, {'model': 'DS-Coder-6.7B-Base', 'date': '2023-11-02', 'parameters': 6700000000.0, 'mmlu': 0.364, 'shots': None, 'source': 'Qwen2.5-Coder Technical Report'}, {'model': 'DS-Coder-33B-Base', 'date': '2023-11-02', 'parameters': 33000000000.0, 'mmlu': 0.394, 'shots': None, 'source': 'Qwen2.5-Coder Technical Report'}, {'model': 'Yi (6B)', 'date': '2023-11-02', 'parameters': 6000000000.0, 'mmlu': 0.64, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Yi (34B)', 'date': '2023-11-02', 'parameters': 34000000000.0, 'mmlu': 0.762, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Yi 6B', 'date': '2023-11-02', 'parameters': 6000000000.0, 'mmlu': 0.632, 'shots': 5.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'Yi 34B', 'date': '2023-11-02', 'parameters': 34000000000.0, 'mmlu': 0.763, 'shots': 5.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'Yi-Chat 6B', 'date': '2023-11-22', 'parameters': 6000000000.0, 'mmlu': 0.582, 'shots': 0.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'Yi-Chat 6B', 'date': '2023-11-22', 'parameters': 6000000000.0, 'mmlu': 0.61, 'shots': 5.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'Yi-Chat 34B', 'date': '2023-11-22', 'parameters': 34000000000.0, 'mmlu': 0.676, 'shots': 0.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'Yi-Chat 34B', 'date': '2023-11-22', 'parameters': 34000000000.0, 'mmlu': 0.735, 'shots': 5.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'Qwen 1.8B', 'date': '2023-11-30', 'parameters': 1800000000.0, 'mmlu': 0.282, 'shots': 5.0, 'source': 'Qwen Technical Report'}, {'model': 'Mistral 7B', 'date': '2023-12-11', 'parameters': 7000000000.0, 'mmlu': 0.625, 'shots': 5.0, 'source': 'Gemma: Open Models Based on Gemini Research and Technology'}, {'model': 'Qwen1.5 (7B)', 'date': '2024-02-04', 'parameters': 7000000000.0, 'mmlu': 0.626, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Qwen1.5 (14B)', 'date': '2024-02-04', 'parameters': 14000000000.0, 'mmlu': 0.686, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Qwen1.5 (32B)', 'date': '2024-02-04', 'parameters': 32000000000.0, 'mmlu': 0.744, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'StarCoder2-7B', 'date': '2024-02-20', 'parameters': 7000000000.0, 'mmlu': 0.388, 'shots': None, 'source': 'Qwen2.5-Coder Technical Report'}, {'model': 'StarCoder2-15B', 'date': '2024-02-20', 'parameters': 15000000000.0, 'mmlu': 0.641, 'shots': None, 'source': 'Qwen2.5-Coder Technical Report'}, {'model': 'Gemma (7B)', 'date': '2024-02-21', 'parameters': 7000000000.0, 'mmlu': 0.661, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Gemma 2B', 'date': '2024-02-21', 'parameters': 2000000000.0, 'mmlu': 0.423, 'shots': 5.0, 'source': 'Gemma: Open Models Based on Gemini Research and Technology'}, {'model': 'Gemma 7B', 'date': '2024-02-21', 'parameters': 7000000000.0, 'mmlu': 0.643, 'shots': 5.0, 'source': 'Gemma: Open Models Based on Gemini Research and Technology'}, {'model': 'Gemma 7B', 'date': '2024-02-21', 'parameters': 7000000000.0, 'mmlu': 0.643, 'shots': 5.0, 'source': 'Nemotron-4 15B Technical Report'}, {'model': 'Gemma 7b               ', 'date': '2024-02-21', 'parameters': 7000000000.0, 'mmlu': 0.636, 'shots': 5.0, 'source': 'Phi-3 Technical Report: A Highly Capable Language Model Locally on Your Phone'}, {'model': 'StarCoder2-3B', 'date': '2024-02-22', 'parameters': 3000000000.0, 'mmlu': 0.366, 'shots': None, 'source': 'Qwen2.5-Coder Technical Report'}, {'model': 'Nemotron-4 15B', 'date': '2024-02-26', 'parameters': 15000000000.0, 'mmlu': 0.587, 'shots': 5.0, 'source': 'Nemotron-4 15B Technical Report'}, {'model': 'Yi-9B', 'date': '2024-03-01', 'parameters': 9000000000.0, 'mmlu': 0.684, 'shots': 5.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'CodeQwen1.5-7B', 'date': '2024-04-15', 'parameters': 7000000000.0, 'mmlu': 0.405, 'shots': None, 'source': 'Qwen2.5-Coder Technical Report'}, {'model': 'Llama 3 (8B)', 'date': '2024-04-18', 'parameters': 8000000000.0, 'mmlu': 0.688, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Llama 3 (70B)', 'date': '2024-04-18', 'parameters': 70000000000.0, 'mmlu': 0.793, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Llama-3-In 8b          ', 'date': '2024-04-18', 'parameters': 8000000000.0, 'mmlu': 0.665, 'shots': 5.0, 'source': 'Phi-3 Technical Report: A Highly Capable Language Model Locally on Your Phone'}, {'model': 'Phi-3 (14B)', 'date': '2024-04-23', 'parameters': 14000000000.0, 'mmlu': 0.775, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Phi-3 14b', 'date': '2024-04-23', 'parameters': 14000000000.0, 'mmlu': 0.779, 'shots': 5.0, 'source': 'Phi-4 Technical Report'}, {'model': 'Falcon2-11B', 'date': '2024-05-09', 'parameters': 11000000000.0, 'mmlu': 0.584, 'shots': 5.0, 'source': 'Falcon2-11B Technical Report'}, {'model': 'Mistral Instruct v0.3 (7B)', 'date': '2024-05-27', 'parameters': 7000000000.0, 'mmlu': 0.599, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Qwen2 Instruct (72B)', 'date': '2024-06-07', 'parameters': 72000000000.0, 'mmlu': 0.824, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Gemma 2 Instruct (9B)', 'date': '2024-06-24', 'parameters': 9000000000.0, 'mmlu': 0.721, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Gemma 2 Instruct (27B)', 'date': '2024-06-24', 'parameters': 27000000000.0, 'mmlu': 0.757, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Llama 3.1 Instruct Turbo (8B)', 'date': '2024-07-23', 'parameters': 8000000000.0, 'mmlu': 0.561, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Llama 3.1 Instruct Turbo (70B)', 'date': '2024-07-23', 'parameters': 70000000000.0, 'mmlu': 0.801, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Llama 3.1 Instruct Turbo (405B)', 'date': '2024-07-23', 'parameters': 405000000000.0, 'mmlu': 0.845, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'LLaMA-3.1 405B Base', 'date': '2024-07-23', 'parameters': 405000000000.0, 'mmlu': 0.844, 'shots': 5.0, 'source': 'DeepSeek-V3 Technical Report'}, {'model': 'Qwen2.5-Coder-0.5B', 'date': '2024-09-18', 'parameters': 500000000.0, 'mmlu': 0.42, 'shots': None, 'source': 'Qwen2.5-Coder Technical Report'}, {'model': 'Qwen2.5-Coder-1.5B', 'date': '2024-09-18', 'parameters': 1500000000.0, 'mmlu': 0.536, 'shots': None, 'source': 'Qwen2.5-Coder Technical Report'}, {'model': 'Qwen2.5-Coder-3B', 'date': '2024-09-18', 'parameters': 3000000000.0, 'mmlu': 0.612, 'shots': None, 'source': 'Qwen2.5-Coder Technical Report'}, {'model': 'Qwen2.5-Coder-7B', 'date': '2024-09-18', 'parameters': 7000000000.0, 'mmlu': 0.68, 'shots': None, 'source': 'Qwen2.5-Coder Technical Report'}, {'model': 'Qwen2.5-Coder-14B', 'date': '2024-09-18', 'parameters': 14000000000.0, 'mmlu': 0.752, 'shots': None, 'source': 'Qwen2.5-Coder Technical Report'}, {'model': 'Qwen2.5-Coder-32B', 'date': '2024-09-18', 'parameters': 32000000000.0, 'mmlu': 0.791, 'shots': None, 'source': 'Qwen2.5-Coder Technical Report'}, {'model': 'Qwen2.5 14b instruct', 'date': '2024-09-19', 'parameters': 14000000000.0, 'mmlu': 0.799, 'shots': 5.0, 'source': 'Phi-4 Technical Report'}, {'model': 'Qwen2.5 72B Base', 'date': '2024-09-19', 'parameters': 72000000000.0, 'mmlu': 0.85, 'shots': 5.0, 'source': 'DeepSeek-V3 Technical Report'}, {'model': 'Qwen2.5 72b instruct', 'date': '2024-09-19', 'parameters': 72000000000.0, 'mmlu': 0.853, 'shots': 5.0, 'source': 'Phi-4 Technical Report'}, {'model': 'Qwen2.5 Instruct Turbo (7B)', 'date': '2024-09-19', 'parameters': 7000000000.0, 'mmlu': 0.729, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Qwen2.5 Instruct Turbo (72B)', 'date': '2024-09-19', 'parameters': 72000000000.0, 'mmlu': 0.834, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Llama 3.2 Vision Instruct Turbo (11B)', 'date': '2024-09-24', 'parameters': 11000000000.0, 'mmlu': 0.565, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Llama 3.2 Vision Instruct Turbo (90B)', 'date': '2024-09-24', 'parameters': 90000000000.0, 'mmlu': 0.803, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Llama 3.3 Instruct Turbo (70B)', 'date': '2024-12-06', 'parameters': 70000000000.0, 'mmlu': 0.791, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Llama3.3 70b instruct', 'date': '2024-12-06', 'parameters': 70000000000.0, 'mmlu': 0.863, 'shots': 5.0, 'source': 'Phi-4 Technical Report'}, {'model': 'Phi-4 14b', 'date': '2024-12-12', 'parameters': 14000000000.0, 'mmlu': 0.848, 'shots': 5.0, 'source': 'Phi-4 Technical Report'}], [{'model': 'Gopher 280B', 'date': '2021-12-08', 'parameters': 280000000000.0, 'mmlu': 0.6, 'shots': 5.0, 'source': 'LLaMA: Open and Efficient Foundation Language Models'}, {'model': 'Chinchilla 70B', 'date': '2022-03-29', 'parameters': 70000000000.0, 'mmlu': 0.675, 'shots': 5.0, 'source': 'LLaMA: Open and Efficient Foundation Language Models'}, {'model': 'LLAMA 1 65B', 'date': '2023-02-24', 'parameters': 65000000000.0, 'mmlu': 0.634, 'shots': 5.0, 'source': 'Llama 2: Open Foundation and Fine-Tuned Chat Models'}, {'model': 'LLAMA 2 34B', 'date': '2023-07-18', 'parameters': 34000000000.0, 'mmlu': 0.626, 'shots': 5.0, 'source': 'Llama 2: Open Foundation and Fine-Tuned Chat Models'}, {'model': 'Qwen-Chat 14B', 'date': '2023-09-24', 'parameters': 14000000000.0, 'mmlu': 0.64, 'shots': 0.0, 'source': 'Yi: Open Foundation Models by 01.AI'}, {'model': 'Mistral 7B', 'date': '2023-09-27', 'parameters': 7000000000.0, 'mmlu': 0.625, 'shots': 5.0, 'source': 'Mixtral of Experts'}, {'model': 'Yi (6B)', 'date': '2023-11-02', 'parameters': 6000000000.0, 'mmlu': 0.64, 'shots': 5.0, 'source': 'Stanford CRFM Leaderboard'}, {'model': 'Qwen2.5-Coder-3B', 'date': '2024-09-18', 'parameters': 3000000000.0, 'mmlu': 0.612, 'shots': None, 'source': 'Qwen2.5-Coder Technical Report'}], 0.6)
+from mlsysim import load_series
+_bar = 0.60  # the chapter's fixed MMLU bar (SmallestCapableModel.threshold)
+_all = sorted(load_series('vol1/10_model_compression/data/mmlu_dense_models.csv').entries, key=lambda r: r['date'])
+_rows = [r for r in _all if r['date'] >= '2021-07-01']  # plotted window
+_front = []
+for _r in _all:  # running smallest model at or above the bar, as in the book cell
+    if _r['mmlu'] >= _bar and (not _front or _r['parameters'] < _front[-1]['parameters']):
+        _front.append(_r)
 
 def _yr(d):
     d = dt.date.fromisoformat(d)
@@ -394,14 +507,14 @@ fig, ax = plt.subplots(figsize=(4.0, 2.6))
 for hi, ck, sz in ((False, 'neutral_l', 16), (True, 'memory', 22)):
     pts = [r for r in _rows if (r['mmlu'] >= _bar) == hi]
     ax.scatter([_yr(r['date']) for r in pts], [r['parameters'] for r in pts], s=sz, color=C[ck], zorder=2 + hi)
-fx = [_yr(r['date']) for r in _front] + [2025.1]
+fx = [_yr(r['date']) for r in _front] + [2025.6]
 fy = [r['parameters'] for r in _front] + [_front[-1]['parameters']]
 ax.step(fx, fy, where='post', color=C['danger'], lw=2.2, zorder=4)
-labels = {'Gopher 280B': (8, 4, 'left'), 'Chinchilla 70B': (8, 6, 'left'), 'LLAMA 2 34B': (8, 8, 'left'), 'Mistral 7B': (8, 6, 'left'), 'Qwen2.5-Coder-3B': (-4, -16, 'right')}
+labels = {'Gopher 280B': (8, 4, 'left'), 'Chinchilla 70B': (8, 6, 'left'), 'LLAMA 2 34B': (8, 8, 'left'), 'Mistral 7B': (8, 6, 'left'), 'Qwen3-1.7B-Base': (-4, -16, 'right')}
 for _r in _front:
     if _r['model'] in labels:
         dx, dy, ha = labels[_r['model']]
-        ax.annotate(_r['model'].replace('LLAMA', 'Llama').replace('Qwen2.5-Coder-3B', 'Qwen2.5-Coder 3B'), (_yr(_r['date']), _r['parameters']), xytext=(dx, dy), textcoords='offset points', fontsize=11, fontweight='bold', color=C['danger'], ha=ha, zorder=5, bbox=dict(facecolor='white', alpha=0.85, edgecolor='none', pad=0.4))
+        ax.annotate(_r['model'].replace('LLAMA', 'Llama').replace('Qwen3-1.7B-Base', 'Qwen3 1.7B'), (_yr(_r['date']), _r['parameters']), xytext=(dx, dy), textcoords='offset points', fontsize=11, fontweight='bold', color=C['danger'], ha=ha, zorder=5, bbox=dict(facecolor='white', alpha=0.85, edgecolor='none', pad=0.4))
 ax.text(2021.55, 140000000.0, 'Blue: MMLU ≥ 60%.  Gray: below.', fontsize=11, color=C['memory'])
 ax.set_yscale('log')
 ax.set_ylim(100000000.0, 1000000000000.0)
@@ -409,7 +522,7 @@ ax.set_yticks([1000000000.0, 10000000000.0, 100000000000.0, 1000000000000.0])
 ax.set_yticklabels(['1B', '10B', '100B', '1T'])
 ax.minorticks_off()
 ax.set_xticks([2022, 2023, 2024, 2025])
-ax.set_xlim(2021.5, 2025.2)
+ax.set_xlim(2021.5, 2025.7)
 ax.set_ylabel('Parameters (log)')
 ax.grid(axis='y', color=C['grid'], linewidth=0.6)
 sp.save(fig, out / 'smallest_capable.svg')
@@ -484,25 +597,28 @@ ax.set_axisbelow(True)
 ax.set_xlabel('Relative to width 1.0, dense (median of 1,000 runs)')
 sp.save(fig, out / 'cpu_measure.svg')
 _cliff_color = {'Pruning + quantization': 'data', 'Pruning only': 'compute', 'Quantization only': 'memory', 'SVD': 'danger'}
+_cliff_step = {'SVD': 1, 'Quantization only': 1, 'Pruning only': 2, 'Pruning + quantization': 3}
 CLIFF = {name: (ck, [(r['size_pct'], r['accuracy_change']) for r in load_series('slides/vol1/10_model_compression/images/data/han2016_compression_methods.csv').entries if r['method'] == name]) for name, ck in _cliff_color.items()}
-fig, ax = plt.subplots(figsize=(5.8, 2.7))
 label_at = {'Pruning + quantization': (2.2, 0.3, 'left'), 'Pruning only': (10.0, 0.3, 'left'), 'Quantization only': (15.3, 0.3, 'left'), 'SVD': (17.2, -3.6, 'left')}
-for name, (ck, pts) in CLIFF.items():
-    xs, ys = zip(*pts)
-    ax.plot(xs, ys, color=C[ck], lw=2.6)
-    ax.plot(xs[1:], ys[1:], 'o', ms=5, color=C[ck], mfc='white', mew=1.8)
-    lx, ly, ha = label_at[name]
-    ax.text(lx, ly, name, color=C[ck], fontsize=12, fontweight='bold', ha=ha)
-ax.axhline(0, color=C['neutral'], lw=1)
-ax.set_xlim(2, 20)
-ax.set_ylim(-4.5, 0.9)
-ax.set_xticks([2, 5, 10, 15, 20])
-ax.set_xticklabels(['2%', '5%', '10%', '15%', '20%'])
-ax.set_yticks([-4, -3, -2, -1, 0])
-ax.set_yticklabels(['-4', '-3', '-2', '-1', '0'])
-ax.set_xlabel('Model size kept (% of original)')
-ax.set_ylabel('Accuracy change (points)')
-ax.grid(color=C['grid'], lw=0.6)
-ax.set_axisbelow(True)
-sp.save(fig, out / 'cliff_methods.svg')
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(5.8, 2.7))
+    for name, (ck, pts) in CLIFF.items():
+        a = 1.0 if k >= _cliff_step[name] else 0.0
+        xs, ys = zip(*pts)
+        ax.plot(xs, ys, color=C[ck], lw=2.6, alpha=a)
+        ax.plot(xs[1:], ys[1:], 'o', ms=5, color=C[ck], mfc='white', mew=1.8, alpha=a)
+        lx, ly, ha = label_at[name]
+        ax.text(lx, ly, name, color=C[ck], fontsize=12, fontweight='bold', ha=ha, alpha=a)
+    ax.axhline(0, color=C['neutral'], lw=1)
+    ax.set_xlim(2, 20)
+    ax.set_ylim(-4.5, 0.9)
+    ax.set_xticks([2, 5, 10, 15, 20])
+    ax.set_xticklabels(['2%', '5%', '10%', '15%', '20%'])
+    ax.set_yticks([-4, -3, -2, -1, 0])
+    ax.set_yticklabels(['-4', '-3', '-2', '-1', '0'])
+    ax.set_xlabel('Model size kept (% of original)')
+    ax.set_ylabel('Accuracy change (points)')
+    ax.grid(color=C['grid'], lw=0.6)
+    ax.set_axisbelow(True)
+    sp.save(fig, out / f'cliff_methods_step{k}.svg')
 print('figures written')

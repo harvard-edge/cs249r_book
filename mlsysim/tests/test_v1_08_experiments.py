@@ -392,7 +392,19 @@ def test_oom_recipe_has_no_measured_run_utilization():
 
 
 def test_stressed_bottleneck_capture_stales_after_control_changes():
-    from mlsysbook_labs.experiment_evidence import audit_evidence, capture_evidence
+    from pathlib import Path
+    import sys
+
+    pytest.importorskip("marimo", reason="marimo not installed (optional dependency)")
+    labs_root = Path(__file__).resolve().parents[2] / "labs"
+    if labs_root.exists() and str(labs_root) not in sys.path:
+        sys.path.insert(0, str(labs_root))
+    exp_ev = pytest.importorskip(
+        "mlsysbook_labs.experiment_evidence",
+        reason="mlsysbook_labs package not available outside full repo checkout",
+    )
+    audit_evidence = exp_ev.audit_evidence
+    capture_evidence = exp_ev.capture_evidence
     comparison = bottleneck_experiment("tinyml", intervention="checkpoint", input_stress=False)
     controls = {"input_stress": False, "intervention": "checkpoint", "rejected_alternative": None}
     capture = capture_evidence(track="tinyml", part="E", prediction="checkpoint", inputs=controls,

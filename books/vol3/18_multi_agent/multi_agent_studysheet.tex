@@ -1,0 +1,163 @@
+% Study sheet: Volume III, Chapter 18, Multi-Agent Coordination.
+% Numbers: \val{...} from multi_agent_studysheet_numbers.tex, written by multi_agent_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{multi_agent_studysheet_numbers}
+\sheetvolume{3}
+\sheetchapter{18}{Multi-Agent Coordination}
+\sheetsources{Numbers from the chapter's mlsysim scenarios (hypothetical partitions, repositories and reviewers); questions marked assumed use new inputs.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+Splitting a task across agents replaces nothing a capable single controller already has; it adds
+\hl{boundaries} between separately owned trajectories. Each must carry explicitly what one trajectory
+carried implicitly: another completion to await (\hl{horizon}), an
+interface version to revalidate (\hl{state}), a grant to bound (\hl{authority}). Delegation pays only by beating that \hl{single controller} on
+the same budget.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Delegation buys separation, not speed.}{One controller already runs tools concurrently; a
+  worker adds its own context, grant and lifecycle.}
+\idea{Three structures, kept apart.}{Dependencies: what finishes first. Topology: who messages whom.
+  Supervision: who owns and cancels.}
+\idea{Envelope in, receipt out.}{Fixed inputs, grant and budget; receipts split evidence from
+  claims. A full window of $\CreditWindowCapacity$ credits: mean residence $\CreditWindowCapacity/\ServiceRate$ at drain rate $\ServiceRate$.}
+\idea{A clean merge is not a valid change.}{Revalidate against the current head, check the exact
+  candidate, publish only if the head held.}
+\idea{Agreement is one correlated signal.}{Shared difficulty floors majority false approval; add an
+  independent, protected check.}
+\idea{Spawning is admission; canceling is not settling.}{Copied remainders multiply liability: reserve each
+  child's share atomically or deny it; grants only narrow.}
+\end{ideas}
+
+\vspace{8pt}
+\fcard{Does a token multiple pay?}%
+  {\frac{\CostPerAcceptedTask^{\text{multi}}}{\CostPerAcceptedTask^{\text{single}}}
+   = \DelegationTokenMultiple\,\frac{\SingleAgentAcceptanceProbability}{\MultiAgentAcceptanceProbability}}%
+  {Delegation uses $\DelegationTokenMultiple$ times the tokens per attempt. It lowers cost per accepted task
+   only if acceptance rises more than $\DelegationTokenMultiple$-fold, possible only when
+   $\SingleAgentAcceptanceProbability < 1/\DelegationTokenMultiple$.}%
+  {Otherwise it must buy time the objective values. Compare against a matched single controller.}{}
+\fcard{Slots or a shorter path?}%
+  {\ScheduleFinishTime \ge \max\!\left(\frac{\AggregateSlotWork}{\WorkerCount},\ \CriticalPathDuration\right)}%
+  {$\AggregateSlotWork$: total slot-work over $\WorkerCount$ worker slots; $\CriticalPathDuration$: longest
+   dependency chain. Once a schedule reaches $\CriticalPathDuration$, only shortening that chain helps.}%
+  {}{}
+\end{leftcol}%
+\begin{rightcol}
+\fcard{Screening a work partition}%
+  {\text{Speedup} = 1\Big/\Bigl[(1-\ParallelFraction) + \frac{\ParallelFraction}{\WorkerCount} + \CoordinationOverhead(\WorkerCount)\Bigr]}%
+  {Fraction $\ParallelFraction$ divides over $\WorkerCount$ workers; overhead
+   $\CoordinationOverhead(\WorkerCount) = \WorkerOverheadSlope(\WorkerCount-1)$ grows with each worker. Best
+   count near $\sqrt{\ParallelFraction/\WorkerOverheadSlope}$; no count beats $1/(1-\ParallelFraction)$.}%
+  {A screening model, not a measurement.}%
+  {\begin{tikzpicture}[sheet]
+     \pgfmathsetmacro\fp{\val{curvef}}
+     \pgfmathsetmacro\gm{\val{curveg}}
+     \pgfmathsetmacro\sy{13}
+     \foreach \yv in {0,1,2,3,4,5}{\draw[gridline] (24,{\yv*\sy}) -- (214,{\yv*\sy});
+       \node[small, anchor=east] at (21,{\yv*\sy}) {\yv$\times$};}
+     \foreach \nv in {1,4,8,12,16}{\node[small, anchor=north] at ({24+(\nv-1)*12.67},-3) {\nv};}
+     \draw[dim, dashed] (24,{\val{cap}*\sy}) -- (214,{\val{cap}*\sy});
+     \node[note, anchor=south east] at (214,{\val{cap}*\sy+1}) {ceiling \val{cap}$\times$};
+     \draw[accent, line width=1.1pt] plot[domain=1:16, samples=60, smooth]
+       ({24+(\x-1)*12.67},{\sy/((1-\fp)+\fp/\x+\gm*(\x-1))});
+     \filldraw[fill=accent, draw=accent] ({24+(\val{best}-1)*12.67},{\sy*\val{bestspeed}}) circle (2pt);
+     \node[lab, anchor=south] at ({24+(\val{best}-1)*12.67},{\sy*\val{bestspeed}+3}) {\val{best} workers: \val{bestspeed}$\times$};
+     \node[note, anchor=north] at (119,-12) {workers, at {\upshape$\ParallelFraction = \val{curvef}$, $\WorkerOverheadSlope = \val{curveg}$}};
+   \end{tikzpicture}}
+\fcard{Barrier or quorum}%
+  {\begin{gathered}\Pr(\text{all by } \TimeInstant) = \WorkerCompletionDistribution(\TimeInstant)^{\WorkerCount}\\[2pt]
+   \Pr(\ge \RequiredResultCount \text{ by } \TimeInstant) = \sum_{\FinishedWorkerCount=\RequiredResultCount}^{\WorkerCount}
+   \binom{\WorkerCount}{\FinishedWorkerCount}\WorkerCompletionDistribution^{\FinishedWorkerCount}(1-\WorkerCompletionDistribution)^{\WorkerCount-\FinishedWorkerCount}\end{gathered}}%
+  {Each worker finishes by $\TimeInstant$ with probability $\WorkerCompletionDistribution(\TimeInstant)$,
+   independently. Waiting for all decays geometrically in $\WorkerCount$.}%
+  {A quorum of $\RequiredResultCount$ needs interchangeable results; a required part has no stand-in.}{}
+\fcard{Shared writes collide early}%
+  {\Pr(\text{no shared write}) \approx \exp\!\left(-\frac{\WorkerCount(\WorkerCount-1)\WorkerWrittenFileCount^2}{2\RepositoryFileCount}\right)}%
+  {$\WorkerCount$ workers each write $\WorkerWrittenFileCount$ of $\RepositoryFileCount$ files at random.
+   Pairs drive the exponent; past \val{lntwo} a collision is likely: with \val{files} files and \val{writes} writes
+   each, at \val{evenodds} workers.}%
+  {}{}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{$\WorkerCount$ = \val{bestnew}: \val{serialnew} + \val{onseven} + \val{gseven} = \val{tnseven}, below
+  \val{tnsix} and \val{tneight}: \val{speednew}$\times$, cap \val{capnew}$\times$. Beats halving $\WorkerOverheadSlope$
+  (\val{speedhalf}$\times$ at \val{besthalf}) with fewer workers (screen card).}
+\ans{Fan-out}{(a) $\val{qpfrac}^{\val{qn}} \approx \val{qallfrac}$: \val{qall}\%. (b) Add exactly one late:
+  \val{qn} $\times$ \val{qninefrac} $\times$ \val{qlatefrac} $\approx$ \val{qonefrac}; total \val{qenough}\%.
+  (c) Interface and caller are both required; no count of caller patches stands in (barrier card).
+  (d) $\max(\val{mkwork}/\val{mkslots}, \val{mkpath})$ = \val{mkbound} min; $\val{mkwork}/\val{mkslotsfive} = \val{mkfive}$
+  still \val{mkbound}: only a shorter chain lowers it (slots card).}
+\ans{Writes}{(a) Exponent \val{wexpthree}: about \val{wthree}\% (collision card). (b) \val{weven} (exponent \val{wexpeven}
+  $>$ \val{lntwo}; at \val{wbelow}, \val{wexpbelow}). (c) Revalidate against the current head, check
+  the exact candidate, publish only if the head held (clean-merge idea).}
+\columnbreak
+\ans{Tokens}{(a) $\val{tr} \times \val{basehighfrac}$ = \val{needhigh}\%: impossible. (b) \val{needlow}\%. Break-even is
+  possible only at $\SingleAgentAcceptanceProbability \le$ \val{baseceiling}\%; a saving needs less. (c) The single controller's handicap;
+  rerun with matched tools, concurrency and budget (token card).}
+\ans{Tree}{(a) $\val{rkids} \times \val{reach}$ = \$\val{rcopied} $>$ \$\val{rrem}. (b) \val{radmit} admitted
+  (\$\val{rheld}); the next is denied, \$\val{rleft} left. Equal split: \$\val{requal}. (c) Deny: it exceeds the
+  parent's grant; narrow it to read (spawning idea).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{How many workers should the migration get?}
+A fixed partition has $\ParallelFraction = \val{fpar}$ and $\WorkerOverheadSlope = \val{gamma}$ per added worker;
+the ceiling is \val{maxn} workers. Which count minimizes elapsed time, as a share of the serial run?\par\vspace{2pt}
+\begin{steps}
+\item Near $\sqrt{\val{fpar}/\val{gamma}} \approx \val{sqrtbest}$, so compare the neighbors.
+\item $\WorkerCount = \val{best}$: \val{serial} + \val{osix} + \val{gsix} = \res{\val{tsix}}, a
+  \res{\val{bestspeed}$\times$} speedup.
+\item $\WorkerCount = \val{nextcount}$: \val{serial} + \val{oseven} + \val{gseven} = \val{tseven}: overhead now outgrows the saving.
+\item Cap: $1/\val{serial}$ = \res{\val{cap}$\times$}. Halving $\WorkerOverheadSlope$ to \val{ghalf}: only
+  \val{speedhalf}$\times$, at \val{besthalf} workers.
+\end{steps}
+\takeaway{The serial fraction sets the ceiling; the overhead sets the useful fleet size.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Make more of the same work parallel}
+\assumed{} planning and integration are split up so $\ParallelFraction = \val{fnew}$; $\WorkerOverheadSlope$ stays \val{gamma}.\par\vspace{4pt}
+\textbf{Given:} $\WorkerCount = 6$: \val{serialnew} + \val{onsix} + \val{gsix} = \val{tnsix}.\par
+\textbf{You:} find the best count near $\sqrt{\ParallelFraction/\WorkerOverheadSlope}$, its speedup and the new cap. Is halving $1-\ParallelFraction$ a bigger lever than halving $\WorkerOverheadSlope$?\par\vspace{30pt}
+\end{practicebox}
+
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``The two patches merged cleanly, so they work together.''}%
+  {Two workers writing \val{writes} of \val{files} files touch disjoint files about \val{disjointtwo}\% of the time:
+   a clean merge is normal and says nothing about the interface.}{}
+\mistake{``A majority of five reviewers approved, so the patch is correct.''}%
+  {On invalid patches with \val{revp}\% false approval each, an independent majority errs \val{indfive}\%. The
+   chapter's correlated model (correlation $\CorrelationCoefficient = \val{revrho}$) approaches a \val{revfloor}\% floor as
+   panels grow.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} \val{qn} read-only workers, each on time with probability \val{qpfrac}, independently.
+  (a) Chance all finish? (b) Any \val{qk} suffice: chance? (c) Why can (b) not serve a migration needing an interface and a caller patch?
+  (d) \val{mktasks} tasks of \val{mklen} min, longest chain \val{mkchain}, \val{mkslots} slots: finish bound? A fifth slot?
+\item \assumed{} \val{wfiles} files; each worker writes \val{wwrites}. (a) Chance some file is written by two of three
+  workers? (b) Smallest fleet where that is likely? (c) A caller patch passed on its snapshot; the
+  interface changed first. What gates publication?
+\item \assumed{} delegation uses \val{tr}$\times$ the tokens per attempt. (a) Single controller accepts
+  \val{basehigh}\%: what must delegation reach to break even? (b) At \val{baselow}\%? (c) Workers ran tools in parallel,
+  the single controller serially. What was measured?
+\item \assumed{} an orchestrator with \$\val{rrem} left proposes \val{rkids} children at \$\val{reach} each.
+  (a) Worst case if allowances are copied? (b) Under atomic
+  reservation, in order? Largest equal split? (c) One child asks to write files its parent may only read. Ruling?
+\end{qs}
+\end{rightcol}
+\end{document}

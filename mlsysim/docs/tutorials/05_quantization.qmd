@@ -1,6 +1,6 @@
 ---
 title: "Quantization: Not a Free Lunch"
-subtitle: "INT4 gives 3.4× speedup for memory-bound decode. For compute-bound weight-only quantization, it gives 1.0×."
+subtitle: "INT4 gives up to 4.0× speedup for memory-bound decode. For compute-bound weight-only quantization, it gives 1.0×."
 description: "Discover that quantization helps only when a workload is memory-bound (or when native low-precision Tensor Cores boost compute). Compare the effect of INT4 on LLM decode vs. large-batch training."
 categories: ["algorithm", "intermediate"]
 ---
@@ -52,9 +52,19 @@ _a100_int8_tflops = _train_hw.compute.precision_flops["int8"].to("TFLOPs/s").mag
 _a100_int8_ratio = _a100_int8_tflops / _a100_fp16_tflops
 
 _comp = CompressionModel()
-_c16 = _comp.solve(model=_model, hardware=_hw, method="quantization", target_bitwidth=16)
-_c8 = _comp.solve(model=_model, hardware=_hw, method="quantization", target_bitwidth=8)
-_c4 = _comp.solve(model=_model, hardware=_hw, method="quantization", target_bitwidth=4)
+_c16 = _comp.solve(model=_model, hardware=_hw, method="quantization", baseline_precision="fp16", target_bitwidth=16, accuracy_delta=0.0)
+_c8 = _comp.solve(model=_model, hardware=_hw, method="quantization", baseline_precision="fp16", target_bitwidth=8, accuracy_delta=-0.002)
+_c4 = _comp.solve(model=_model, hardware=_hw, method="quantization", baseline_precision="fp16", target_bitwidth=4, group_size=128, accuracy_delta=-0.015)
+
+import sys
+from pathlib import Path
+for _cand in [Path.cwd(), *Path.cwd().parents]:
+    for _rel in [Path("scripts"), Path("mlsysim/docs/scripts")]:
+        if ((_cand / _rel) / "curriculum_links.py").exists():
+            if str(_cand / _rel) not in sys.path:
+                sys.path.insert(0, str(_cand / _rel))
+            break
+import curriculum_links
 ```
 
 ## The Question
@@ -145,9 +155,7 @@ for prec in ["fp16", "int8", "int4"]:
 table(["Precision", "ITL", "Weights", "Speedup vs FP16"], rows)
 ```
 
-INT8 cuts weights from `{python} f"{_w_fp16:.2f} GB"` to `{python} f"{_w_int8:.2f} GB"` and lowers ITL from `{python} f"{_itl_fp16:.2f} ms"` to `{python} f"{_itl_int8:.2f} ms"`, a **`{python} f"{_sp_dec_int8:.1f}"`×** speedup. INT4 cuts weights to `{python} f"{_w_int4:.2f} GB"` and lowers ITL to `{python} f"{_itl_int4:.2f} ms"`, a **`{python} f"{_sp_dec_int4:.1f}"`×** speedup. The speedup tracks the byte
-reduction closely (falling slightly short of 2.0× and 4.0× only because per-layer kernel launch overhead does not shrink with weight precision). Every weight byte
-removed directly reduces HBM transfer time.
+INT8 cuts weights from `{python} f"{_w_fp16:.2f} GB"` to `{python} f"{_w_int8:.2f} GB"` and lowers ITL from `{python} f"{_itl_fp16:.2f} ms"` to `{python} f"{_itl_int8:.2f} ms"`, a **`{python} f"{_sp_dec_int8:.1f}"`×** speedup. INT4 cuts weights to `{python} f"{_w_int4:.2f} GB"` and lowers ITL to `{python} f"{_itl_int4:.2f} ms"`, a **`{python} f"{_sp_dec_int4:.1f}"`×** speedup. On the pure Roofline ceiling (zero kernel-launch tax and matching weight/KV precision), decode latency scales directly with bytes transferred from HBM; in production W4A16 serving—where the KV cache stays in FP16, group scales add overhead, and dequantization kernels add launch latency—realized speedups typically land around 3.0–3.8×.
 
 ---
 
@@ -231,35 +239,42 @@ check the regime before choosing an optimization.
 
 ---
 
-## 5. The Accuracy Tax: CompressionModel
+## 5. Scale Overhead and the Accuracy Tax: CompressionModel
 
-Quantization is not free; it trades accuracy for speed and memory capacity. The `CompressionModel` quantifies
-this trade-off relative to an FP32 baseline:
+Quantization is not free: group-wise scale factors slightly increase effective bitwidth ($b_{\text{eff}} = b_{\text{target}} + b_{\text{scale}} / g$), and lower bitwidths trade task accuracy for memory savings. Because accuracy degradation depends on architecture, calibration method (e.g., GPTQ or AWQ), and downstream metric, `CompressionModel` takes `accuracy_delta` as an explicit empirical input rather than guessing from a fixed curve:
 
 ```{python}
 from mlsysim.solvers import CompressionModel
 
 comp_solver = CompressionModel()
 
+configs = [
+    ("FP16 (baseline)", 16, None, 0.0),
+    ("INT8 per-channel", 8, None, -0.002),
+    ("INT4 (g=128)",     4, 128,  -0.015),
+]
+
 rows = []
-for bits in [16, 8, 4]:
+for label, bits, group_size, acc_delta in configs:
     c = comp_solver.solve(
         model=model, hardware=hardware,
-        method="quantization", target_bitwidth=bits
+        method="quantization", baseline_precision="fp16",
+        target_bitwidth=bits, group_size=group_size,
+        accuracy_delta=acc_delta,
     )
     rows.append([
-        bits,
+        label,
         c.compressed_size_gb,
-        f"{c.compression_ratio:.1f}x",
+        f"{c.compression_ratio:.2f}x",
         f"{c.estimated_accuracy_delta:+.1%}",
         f"{c.memory_savings_pct:.1f}%"
     ])
 
-table(["Bits", "Compressed", "Compression", "Accuracy", "Savings"], rows)
+table(["Format", "Compressed", "Compression", "Accuracy", "Savings"], rows)
 ```
 
-Relative to FP32, 8-bit quantization shrinks `{python} _model.name` to `{python} f"{_c8.compressed_size_gb.to('GB').magnitude:.2f} GB"` (`{python} f"{_c8.compression_ratio:.1f}"`× compression, `{python} f"{_c8.memory_savings_pct:.1f}%"` memory savings) with an estimated accuracy change of `{python} f"{_c8.estimated_accuracy_delta:+.1%}"`. Going to 4-bit shrinks weights to `{python} f"{_c4.compressed_size_gb.to('GB').magnitude:.2f} GB"` (`{python} f"{_c4.compression_ratio:.1f}"`× compression, `{python} f"{_c4.memory_savings_pct:.1f}%"` savings) with an estimated accuracy change of `{python} f"{_c4.estimated_accuracy_delta:+.1%}"`. The decision is not "always quantize" but "quantize when
-the workload is memory-bound AND the accuracy cost is acceptable for the application."
+Relative to FP16, 8-bit quantization shrinks `{python} _model.name` to `{python} f"{_c8.compressed_size_gb.to('GB').magnitude:.2f} GB"` (`{python} f"{_c8.compression_ratio:.2f}"`× compression, `{python} f"{_c8.memory_savings_pct:.1f}%"` memory savings) at a typical `{python} f"{_c8.estimated_accuracy_delta:+.1%}"` accuracy delta. Going to 4-bit with `group_size=128` (16-bit scale per 128 weights, $b_{\text{eff}} = 4.125$ bits/weight) shrinks weights to `{python} f"{_c4.compressed_size_gb.to('GB').magnitude:.2f} GB"` (`{python} f"{_c4.compression_ratio:.2f}"`× compression rather than an idealized 4.00×, `{python} f"{_c4.memory_savings_pct:.1f}%"` savings) at an illustrative `{python} f"{_c4.estimated_accuracy_delta:+.1%}"` delta. The engineering rule is not "always quantize" but "quantize when
+the workload is memory-bound AND measured accuracy loss stays within the application's error budget."
 
 ::: {.callout-warning}
 ## When NOT to Quantize
@@ -267,10 +282,78 @@ the workload is memory-bound AND the accuracy cost is acceptable for the applica
 - **Training**: Training is compute-bound at large batch sizes. Weight-only quantization does not help and
   low-precision gradients can harm convergence.
 - **High-accuracy applications**: Medical, financial, and safety-critical systems may not
-  tolerate even a `{python} f"{abs(_c8.estimated_accuracy_delta):.1%}"` to `{python} f"{abs(_c4.estimated_accuracy_delta):.1%}"` accuracy loss.
+  tolerate even a `{python} f"{abs(_c8.estimated_accuracy_delta):.1%}"` to `{python} f"{abs(_c4.estimated_accuracy_delta):.1%}"` accuracy loss without task-specific validation.
 - **Already compute-bound inference**: An inference workload that runs at large batch sizes
   (e.g., offline batch processing) is already compute-bound unless hardware supports faster low-precision arithmetic.
 :::
+
+### Using a Measured Accuracy Curve
+
+Passing a scalar `accuracy_delta` works for a single operating point, while sweeping bitwidths or pruning ratios benefits from a multi-point `AccuracyCurve`. A curve records the accuracy one experiment measured across several compression levels alongside the uncompressed baseline in the same evaluation harness, together with explicit `Provenance`.
+
+The package ships four published curves as examples of the format. Below, two curves for Qwen-7B-Chat from Table 2 of Jin et al. (2024) compare GPTQ against SpQR across bitwidths (note that the curves belong to Qwen-7B-Chat rather than `{python} _model.name`, so treat the table as a demonstration of how quantizer choice reshapes the cliff):
+
+```{python}
+from mlsysim.engine.accuracy_curve import shipped_curve
+
+gptq_curve = shipped_curve("qwen-7b-chat-gptq")
+spqr_curve = shipped_curve("qwen-7b-chat-spqr")
+
+rows = []
+for bits in [8, 4, 3, 2]:
+    gptq_res = comp_solver.solve(model=model, hardware=hardware, baseline_precision="fp16", target_bitwidth=bits, accuracy_curve=gptq_curve)
+    spqr_res = comp_solver.solve(model=model, hardware=hardware, baseline_precision="fp16", target_bitwidth=bits, accuracy_curve=spqr_curve)
+    rows.append([
+        bits,
+        f"{gptq_res.estimated_accuracy_delta:+.1%}",
+        f"{spqr_res.estimated_accuracy_delta:+.1%}",
+    ])
+
+table(["Bits", "Qwen-7B-Chat (GPTQ)", "Qwen-7B-Chat (SpQR)"], rows)
+```
+
+Only the accuracy column changes between the two curves; size, compression ratio, and Roofline speedup are computed from physical bitwidth and group-scale parameters as before. A curve returns exact values at measured points, interpolates linearly between adjacent measured points, and refuses to extrapolate outside its measured range because the accuracy cliff varies sharply across models and quantizers.
+
+To use your own results, build a curve from your measured points:
+
+```{python}
+from mlsysim.core.provenance import Provenance
+from mlsysim.engine.accuracy_curve import AccuracyCurve
+
+my_curve = AccuracyCurve(
+    name="my-model-rtn",
+    axis="bitwidth",                      # or "sparsity" for a pruning curve
+    measured_model="my model and checkpoint",
+    method="round-to-nearest, per-channel, weights only",
+    metric="top-1 accuracy",
+    dataset="my validation set (10,000 examples)",
+    retrained=False,
+    baseline_accuracy=0.761,              # the uncompressed model, same harness
+    points=[(16, 0.761), (8, 0.759), (6, 0.752), (4, 0.705)],
+    provenance=Provenance(
+        kind="derived",
+        ref="my quantization sweep",
+        verified="2026-11-16",
+        notes="Measured with my evaluation script on my validation set.",
+    ),
+)
+
+c = comp_solver.solve(model=model, hardware=hardware, target_bitwidth=6, accuracy_curve=my_curve)
+info("From my curve", accuracy_change_at_6_bits=f"{c.estimated_accuracy_delta:+.1%}")
+```
+
+A curve describes the model, method and data it was measured on. The solver cannot check that it matches the
+workload you pass, so keep one curve per model and method.
+
+---
+
+## Where This Clicks in the Textbook
+
+```{python}
+#| echo: false
+#| output: asis
+print(curriculum_links.render_tutorial_links("05_quantization"))
+```
 
 ---
 

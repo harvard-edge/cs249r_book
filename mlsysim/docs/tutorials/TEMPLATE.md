@@ -122,8 +122,12 @@ tutorials/
 ├── 08_nine_million_dollar.qmd   ← Cluster 5: Ops
 ├── 09_sensitivity.qmd           ← Cluster 6: Analysis
 ├── 10_gpu_vs_wafer.qmd          ← Cluster 6: Analysis
+├── 11_training_memory_capacity_moe.qmd ← Cluster 6: Analysis
+├── 12_design_space_exploration.qmd ← Cluster 6: Analysis
 ├── 12_full_stack_audit.qmd      ← Cluster 7: Capstone
-└── extending.qmd                ← Developer appendix (unnumbered)
+├── distributed.qmd              ← Cluster 4: Fleet (3D parallelism)
+├── 01_pipeline_callbacks.qmd    ← Developer extension guide
+└── 02_differential_explainer.qmd ← Developer / analysis guide
 ```
 
 ---

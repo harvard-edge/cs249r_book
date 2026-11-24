@@ -189,22 +189,26 @@ for k in (1, 2, 3, 4):
             p.append(text(cx, cy + 62, c1, 24, C['compute'], 'bold'))
             p.append(text(cx, cy + 92, c2, 24, C['compute'], 'bold'))
     save_svg(p, f'oploop_step{k}.svg')
-fig, ax = plt.subplots(figsize=(3.2, 2.1))
-vals = [61.0, 0.0, 9.0, 2.0, 24.0]
-cols = [C['neutral']] * 4 + [C['compute']]
-for i, v in enumerate(vals):
-    ax.bar(i, v, 0.62, color=cols[i])
-    ax.text(i, v + 1.5, f'{v}', ha='center', va='bottom', fontsize=12, fontweight='bold', color=cols[i])
-ax.set_xticks(range(5))
-ax.set_xticklabels(['0\nnot ML', '1', '2', '3', '4\nall ML'], fontsize=11)
-ax.set_ylim(0, 72)
-ax.set_yticks([0, 20, 40, 60])
-ax.tick_params(axis='y', labelsize=11)
-ax.set_ylabel(f'Outages (of {sum(vals)})', fontsize=11)
-ax.set_xlabel('How ML-specific the cause was', fontsize=11)
-ax.grid(axis='y', color=C['grid'], linewidth=0.6)
-ax.set_axisbelow(True)
-sp.save(fig, out / 'outages.svg')
+vals = [61, 0, 9, 2, 24]
+cols = [C['memory'], C['neutral'], C['neutral'], C['neutral'], C['compute']]
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(3.6, 2.4))
+    for i, v in enumerate(vals):
+        if k == 1 and i > 0:
+            continue
+        ax.bar(i, v, 0.62, color=cols[i])
+        ax.text(i, v + 1.5, f'{v}', ha='center', va='bottom', fontsize=12, fontweight='bold', color=cols[i])
+    ax.set_xlim(-0.55, 4.55)
+    ax.set_xticks(range(5))
+    ax.set_xticklabels(['0\nnot ML', '1', '2', '3', '4\nall ML'], fontsize=11)
+    ax.set_ylim(0, 72)
+    ax.set_yticks([0, 20, 40, 60])
+    ax.tick_params(axis='y', labelsize=11)
+    ax.set_ylabel('Outages (of 96)', fontsize=11)
+    ax.set_xlabel('How ML-specific the cause was', fontsize=11)
+    ax.grid(axis='y', color=C['grid'], linewidth=0.6)
+    ax.set_axisbelow(True)
+    sp.save(fig, out / f'outages_step{k}.svg')
 
 def chain(p, y, boxes, color, fill):
     xs = [12 + i * 225 for i in range(len(boxes))]
@@ -327,28 +331,37 @@ DAY = 24
 N = 8
 
 def nodeday(k):
-    fig, ax = plt.subplots(figsize=(3.9, 2.4))
+    fig, ax = plt.subplots(figsize=(4.1, 2.55))
     P, R, T = (2, 4, 6.0)
-    blocks = [(0, P, 0, DAY, 'memory_l', 'memory', 'Serving copy: 100 GB of tables', 1), (P, P, 0, DAY, 'data_l', 'data', 'Hot standby: previous version', 2), (2 * P, R, 0, T, 'compute_l', 'compute', 'Retrain\n4 × 6 h\n= 24\nGPU-h', 3), (2 * P, P, T, DAY - T, 'network_l', 'network', 'Canary: new candidate', 3)]
+    blocks = [
+        (0, P, 0, DAY, 'memory_l', 'memory', 'Serving copy: 100 GB of tables', 1),
+        (P, P, 0, DAY, 'data_l', 'data', 'Hot standby: previous version', 1),
+        (2 * P, R, 0, T, 'compute_l', 'compute', 'Retrain\n4 × 6 h\n= 24\nGPU-h', 2),
+        (2 * P, P, T, DAY - T, 'network_l', 'network', 'Canary: new candidate', 4),
+    ]
     for y0, h, x0, w, f, e, lab, st in blocks:
-        a = 1.0 if k >= st else 0.0
-        ax.add_patch(plt.Rectangle((x0, N - y0 - h), w, h, facecolor=C[f], edgecolor=C[e], lw=2, alpha=a))
-        ax.text(x0 + w / 2, N - y0 - h / 2, lab, ha='center', va='center', fontsize=11, color=C['text'], alpha=a)
-    a = 1.0 if k >= 3 else 0.0
-    free = 2
-    ax.add_patch(plt.Rectangle((T, 0.02), DAY - T, free - 0.04, facecolor='white', edgecolor=C['neutral'], lw=1.5, ls='--', alpha=a))
-    ax.text((T + DAY) / 2, free / 2, 'Free: one more copy', ha='center', va='center', fontsize=11, color=C['neutral'], alpha=a)
+        if k < st:
+            continue
+        ax.add_patch(plt.Rectangle((x0, N - y0 - h), w, h, facecolor=C[f], edgecolor=C[e], lw=2))
+        tx = (T + DAY) / 2 if st == 1 else x0 + w / 2
+        ax.text(tx, N - y0 - h / 2, lab, ha='center', va='center', fontsize=10.5, color=C['text'], fontweight='bold' if st in (1, 4) else 'normal', zorder=5)
+    if k >= 3:
+        ax.plot([T, T], [0, N], color=C['danger'], lw=1.8, ls='--')
+        ax.text(0.3, 8.2, '0–6 h: 8/8 busy (canary waits)', ha='left', va='bottom', fontsize=10, color=C['danger'], fontweight='bold')
+    if k >= 4:
+        free = 2
+        ax.add_patch(plt.Rectangle((T, 0.04), DAY - T, free - 0.08, facecolor='white', edgecolor=C['neutral'], lw=1.5, ls='--'))
+        ax.text((T + DAY) / 2, free / 2, 'Free: 2 GPUs (1 copy)', ha='center', va='center', fontsize=10.5, color=C['neutral'], fontweight='bold')
     ax.set_xlim(0, DAY)
-    ax.set_ylim(0, N)
+    ax.set_ylim(0, N + 0.85)
     ax.set_yticks([N - 0.5 - i for i in range(N)])
     ax.set_yticklabels([f'GPU {i}' for i in range(N)], fontsize=10)
     ax.set_xticks(np.arange(0, DAY + 1, T))
-    ax.tick_params(axis='x', labelsize=11)
-    ax.set_xlabel('Hours from the start of retraining', fontsize=11)
+    ax.tick_params(axis='x', labelsize=10.5)
+    ax.set_xlabel('Hours from the start of retraining', fontsize=10.5)
     sp.save(fig, out / f'nodeday_step{k}.svg')
-nodeday(1)
-nodeday(2)
-nodeday(3)
+for k in (1, 2, 3, 4):
+    nodeday(k)
 for k in (1, 2, 3):
     p = svg_open(900, 440)
     p.append(rect(10, 150, 170, 90, '#F4F4F4', '#777777', 2.5, 8))
@@ -384,7 +397,7 @@ for k in (1, 2, 3):
                 p.append(text(xs[i] + 60, 416, s_, 24, C['network'], 'bold'))
                 if i < 3:
                     p.append(line(xs[i] + 124, 407, xs[i + 1] - 6, 407, '#555555', 3))
-                    p.append(text(xs[i] + 160, 396, 'gate', 20, C['neutral']))
+                    p.append(text(xs[i] + 160, 396, 'check', 20, C['neutral']))
     save_svg(p, f'release_step{k}.svg')
 print('release written')
 for k in (1, 2, 3):
@@ -406,11 +419,11 @@ for k in (1, 2, 3):
         p.append(text(280, 150, "v1 reads vectors from v2's space", 25, C['danger'], 'bold'))
         p.append(text(280, 182, '(v2 changed the embedding size)', 23, C['neutral']))
     if k == 3:
-        p.append(text(280, 150, 'restored together: v1 agrees again', 25, C['data'], 'bold'))
-        p.append(rect(4, 204, 552, 210, '#F7F7F7', C['data'], 2.5, 10))
-        p.append(text(280, 244, 'A tested rollback restores together:', 25, C['data'], 'bold'))
-        for j, s_ in enumerate(('the weights, from the registry', 'the feature transform version', 'the cache (invalidate or swap)')):
-            p.append(text(36, 290 + j * 40, '• ' + s_, 24, C['text'], anchor='start'))
+        p.append(text(280, 146, 'restored together: v1 agrees again', 24, C['data'], 'bold'))
+        p.append(rect(4, 178, 552, 236, '#F7F7F7', C['data'], 2.5, 10))
+        p.append(text(280, 214, 'A tested rollback restores the bundle:', 24, C['data'], 'bold'))
+        for j, s_ in enumerate(('weights (v1), from the registry', 'feature transform + cache namespace', 'drain in-flight v2 before releasing it', 'quarantine degraded-window logs')):
+            p.append(text(28, 256 + j * 40, '• ' + s_, 22, C['text'], anchor='start'))
     save_svg(p, f'rollback_step{k}.svg')
 inputs = [('Code', 'Git commit'), ('Data', 'DVC hash'), ('Config', 'config file'), ('Environment', 'container image')]
 for k in (1, 2):
@@ -471,17 +484,17 @@ rows = (('Needed', 745643.5748, 'danger', '745,644'), ('Have', 25000.0, 'data', 
 for i, (lab, v, ck, s_) in enumerate(rows):
     y = 1 - i
     ax.barh(y, v, color=C[ck], height=0.6)
-    ax.text(v * 1.3, y, s_, va='center', fontsize=11, color=C[ck], fontweight='bold')
-    ax.text(700, y, lab + ' ', ha='right', va='center', fontsize=11, color=C['text'], fontweight='bold')
+    ax.text(v * 1.3, y, s_, va='center', fontsize=14, color=C[ck], fontweight='bold')
+    ax.text(700, y, lab + ' ', ha='right', va='center', fontsize=14, color=C['text'], fontweight='bold')
 ax.set_xscale('log')
 ax.minorticks_off()
 ax.set_xlim(1000, 10000000.0)
 ax.set_xticks([1000.0, 10000.0, 100000.0, 1000000.0])
-ax.set_xticklabels(['1K', '10K', '100K', '1M'], fontsize=10)
+ax.set_xticklabels(['1K', '10K', '100K', '1M'], fontsize=13.5)
 ax.set_yticks([])
 ax.set_ylim(-0.6, 1.6)
 ax.spines['left'].set_visible(False)
-ax.set_xlabel('Users per variant (log)', fontsize=10)
+ax.set_xlabel('Users per variant (log)', fontsize=14)
 ax.grid(axis='x', color=C['grid'], linewidth=0.6)
 ax.set_axisbelow(True)
 sp.save(fig, out / 'ab_users.svg')

@@ -18,16 +18,17 @@ export const htmlContent = `
       style="width: 100%; max-width: 400px; pointer-events: auto;">
       <!-- Actual slide-out menu with defined max-width -->
       <div class="p-4 bg-gray-100 dark:bg-zinc-700 shadow-lg rounded-lg h-full flex flex-col overflow-auto"
-        style="max-width: 400px; box-shadow: 4px 0 15px rgba(0,0,0,0.25);">
+        style="max-width: 400px; background-color: var(--socratiq-hover, #fcf8f9); border-left: 1px solid var(--socratiq-border, #d8c5cb); box-shadow: 0 22px 64px rgba(31,14,22,0.22);">
 
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg text-zinc-800 dark:text-white">
             SocratiQ
           </h2>
-          <div class="flex space-x-2">
+          <div class="flex items-center space-x-2">
 
-            <span id="new-chat-btn" 
-              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400">
+            <span id="new-chat-btn" role="button" tabindex="0" aria-label="New conversation"
+              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400 min-w-[36px] min-h-[36px] inline-flex items-center justify-center cursor-pointer"
+              style="min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-6 h-6" style="width: 1.5rem; height: 1.5rem;">
                 <path stroke-linecap="round" stroke-linejoin="round"
@@ -47,9 +48,10 @@ export const htmlContent = `
 
           </span> -->
 
-  <span id="knowledge-graph-btn" 
-              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"class="w-6 h-6" style="width: 1.5rem; height: 1.5rem;">
+  <span id="knowledge-graph-btn" role="button" tabindex="0" aria-label="Knowledge graph"
+              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400 min-w-[36px] min-h-[36px] inline-flex items-center justify-center cursor-pointer"
+              style="min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6" style="width: 1.5rem; height: 1.5rem;">
   <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 0 1-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 0 1 4.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0 1 12 15a9.065 9.065 0 0 0-6.23-.693L5 14.5m14.8.8 1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0 1 12 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
 </svg>
 
@@ -57,8 +59,9 @@ export const htmlContent = `
             </span>
 
 
-            <span id="chat-quiz-btn"
-              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400">
+            <span id="chat-quiz-btn" role="button" tabindex="0" aria-label="Chapter quiz"
+              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400 min-w-[36px] min-h-[36px] inline-flex items-center justify-center cursor-pointer"
+              style="min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-6 h-6" style="width: 1.5rem; height: 1.5rem;">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6a7.5 7.5 0 1 0 7.5 7.5h-7.5V6Z" />
@@ -67,8 +70,9 @@ export const htmlContent = `
 
             </span>
 
-            <span id="help-btn"
-              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400">
+            <span id="help-btn" role="button" tabindex="0" aria-label="Help"
+              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400 min-w-[36px] min-h-[36px] inline-flex items-center justify-center cursor-pointer"
+              style="min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                 stroke="currentColor" class="w-6 h-6" style="width: 1.5rem; height: 1.5rem;">
                 <path stroke-linecap="round" stroke-linejoin="round"
@@ -77,8 +81,9 @@ export const htmlContent = `
 
             </span>
 
-            <span id="settings-btn" 
-              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400">
+            <span id="settings-btn" role="button" tabindex="0" aria-label="Settings"
+              class="hover:text-blue-300 text-sm text-zinc-600 dark:text-zinc-400 min-w-[36px] min-h-[36px] inline-flex items-center justify-center cursor-pointer"
+              style="min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;">
 
 
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
@@ -123,17 +128,17 @@ export const htmlContent = `
                       </div> -->
             <div id="markdown-preview" class="text-sm text-zinc-800 dark:text-zinc-200 chat-message">
               SocratiQ is an AI Generative Learning Assistant, designed to make learning more efficient, engaging and
-              accessible. We welcome your <a href="https://forms.gle/jmWJcdzN2TXXjHWn7" target="_blank"
+              accessible. We welcome your <a href="https://forms.gle/jmWJcdzN2TXXjHWn7" target="_blank" rel="noopener noreferrer"
                 class="text-blue-500 hover:text-blue-700" title="Provide your feedback here">Feedback</a>. Learn more
-              about <a href="https://www.youtube.com/watch?v=mIT9nIsxCe0" target="_blank"
+              about <a href="https://www.youtube.com/watch?v=mIT9nIsxCe0" target="_blank" rel="noopener noreferrer"
                 class="text-blue-500 hover:text-blue-700"
                 title="Watch the SocratiQ Introduction on YouTube">SocratiQ</a>.
             </div>
 
-            <div id="utility-btn-container" class="absolute bottom-1 right-2 text-blue-400 flex space-x-2 p-2">
+            <div id="utility-btn-container" class="absolute bottom-1 right-2 text-blue-400 flex items-center space-x-2 p-2">
               <!-- Buttons with icons -->
 
-              <button id='highlight-btn' class="w-4 h-4  flex items-center justify-center hover:text-blue-700"
+              <button id='highlight-btn' class="w-6 h-6 p-1 flex items-center justify-center hover:text-blue-700"
                 title="Highlight">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                   stroke="currentColor" class="icons">
@@ -142,7 +147,7 @@ export const htmlContent = `
                 </svg>
               </button>
 
-                   <button id='sr-send-btn' class="w-4 h-4 st-send-btn mr-2 flex items-center justify-center hover:text-blue-700"
+                   <button id='sr-send-btn' class="w-6 h-6 p-1 st-send-btn mr-2 flex items-center justify-center hover:text-blue-700"
                >
                 
 
@@ -153,21 +158,21 @@ export const htmlContent = `
 
               </button>
 
-              <button id='share-btn' class="w-4 h-4  flex items-center justify-center hover:text-blue-700"
+              <button id='share-btn' class="w-6 h-6 p-1 flex items-center justify-center hover:text-blue-700"
                 title="Share"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                   stroke="currentColor" class="icons">
                   <path stroke-linecap="round" stroke-linejoin="round"
                     d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" />
                 </svg>
               </button>
-              <button id='copy-btn' class="w-4 h-4  mr-1 mt-1  flex items-center justify-center hover:text-blue-700"
+              <button id='copy-btn' class="w-6 h-6 p-1 mr-1 flex items-center justify-center hover:text-blue-700"
                 title="Copy"><svg id="copy-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
                   stroke-width="1.5" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round"
                     d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" />
                 </svg>
               </button>
-              <button id='download-btn' class="w-4 h-4  mr-2  flex items-center justify-center hover:text-blue-700"
+              <button id='download-btn' class="w-6 h-6 p-1 mr-2 flex items-center justify-center hover:text-blue-700"
                 title="Download"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
                   stroke-width="1.5" stroke="currentColor" class="icons">
                   <path stroke-linecap="round" stroke-linejoin="round"
@@ -180,17 +185,17 @@ export const htmlContent = `
             </div>
 
 
-            <div id="reference-btn-container_temp" class="flex space-x-2 text-xs font-mono">
+            <div id="reference-btn-container_temp" class="flex space-x-2 text-xs font-mono mb-7 pb-6" style="margin-bottom: 28px;">
               <a href="https://mlsysbook.ai/"
                 class="inline-block bg-blue-100 text-zinc-900 px-4 py-0.5 rounded-md" target="_blank"
-                rel="noopener noreferrer" title="TinyML Textbook">1</a>
+                rel="noopener noreferrer" title="Machine Learning Systems Textbook">1</a>
               <!-- Omitted buttons as they are not links -->
               <a href="https://github.com/harvard-edge/cs249r_book"
                 class="inline-block bg-blue-100 text-zinc-900 px-4 py-0.5 rounded-md" target="_blank"
-                rel="noopener noreferrer" title="TinyML GitHub Repo">2</a>
-              <a href="https://www.edx.org/certificates/professional-certificate/harvardx-tiny-machine-learning"
+                rel="noopener noreferrer" title="MLSysBook GitHub Repository">2</a>
+              <a href="https://doi.org/10.1145/3743646.3750010"
                 class="inline-block bg-blue-100 text-zinc-900 px-4 py-0.5 rounded-md" target="_blank"
-                rel="noopener noreferrer" title="TinyML on EdX">3</a>
+                rel="noopener noreferrer" title="SocratiQ Research Paper (WCAE '25; arXiv:2502.00341)">3</a>
 
             </div>
 
@@ -214,26 +219,26 @@ export const htmlContent = `
         <div id="input-container" class="mt-4 relative">
           <!-- <div id="ai-prompt-label" style="font-size: 12px; color: rgb(85, 85, 85); margin-bottom: 8px; display: block;">Included context:</div> -->
 
-          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-            <button id="context-button" title="Context">
+          <div id="study-toolbar-row" style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: nowrap;">
+            <button id="context-button" title="Context" class="socratiq-toolbar-btn min-h-[38px] py-1.5 px-2.5 text-xs whitespace-nowrap inline-flex items-center justify-center" style="min-height: 38px; padding: 6px 10px; font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center;">
               <div style="display: flex; align-items: center;"> 
-                <span style="font-size: 1.2rem; font-weight: bold; color: #6b7280;">@</span>
+                <span style="font-size: 1.1rem; line-height: 1; font-weight: bold; color: #6b7280;">@</span>
                 <span style="font-size: 12px; margin-left: 4px;">Add Context</span>
               </div>
             </button>
 
-            <button id="quiz-button" title="Quiz">
-              <div style="display: flex;"> 
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 1.2rem; height: 1.2rem;">
+            <button id="quiz-button" title="Quiz" class="socratiq-toolbar-btn min-h-[38px] py-1.5 px-2.5 text-xs whitespace-nowrap inline-flex items-center justify-center" style="min-height: 38px; padding: 6px 10px; font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center;">
+              <div style="display: flex; align-items: center;"> 
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 1.1rem; height: 1.1rem; flex-shrink: 0;">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M8.242 5.992h12m-12 6.003H20.24m-12 5.999h12M4.117 7.495v-3.75H2.99m1.125 3.75H2.99m1.125 0H5.24m-1.92 2.577a1.125 1.125 0 1 1 1.591 1.59l-1.83 1.83h2.16M2.99 15.745h1.125a1.125 1.125 0 0 1 0 2.25H3.74m0-.002h.375a1.125 1.125 0 0 1 0 2.25H2.99" />
                 </svg>
                 <span style="font-size: 12px; margin-left: 4px;">Quiz me</span>
               </div>
             </button>
 
-            <button id="flashcards-button" title="Flashcards">
-              <div style="display: flex;"> 
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 1.2rem; height: 1.2rem;">
+            <button id="flashcards-button" title="Flashcards" class="socratiq-toolbar-btn min-h-[38px] py-1.5 px-2.5 text-xs whitespace-nowrap inline-flex items-center justify-center" style="min-height: 38px; padding: 6px 10px; font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center;">
+              <div style="display: flex; align-items: center;"> 
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 1.1rem; height: 1.1rem; flex-shrink: 0;">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" />
                 </svg>
                 <span style="font-size: 12px; margin-left: 4px;">Flashcards</span>
@@ -241,7 +246,7 @@ export const htmlContent = `
             </button>
 
             <div class="relative flex items-center justify-center">
-              <button id="more-options-button" title="More Options">
+              <button id="more-options-button" class="socratiq-toolbar-btn" title="More Options">
                 <div style="display: flex; align-items: center;"> 
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 1.2rem; height: 1.2rem;">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />
@@ -292,10 +297,12 @@ export const htmlContent = `
 
 
 
-        <div class="bg-zinc-100 text-gray-500 p-1 dark:bg-zinc-200/50" style="font-size: 8pt">
+        <div class="bg-zinc-100 text-gray-600 p-1 text-center dark:bg-zinc-800 dark:text-zinc-300" style="font-size: 8pt">
           <!-- <p class="font-bold">Be cautious</p> -->
-          <p>Information provided here may not always be accurate.<span> <a href="#" id="openModal-feedback"
-                class="underline text-blue-500 hover:text-zinc-800 dark:hover:text-zinc-900">Provide feedback</a>
+          <p>SocratiQ uses AI and can make mistakes. Check claims in the book.<span> <a href="#" id="openModal-feedback"
+                class="underline text-blue-600 dark:text-blue-400 hover:text-zinc-800 dark:hover:text-zinc-100">Provide feedback</a>
+              · <span id="study-model-status">Free shared model</span> · <button type="button" id="open-byok-settings"
+                class="underline text-blue-600 dark:text-blue-400 hover:text-zinc-800 dark:hover:text-zinc-100 bg-transparent border-0 p-0 cursor-pointer">Connect your own Gemini / Claude</button>
             </span></p>
         </div>
       </div>
@@ -429,26 +436,30 @@ export const htmlContent = `
     }
     
     .difficulty-content-expanded {
-      max-height: 500px;
+      max-height: 950px;
       overflow: hidden;
       transition: max-height 0.3s ease-in-out;
     }
+
+    @media (max-width: 639px) {
+      #difficulty-content .grid {
+        grid-template-columns: minmax(0, 1fr) !important;
+      }
+    }
     
-    #difficulty-dropdown-toggle.rotated {
+    #difficulty-dropdown-toggle.rotated svg {
       transform: rotate(180deg);
     }
     
     /* Toggle switch styles */
     .toggle-checkbox:checked {
       right: 0;
-      border-color: #3b82f6;
+      border-color: var(--socratiq-accent, #8e1537);
     }
     .toggle-checkbox:checked + .toggle-label {
-      background-color: #3b82f6;
+      background-color: var(--socratiq-accent, #8e1537);
     }
   </style>
-  </div>
-  </div>
   <div id="success-notice" style="
   display: none;
   position: fixed;
@@ -458,7 +469,7 @@ export const htmlContent = `
   padding: 10px 15px;
   border-radius: 5px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1),
-              0 0 15px rgba(66, 153, 225, 0.3);
+              0 0 15px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.3);
   font-family: system-ui, -apple-system, sans-serif;
   color: #2d3748;
   animation: glow 2s infinite alternate;
@@ -485,12 +496,12 @@ export const htmlContent = `
       @keyframes glow {
         from {
           box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1),
-            0 0 15px rgba(66, 153, 225, 0.3);
+            0 0 15px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.3);
         }
 
         to {
           box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1),
-            0 0 20px rgba(66, 153, 225, 0.5);
+            0 0 20px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.5);
         }
       }
     </style>
@@ -512,8 +523,8 @@ export const htmlContent = `
   <div id="modal1" class="modal">
     <!-- Modal content -->
 
-    <div class="bg-white p-6 rounded-lg shadow-lg max-w-sm mx-auto mt-10" style="background-color: var(--socratiq-bg, #ffffff); color: var(--socratiq-text, #1f2328);">
-      <div class="flex justify-between items-center mb-4">
+    <div class="bg-white p-3.5 rounded-lg shadow-lg mx-auto" style="width: 100%; max-height: 92vh; overflow-y: auto; box-sizing: border-box; background-color: var(--socratiq-bg, #ffffff); color: var(--socratiq-text, #1f2328);">
+      <div class="flex justify-between items-center mb-2.5">
         <span class="text-lg font-semibold dark:text-white">Settings</span>
         <button id='close-btn' class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
@@ -523,22 +534,22 @@ export const htmlContent = `
         </button>
       </div>
 
-      <details id="study-learner-preferences" class="mb-6 p-3 border rounded-lg">
+      <details id="study-learner-preferences" class="mb-3 p-2.5 border border-zinc-200 dark:border-zinc-700 rounded-lg">
         <summary class="cursor-pointer font-semibold">Learning preferences</summary>
         <p class="text-xs mt-2" style="color:var(--socratiq-muted,#4c566a)">Shared with the reader. Saved in this browser and included when you ask AI. Avoid sensitive details.</p>
         <label class="block text-sm mt-3">What do you already know? (optional)
-          <textarea id="study-learner-background" rows="2" maxlength="1200" class="w-full p-2 border rounded mt-1 bg-transparent" placeholder="I know Python; hardware is new to me."></textarea>
+          <textarea id="study-learner-background" rows="2" maxlength="1200" class="w-full p-2 border border-zinc-300 dark:border-zinc-600 rounded mt-1 bg-transparent" placeholder="I know Python; hardware is new to me."></textarea>
         </label>
         <label class="block text-sm mt-3">How should explanations help you? (optional)
-          <textarea id="study-learner-instructions" rows="2" maxlength="800" class="w-full p-2 border rounded mt-1 bg-transparent" placeholder="Define symbols and use everyday analogies."></textarea>
+          <textarea id="study-learner-instructions" rows="2" maxlength="800" class="w-full p-2 border border-zinc-300 dark:border-zinc-600 rounded mt-1 bg-transparent" placeholder="Define symbols and use everyday analogies."></textarea>
         </label>
         <p class="text-xs mt-2" style="color:var(--socratiq-muted,#4c566a)">Use Understanding Level below to change your level.</p>
-        <div class="flex flex-wrap gap-2 mt-3"><button id="study-learner-save" type="button" class="p-2 border rounded">Save preferences</button><button id="study-learner-clear" type="button" class="p-2 border rounded">Clear preferences</button></div>
+        <div class="flex flex-wrap gap-2 mt-3"><button id="study-learner-save" type="button" class="p-2 border border-zinc-300 dark:border-zinc-600 rounded hover:bg-gray-50 dark:hover:bg-zinc-800">Save preferences</button><button id="study-learner-clear" type="button" class="p-2 border border-zinc-300 dark:border-zinc-600 rounded hover:bg-gray-50 dark:hover:bg-zinc-800">Clear preferences</button></div>
         <p id="study-learner-status" class="text-xs mt-2" style="color:var(--socratiq-muted,#4c566a)" role="status" aria-live="polite"></p>
       </details>
       <!-- Use your own AI Section -->
-      <div class="mb-6 p-4 border border-zinc-200 dark:border-zinc-700 rounded-lg" style="background-color: var(--socratiq-bg, #ffffff); color: var(--socratiq-text, #1f2328);">
-        <div class="flex items-center justify-between mb-4">
+      <div class="mb-3 p-2.5 border border-zinc-200 dark:border-zinc-700 rounded-lg" style="background-color: var(--socratiq-bg, #ffffff); color: var(--socratiq-text, #1f2328);">
+        <div class="flex items-center justify-between gap-3 flex-wrap mb-2" style="gap: 12px; flex-wrap: wrap;">
           <h3 class="text-md font-semibold text-zinc-900 dark:text-white">Use your own AI</h3>
           
           <!-- Custom API Toggle Switch -->
@@ -555,13 +566,22 @@ export const htmlContent = `
         
         <!-- Custom API Configuration (initially hidden) -->
         <div id="custom-api-config" class="hidden">
+          <div class="mb-3">
+            <button type="button" id="study-openrouter-sso"
+              class="w-full py-2 px-3 rounded-md text-white font-semibold text-sm transition-colors"
+              style="background-color: var(--socratiq-accent, #8e1537);">
+              Sign in with OpenRouter (1-Click SSO — Gemini / Claude / GPT)
+            </button>
+          </div>
           <!-- API Provider Dropdown -->
         <div class="mb-4">
           <label for="ai-provider" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">AI Provider</label>
           <select id="ai-provider" class="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-zinc-700 dark:text-white">
             <option value="">Select an AI provider</option>
             <option value="google-gemini">Google Gemini API</option>
+            <option value="anthropic">Anthropic Claude API</option>
             <option value="open-router">Open Router API</option>
+            <option value="openai">OpenAI API</option>
             <option value="groq">GROQ API</option>
             <option value="ollama">OLLAMA API</option>
           </select>
@@ -572,7 +592,7 @@ export const htmlContent = `
           <label for="api-model" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">Model</label>
           <input type="text" id="api-model" 
             class="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-zinc-700 dark:text-white"
-            placeholder="Model name (e.g., gemini-2.5-flash, gpt-3.5-turbo)">
+            placeholder="Model name (e.g., gemini-2.5-flash, claude-sonnet-4-20250514)">
         </div>
 
         <!-- API Endpoint URL Input -->
@@ -585,8 +605,12 @@ export const htmlContent = `
 
         <!-- API Key Input -->
         <div class="mb-4">
-          <label for="api-key" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">API Key (Optional)</label>
-          <input type="password" id="api-key" 
+          <div class="flex items-center justify-between mb-2">
+            <label for="api-key" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">API Key (Session-only by default)</label>
+            <a id="study-api-key-portal" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer"
+              class="text-xs underline text-blue-600 dark:text-blue-400">Get free Gemini key ↗</a>
+          </div>
+          <input type="password" id="api-key" autocomplete="off" spellcheck="false"
             class="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-zinc-700 dark:text-white"
             placeholder="Enter your API key (leave empty for local APIs like Ollama)">
         </div>
@@ -625,7 +649,7 @@ export const htmlContent = `
       </div>
 
       <!-- Add this at the top of the settings modal -->
-      <div class="mb-6 border-b pb-4">
+      <div class="mb-3 border-b border-zinc-200 dark:border-zinc-700 pb-2.5">
         <label class="flex items-center justify-between">
           <span class="text-sm font-medium text-zinc-900 dark:text-zinc-300">
             Push content when menu opens
@@ -640,55 +664,55 @@ export const htmlContent = `
       </div>
 
       <!-- Difficulty Level Dropdown -->
-      <div class="mb-6">
-        <button id="difficulty-dropdown-toggle" class="w-full flex justify-between items-center p-3 bg-gray-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-700 transition-colors">
+      <div class="mb-3">
+        <button id="difficulty-dropdown-toggle" class="w-full flex justify-between items-center p-2.5 bg-gray-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-700 transition-colors">
           <span class="text-sm font-medium text-zinc-900 dark:text-white">Understanding Level Info</span>
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-zinc-500 dark:text-zinc-400 transition-transform duration-200">
             <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
           </svg>
         </button>
         
-        <div id="difficulty-content" class="difficulty-content-collapsed mt-2">
-          <div class="p-4 border border-zinc-200 dark:border-zinc-700 rounded-lg">
-            <div class="grid grid-cols-2 gap-4">
-              <div class="difficulty-level beginner-level">
+        <div id="difficulty-content" class="difficulty-content-collapsed mt-1.5">
+          <div class="p-2 border border-zinc-200 dark:border-zinc-700 rounded-lg">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div class="difficulty-level beginner-level p-1.5 rounded">
                 <div class="flex items-center gap-2">
-                  <span class="text-xl">🚲</span>
+                  <span class="text-lg">🚲</span>
                   <span class="font-semibold text-sm dark:text-white">Beginner</span>
                 </div>
-                <p class="text-xs text-zinc-600 dark:text-zinc-400">For learners who are new to machine learning systems and are building foundational knowledge of concepts, tools, and basic implementations.</p>
+                <p class="text-xs leading-snug text-zinc-600 dark:text-zinc-400">For learners who are new to machine learning systems and are building foundational knowledge of concepts, tools, and basic implementations.</p>
               </div>
               
-              <div class="difficulty-level intermediate-level">
+              <div class="difficulty-level intermediate-level p-1.5 rounded">
                 <div class="flex items-center gap-2">
-                  <span class="text-xl">🚗</span>
+                  <span class="text-lg">🚗</span>
                   <span class="font-semibold text-sm dark:text-white">Intermediate</span>
                 </div>
-                <p class="text-xs text-zinc-600 dark:text-zinc-400">For learners who have a working understanding of machine learning principles and are ready to design and optimize systems for real-world applications.</p>
+                <p class="text-xs leading-snug text-zinc-600 dark:text-zinc-400">For learners who have a working understanding of machine learning principles and are ready to design and optimize systems for real-world applications.</p>
               </div>
               
-              <div class="difficulty-level advanced-level">
+              <div class="difficulty-level advanced-level p-1.5 rounded">
                 <div class="flex items-center gap-2">
-                  <span class="text-xl">🚁</span>
+                  <span class="text-lg">🚁</span>
                   <span class="font-semibold text-sm dark:text-white">Advanced</span>
                 </div>
-                <p class="text-xs text-zinc-600 dark:text-zinc-400">For learners with significant experience in machine learning systems, focused on tackling complex problems, scaling solutions, and innovating in the field.</p>
+                <p class="text-xs leading-snug text-zinc-600 dark:text-zinc-400">For learners with significant experience in machine learning systems, focused on tackling complex problems, scaling solutions, and innovating in the field.</p>
               </div>
               
-              <div class="difficulty-level agi-level">
+              <div class="difficulty-level agi-level p-1.5 rounded">
                 <div class="flex items-center gap-2">
-                  <span class="text-xl">🛸</span>
+                  <span class="text-lg">🛸</span>
                   <span class="font-semibold text-sm dark:text-white">Bloom's Taxonomy</span>
                 </div>
-                <p class="text-xs text-zinc-600 dark:text-zinc-400">Bloom's Taxonomy: Bloom's Taxonomy is an educational framework classifying cognitive skills from basic recall to complex evaluation. 
-                  <a class="text-blue-500 text-sm hover:text-zinc-800 dark:hover:text-zinc-900"  href="https://en.wikipedia.org/wiki/Bloom%27s_taxonomy" target="_blank">Read More</a></p>
+                <p class="text-xs leading-snug text-zinc-600 dark:text-zinc-400">An educational framework classifying cognitive skills from basic recall to complex evaluation. 
+                  <a class="text-blue-500 dark:text-blue-300 text-xs underline hover:text-blue-700 dark:hover:text-blue-200" href="https://en.wikipedia.org/wiki/Bloom%27s_taxonomy" target="_blank" rel="noopener noreferrer">Read More</a></p>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="mb-6">
+      <div class="mb-1">
         <label for="understanding-level" class="block mb-2 font-medium text-zinc-900 dark:text-zinc-300">Understanding
           Level</label>
         <input type="range" id="understanding-slider" name="understanding-level" min="0" max="3" value="2"
@@ -808,9 +832,9 @@ export const htmlContent = `
           margin-bottom: 12px;
         }
         #quizModal .quiz-option-card:hover {
-          border-color: #6366f1;
-          box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
-          background: rgba(99,102,241,0.04);
+          border-color: var(--socratiq-accent, #8e1537);
+          box-shadow: 0 0 0 3px rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.12);
+          background: rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.04);
         }
         #quizModal .quiz-option-icon {
           width: 40px;
@@ -829,7 +853,7 @@ export const htmlContent = `
         }
         #quizModal .quiz-option-desc {
           font-size: 0.8rem;
-          color: var(--socratiq-text-muted, #6b7280);
+          color: var(--socratiq-muted, #6b7280);
           line-height: 1.4;
         }
         #quizModal .quiz-modal-close {
@@ -839,7 +863,7 @@ export const htmlContent = `
           background: none;
           border: none;
           cursor: pointer;
-          color: var(--socratiq-text-muted, #9ca3af);
+          color: var(--socratiq-muted, #9ca3af);
           padding: 4px;
           border-radius: 6px;
           line-height: 1;
@@ -852,13 +876,13 @@ export const htmlContent = `
 
       <div style="margin-bottom: 20px;">
         <div style="font-size: 1.05rem; font-weight: 700; margin-bottom: 4px; color: var(--socratiq-text, #1f2328);">Choose Quiz Type</div>
-        <div style="font-size: 0.8rem; color: var(--socratiq-text-muted, #6b7280);">Select how you'd like to be tested</div>
+        <div style="font-size: 0.8rem; color: var(--socratiq-muted, #6b7280);">Select how you'd like to be tested</div>
       </div>
 
       <!-- Section Quiz -->
       <button class="quiz-option-card" id="section-quiz-btn">
-        <div class="quiz-option-icon" style="background: rgba(99,102,241,0.1);">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="#6366f1">
+        <div class="quiz-option-icon" style="background: rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.1); color: var(--socratiq-accent, #8e1537);">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25Z" />
           </svg>
         </div>
@@ -888,9 +912,6 @@ export const htmlContent = `
   </div>
 
   <!-- Cumulative quiz button removed -->
-      </div>
-    </div>
-  </div>
 
   <div class="hidden" id="bag-of-stuff">
 
@@ -940,7 +961,7 @@ export const htmlContent = `
 
 
 
-    <div id="reference-btn-container" class="flex space-x-2 text-xs font-mono">
+    <div id="reference-btn-container" class="flex space-x-2 text-xs font-mono mb-7 pb-6" style="margin-bottom: 28px;">
       <!-- <button id="reference-btn" class="bg-blue-100 text-zinc-900 px-4 py-0.5 rounded-md">1</button> -->
 
     </div>

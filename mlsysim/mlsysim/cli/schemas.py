@@ -1,27 +1,87 @@
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from typing import Optional, Any, List
-import yaml
 from pathlib import Path
 
-from mlsysim.core.units import Q_, ureg
+from mlsysim.core.units import Q_, ureg, normalize_precision
 from mlsysim.core.types import Quantity, require_unit_family
-from mlsysim.core.units import normalize_precision
+from mlsysim.core.loader import _load_mapping, _instantiate, load_yaml_entry
 from mlsysim.models.registry import Models
 from mlsysim.hardware.registry import Hardware
+from mlsysim.infrastructure.registry import Infrastructure
 from mlsysim.core.registry import Registry
 from mlsysim.hardware.types import HardwareNode
-from mlsysim.models.types import TransformerWorkload, CNNWorkload, SSMWorkload, DiffusionWorkload, Workload
+from mlsysim.models.types import (
+    CNNWorkload,
+    DiffusionWorkload,
+    EmbodiedWorkload,
+    SparseTransformerWorkload,
+    SSMWorkload,
+    TransformerWorkload,
+    Workload,
+)
+
+_CLI_WORKLOAD_TYPE_MAP = {
+    "Workload": Workload,
+    "TransformerWorkload": TransformerWorkload,
+    "SparseTransformerWorkload": SparseTransformerWorkload,
+    "CNNWorkload": CNNWorkload,
+    "SSMWorkload": SSMWorkload,
+    "DiffusionWorkload": DiffusionWorkload,
+    "EmbodiedWorkload": EmbodiedWorkload,
+}
+
 
 def _find_flat(reg: Any, name: str) -> Any:
-    """Helper to do a deep search for a name in the registry tree."""
+    """Deep-search for a leaf entry in a registry tree, respecting __registry_list_exclude__."""
+    excluded = set(getattr(reg, "__registry_list_exclude__", ()))
     for k, v in vars(reg).items():
+        if k in excluded or k.startswith("_"):
+            continue
         if k == name and not isinstance(v, type):
             return v
         if isinstance(v, type) and issubclass(v, Registry):
             res = _find_flat(v, name)
-            if res: 
+            if res is not None:
                 return res
     return None
+
+
+def _decompose_bundled_hardware(hw: HardwareNode) -> HardwareNode:
+    """Scale a multi-accelerator rack/appliance HardwareNode down to per-accelerator supply."""
+    bundle_count = hw.accelerator_count or 1
+    if bundle_count <= 1:
+        return hw
+    compute_updates: dict[str, Any] = {
+        "peak_flops": hw.compute.peak_flops / bundle_count,
+        "precision_flops": {k: v / bundle_count for k, v in hw.compute.precision_flops.items()},
+    }
+    mem_updates: dict[str, Any] = {
+        "capacity": hw.memory.capacity / bundle_count,
+        "bandwidth": hw.memory.bandwidth / bundle_count,
+    }
+    if hw.memory.sram_capacity is not None:
+        mem_updates["sram_capacity"] = hw.memory.sram_capacity / bundle_count
+    hw_updates: dict[str, Any] = {
+        "compute": hw.compute.model_copy(update=compute_updates),
+        "memory": hw.memory.model_copy(update=mem_updates),
+        "accelerator_count": 1,
+    }
+    if hw.nvlink is not None:
+        hw_updates["nvlink"] = hw.nvlink.model_copy(
+            update={"bandwidth": hw.nvlink.bandwidth / bundle_count}
+        )
+    if hw.interconnect is not None:
+        hw_updates["interconnect"] = hw.interconnect.model_copy(
+            update={"bandwidth": hw.interconnect.bandwidth / bundle_count}
+        )
+    if hw.tdp is not None:
+        hw_updates["tdp"] = hw.tdp / bundle_count
+    if hw.unit_cost is not None:
+        hw_updates["unit_cost"] = hw.unit_cost / bundle_count
+    if hw.embodied_carbon_kg is not None:
+        hw_updates["embodied_carbon_kg"] = hw.embodied_carbon_kg / bundle_count
+    return hw.model_copy(update=hw_updates)
+
 
 def _resolve_hardware(name_or_path: str) -> HardwareNode:
     """Resolves a hardware node from the Zoo or a local YAML file."""
@@ -29,14 +89,13 @@ def _resolve_hardware(name_or_path: str) -> HardwareNode:
         p = Path(name_or_path)
         if not p.exists():
             raise ValueError(f"Hardware YAML not found: {p}")
-        with open(p, "r") as f:
-            data = yaml.safe_load(f)
-        return HardwareNode(**data)
-        
+        return load_yaml_entry(p, model_cls=HardwareNode, tech_root=Hardware.Tech)
+
     h_obj = _find_flat(Hardware, name_or_path)
-    if not h_obj:
+    if not isinstance(h_obj, HardwareNode):
         raise ValueError(f"Hardware '{name_or_path}' not found in the MLSysZoo. (Check case and spelling)")
     return h_obj
+
 
 def _resolve_model(name_or_path: str) -> Workload:
     """Resolves a model from the Zoo, a local YAML file, or the Hugging Face Hub (hf://)."""
@@ -49,23 +108,30 @@ def _resolve_model(name_or_path: str) -> Workload:
         p = Path(name_or_path)
         if not p.exists():
             raise ValueError(f"Model YAML not found: {p}")
-        with open(p, "r") as f:
-            data = yaml.safe_load(f)
-            
-        arch = data.get("architecture", "").lower()
-        if "transformer" in arch:
-            return TransformerWorkload(**data)
+        data = _load_mapping(p)
+        data.pop("__key__", None)
+        if "__type__" in data:
+            return _instantiate(data, model_cls=None, type_map=_CLI_WORKLOAD_TYPE_MAP, tech_root=Hardware.Tech)
+
+        arch = str(data.get("architecture", "")).lower()
+        if "moe" in arch or "sparse" in arch or "num_experts" in data:
+            cls = SparseTransformerWorkload
+        elif "transformer" in arch:
+            cls = TransformerWorkload
         elif "cnn" in arch:
-            return CNNWorkload(**data)
-        elif "ssm" in arch:
-            return SSMWorkload(**data)
+            cls = CNNWorkload
+        elif "ssm" in arch or "mamba" in arch:
+            cls = SSMWorkload
         elif "diffusion" in arch:
-            return DiffusionWorkload(**data)
+            cls = DiffusionWorkload
+        elif "embodied" in arch or "vla" in arch:
+            cls = EmbodiedWorkload
         else:
-            return Workload(**data)
-            
+            cls = Workload
+        return _instantiate(data, model_cls=cls, type_map=_CLI_WORKLOAD_TYPE_MAP, tech_root=Hardware.Tech)
+
     m_obj = _find_flat(Models, name_or_path)
-    if not m_obj:
+    if not isinstance(m_obj, Workload):
         raise ValueError(f"Model '{name_or_path}' not found in the MLSysZoo. (Check case and spelling)")
     return m_obj
 
@@ -187,6 +253,7 @@ class MlsysPlanSchema(BaseModel):
     _model_obj: Any = PrivateAttr(default=None)
     _hardware_obj: Any = PrivateAttr(default=None)
     _fleet_obj: Any = PrivateAttr(default=None)
+    _total_accelerators: int = PrivateAttr(default=1)
 
     @property
     def model_obj(self) -> Any:
@@ -199,50 +266,74 @@ class MlsysPlanSchema(BaseModel):
     @property
     def fleet_obj(self) -> Any:
         return self._fleet_obj
-    
+
+    @property
+    def total_accelerators(self) -> int:
+        return self._total_accelerators
+
     @model_validator(mode='after')
     def resolve_and_validate(self) -> 'MlsysPlanSchema':
         self._model_obj = _resolve_model(self.workload.name)
-        self._hardware_obj = _resolve_hardware(self.hardware.name)
-        
-        # 3. Resolve Fleet if total accelerators > 1.
-        total_accelerators = self.hardware.total_accelerators
-        if total_accelerators > 1:
+        raw_hw = _resolve_hardware(self.hardware.name)
+        bundle_count = raw_hw.accelerator_count or 1
+
+        if self.hardware.node_count is not None and self.hardware.accelerators_per_node is not None:
+            total_accelerators = self.hardware.node_count * self.hardware.accelerators_per_node
+        elif self.hardware.accelerators is not None:
+            total_accelerators = self.hardware.accelerators
+        else:
+            total_accelerators = bundle_count
+        self._total_accelerators = total_accelerators
+
+        per_accel_hw = _decompose_bundled_hardware(raw_hw) if bundle_count > 1 else raw_hw
+        self._hardware_obj = per_accel_hw if total_accelerators > 1 else raw_hw
+
+        grid_obj = None
+        if self.ops is not None:
+            grid_obj = getattr(Infrastructure.Grids, self.ops.region, None) or _find_flat(
+                Infrastructure.Grids, self.ops.region
+            )
+            if grid_obj is None:
+                valid = ", ".join(
+                    sorted(
+                        k
+                        for k, v in vars(Infrastructure.Grids).items()
+                        if not k.startswith("_") and not isinstance(v, type)
+                    )
+                )
+                raise ValueError(f"Unknown ops.region '{self.ops.region}'. Valid regions: {valid}")
+
+        # Build Fleet whenever distributed (total_accelerators > 1) or ops economics are requested.
+        if total_accelerators > 1 or self.ops is not None:
             from mlsysim.systems.types import Fleet, Node, NetworkFabric
 
-            # Step 1: prefer an explicit plan topology, then hardware aggregate
-            # metadata such as GB200 NVL72, then single-accelerator nodes.
             accelerators_per_node = (
                 self.hardware.accelerators_per_node
-                or self._hardware_obj.accelerator_count
+                or (bundle_count if total_accelerators >= bundle_count else None)
                 or 1
             )
-            # Step 2: refuse to floor partial nodes; that would silently change
-            # the number of accelerators represented by the plan.
             if total_accelerators % accelerators_per_node != 0:
                 raise ValueError(
                     "hardware total accelerators must be divisible by hardware.accelerators_per_node "
                     f"(got {total_accelerators} and {accelerators_per_node})"
                 )
-            # Step 3: use the most specific one-way bandwidth source available.
             intra_node_bw = (
                 self.hardware.intra_node_bw
-                or (self._hardware_obj.nvlink.bandwidth_per_direction if self._hardware_obj.nvlink else None)
-                or (self._hardware_obj.interconnect.bandwidth_per_direction if self._hardware_obj.interconnect else None)
+                or (per_accel_hw.nvlink.bandwidth_per_direction if per_accel_hw.nvlink else None)
+                or (per_accel_hw.interconnect.bandwidth_per_direction if per_accel_hw.interconnect else None)
                 or self.hardware.fabric_bandwidth
             )
-            # Step 4: compile the declarative plan into the Fleet object used by
-            # distributed solvers.
             self._fleet_obj = Fleet(
                 name=f"{self.hardware.name} Fleet",
                 node=Node(
                     name=f"{self.hardware.name} Node",
-                    accelerator=self._hardware_obj,
+                    accelerator=per_accel_hw,
                     accelerators_per_node=accelerators_per_node,
                     intra_node_bw=intra_node_bw,
                 ),
                 count=total_accelerators // accelerators_per_node,
                 fabric=NetworkFabric(name="Default Fabric", bandwidth=self.hardware.fabric_bandwidth),
+                region=grid_obj,
             )
-            
+
         return self

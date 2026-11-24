@@ -1,4 +1,4 @@
-"""Sustainability solvers: facility power, run footprints, carbon placement, and demand.
+"""Sustainability solvers: facility power, run footprints, carbon placement, time shifting, and demand.
 
 Domain implementations behind ``mlsysim.solvers`` (the public import
 path, derived from ``engine.solvers.__init__``); kept per-domain so the logic
@@ -13,6 +13,8 @@ times a grid carbon intensity.
 """
 
 from __future__ import annotations
+
+import math
 
 from typing import Dict, List, Optional
 
@@ -31,6 +33,7 @@ from ..results import (
     RunFootprintResult,
     ServiceLifeExtensionResult,
     ServingCrossoverResult,
+    TemporalShiftResult,
     WaterUseResult,
 )
 from ...core.types import Quantity
@@ -44,6 +47,15 @@ _DAY = _Q(1, "day")
 
 def _ratio(a, b) -> float:
     return (a / b).to("").magnitude
+
+
+def _whole_steps(span, step_h: float, name: str) -> int:
+    count = span.m_as("hour") / step_h
+    if not math.isfinite(count):
+        raise ValueError(f"{name} must be finite")
+    if count < -1e-9 or abs(count - round(count)) > 1e-9:
+        raise ValueError(f"{name} must be a nonnegative whole number of steps")
+    return int(round(count))
 
 
 class FacilityPowerModel(ForwardModel):
@@ -962,4 +974,162 @@ class CarbonPricedPlacementModel(ForwardModel):
             objective_value=taxed.objective_value,
             objective={c["region"]: c["objective"] for c in taxed.top_candidates},
             objective_untaxed={c["region"]: c["objective"] for c in untaxed.top_candidates},
+        )
+
+
+class TemporalShiftModel(ForwardModel):
+    """
+    Deadline-constrained carbon-aware time shifting of one flexible run.
+
+    Picks the start time with the lowest total emissions among starts that finish
+    by the deadline and have capacity. Waiting is charged the extra energy it
+    causes, so a later start wins only if it avoids more carbon than the wait adds.
+    """
+
+    requires = ()
+    produces = TemporalShiftResult
+
+    def solve(
+        self,
+        intensities: List[Quantity],
+        power: Quantity,
+        duration: Quantity,
+        slack: Quantity,
+        step: Optional[Quantity] = None,
+        deferral_energy: Optional[Quantity] = None,
+        standby_power: Optional[Quantity] = None,
+        capacity_available: Optional[List[bool]] = None,
+    ) -> TemporalShiftResult:
+        """Best deadline-feasible start of one flexible run on a time-varying grid signal.
+
+        Parameters
+        ----------
+        intensities : List[Quantity]
+            Carbon intensity per step, in g/kWh or compatible units, starting at the
+            run's release; finite and nonnegative; must cover ``duration + slack``.
+            Average or marginal intensity is the caller's choice.
+        power : Quantity
+            Facility power while the run executes (IT power times PUE), in kW or
+            compatible units; finite and nonnegative.
+        duration : Quantity
+            Run duration; a positive whole number of steps.
+        slack : Quantity
+            The run must finish by release + duration + slack; a nonnegative whole
+            number of steps. Zero forces an immediate start.
+        step : Quantity, optional
+            Length of one signal step; default one hour.
+        deferral_energy : Quantity, optional
+            One-time extra energy caused by deferring, such as restaging input data, in
+            kWh or compatible units; finite and nonnegative; default zero.
+        standby_power : Quantity, optional
+            Extra power drawn while waiting, such as reserved capacity kept powered, in kW
+            or compatible units; finite and nonnegative; default zero. Use zero if the
+            hardware draws that power either way.
+        capacity_available : List[bool], optional
+            Per-step bool: True if capacity is free. A start is feasible only if every
+            step it occupies is free. Non-bool values are rejected. Default: all free.
+
+        Returns
+        -------
+        TemporalShiftResult
+            Chosen start and completion time; start-now, run, overhead, and net emissions
+            in kg CO2e; net saving and saving fraction (None if start-now emits nothing);
+            net emissions per candidate start (None if infeasible); and the shortest
+            wait that saves carbon (None if none does).
+
+        Notes
+        -----
+        Equation: with n run steps, step energy E = power * step, and candidate wait k
+        in {0, ..., slack/step}, run(k) = sum over t from k to k+n-1 of E * CI[t];
+        overhead(0) = 0 and, for k > 0, overhead(k) = deferral_energy * CI[0] + sum
+        over t from 0 to k-1 of standby_power * step * CI[t]; net(k) = run(k) +
+        overhead(k). Among starts with capacity in steps k to k+n-1, the chosen wait
+        minimizes net(k), taking the earliest wait on ties, and net_saving = net(0) -
+        min net(k). If start-now has no capacity, net(0) is hypothetical
+        (immediate_feasible is False) and net_saving can be negative.
+
+        Assumptions: The run is non-preemptive and contiguous; power is constant;
+        intensity is uniform within each step; deferral energy is drawn at release.
+        Excludes: Pausing or migrating a started run, partial capacity, forecast
+        error, runtime changes from moving the run, failures, and penalties other
+        than the hard deadline.
+
+        References
+        ----------
+        Derivation: Emissions are energy times intensity summed per step; checking every
+        feasible start gives the exact minimum. Related work: Radovanovic et al.,
+        Carbon-Aware Computing for Datacenters, https://arxiv.org/abs/2106.11750.
+
+        Examples
+        --------
+        >>> from mlsysim import Q_
+        >>> signal = [Q_(500, "g/kWh"), Q_(500, "g/kWh"), Q_(100, "g/kWh")]
+        >>> result = TemporalShiftModel().solve(signal, Q_("10 kW"), Q_("1 hour"), Q_("2 hour"))
+        >>> result.best_start.m_as("hour"), result.net_saving.m_as("kg")
+        (2.0, 4.0)
+        """
+        step = _Q(1, "hour") if step is None else step
+        deferral_energy = _Q(0, "kWh") if deferral_energy is None else deferral_energy
+        standby_power = _Q(0, "kW") if standby_power is None else standby_power
+
+        step_h = step.m_as("hour")
+        if not math.isfinite(step_h) or step_h <= 0:
+            raise ValueError("step must be finite and positive")
+        n = _whole_steps(duration, step_h, "duration")
+        max_wait = _whole_steps(slack, step_h, "slack")
+        if n == 0:
+            raise ValueError("duration must be at least one step")
+
+        run_kwh = power.m_as("kW") * step_h
+        standby_kwh = standby_power.m_as("kW") * step_h
+        deferral_kwh = deferral_energy.m_as("kWh")
+        if not all(math.isfinite(v) and v >= 0 for v in (run_kwh, standby_kwh, deferral_kwh)):
+            raise ValueError("power, deferral_energy, and standby_power must be finite and nonnegative")
+
+        ci = [x.m_as("g/kWh") for x in intensities]
+        if not all(math.isfinite(c) and c >= 0 for c in ci):
+            raise ValueError("carbon intensities must be finite and nonnegative")
+        if len(ci) < n + max_wait:
+            raise ValueError("intensity signal must cover duration + slack")
+
+        free = [True] * len(ci) if capacity_available is None else list(capacity_available)
+        if len(free) < n + max_wait:
+            raise ValueError("capacity_available must cover duration + slack")
+        if not all(type(f) is bool for f in free[: n + max_wait]):
+            raise ValueError("capacity_available entries must be bool (True or False)")
+
+        # Grams of CO2e for each start k: the run itself, plus what waiting k steps costs.
+        run_g, wait_g, ok = [], [], []
+        waited = 0.0  # sum of intensities over the steps spent waiting
+        for k in range(max_wait + 1):
+            run_g.append(run_kwh * sum(ci[k : k + n]))
+            wait_g.append(0.0 if k == 0 else deferral_kwh * ci[0] + standby_kwh * waited)
+            ok.append(all(free[k : k + n]))
+            waited += ci[k]
+        net_g = [r + w for r, w in zip(run_g, wait_g)]
+
+        if not any(ok):
+            raise ValueError("no start within the deadline has capacity available for the whole run")
+        if not all(math.isfinite(v) for v in net_g):
+            raise ValueError("emissions overflowed; inputs are outside the supported numeric range")
+
+        now = net_g[0]
+        best = min((k for k in range(max_wait + 1) if ok[k]), key=lambda k: (net_g[k], k))
+        first_gain = next((k for k in range(1, max_wait + 1) if ok[k] and net_g[k] < now), None)
+        best_start = (float(best) * step).to("hour")
+
+        return TemporalShiftResult(
+            immediate_emissions=_Q(now, "g").to("kg"),
+            immediate_feasible=ok[0],
+            best_start=best_start,
+            expected_completion=(best_start + duration).to("hour"),
+            best_run_emissions=_Q(run_g[best], "g").to("kg"),
+            shift_overhead_emissions=_Q(wait_g[best], "g").to("kg"),
+            best_net_emissions=_Q(net_g[best], "g").to("kg"),
+            net_saving=_Q(now - net_g[best], "g").to("kg"),
+            saving_fraction=(now - net_g[best]) / now if now > 0 else None,
+            shifted=best > 0,
+            candidate_starts=sum(ok),
+            net_emissions_by_start=[_Q(v, "g").to("kg") if f else None for v, f in zip(net_g, ok)],
+            min_beneficial_wait=None if first_gain is None else (float(first_gain) * step).to("hour"),
         )

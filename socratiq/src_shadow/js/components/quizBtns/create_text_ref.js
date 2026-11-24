@@ -1,3 +1,7 @@
+import { extractReadableBookText } from '../../utils/textExtractor.js';
+
+const IGNORED_CONTEXT_SELECTOR = 'nav, aside:not(.column-margin), header, footer, #socratiq-reader, #widget-chat-container, #collaborative-widget-host, .chapter-concept-map, [data-socratiq-ignore]';
+
 // Keep the old function for backward compatibility with other parts that might need random IDs
 function generateUniqueId() {
     const timePart = new Date().getTime();
@@ -58,22 +62,31 @@ function generateStableClassId(textContent) {
 export function get_text_ref() {
     const extractSubsections = () => {
       const sectionElements = Array.from(document.querySelectorAll("section"));
-      sectionElements.forEach((section) => {
+      sectionElements.forEach((section, sectionIndex) => {
+        if (section.closest?.(IGNORED_CONTEXT_SELECTOR)) return;
+
         const treeWalker = document.createTreeWalker(
           section,
           NodeFilter.SHOW_ELEMENT,
           {
             acceptNode: (node) => {
-              if (node.tagName === "H3" || node.tagName === "P") {
+              if (node.closest?.(IGNORED_CONTEXT_SELECTOR)) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              if (node.tagName === "H3" || node.tagName === "P" || node.tagName === "LI") {
+                if (node.tagName === "P" && node.closest?.("li")) {
+                  return NodeFilter.FILTER_SKIP;
+                }
                 return NodeFilter.FILTER_ACCEPT;
               }
-              return NodeFilter.FILTER_REJECT;
+              return NodeFilter.FILTER_SKIP;
             },
           }
         );
 
         let currentSubsection = "";
         let currentText = "";
+        let currentHeadingElement = null;
         const subsectionElements = new Map();
         let currentElement;
         let uniqueClass;
@@ -83,52 +96,109 @@ export function get_text_ref() {
           currentElement = treeWalker.currentNode;
           if (currentElement.tagName === "H3") {
             if (currentSubsection !== "") {
-              subsectionElements.set(currentSubsection, { text: currentText, element: currentElement });
+              subsectionElements.set(currentSubsection, {
+                text: currentText.trim(),
+                element: currentHeadingElement || currentElement,
+                section: sectionIndex + 1,
+              });
               currentText = "";
             }
-            currentSubsection = currentElement.textContent.trim();
-          } else if (currentElement.tagName === "P") {
-            currentText += "" + currentElement.textContent.trim();
+            currentSubsection = extractReadableBookText(currentElement) || currentElement.textContent.trim();
+            currentHeadingElement = currentElement;
+          } else if (currentElement.tagName === "P" || currentElement.tagName === "LI") {
+            const readable = extractReadableBookText(currentElement) || currentElement.textContent.trim();
+            if (readable) {
+              currentText = currentText ? `${currentText} ${readable}` : readable;
+            }
           }
 
-          if (currentElement.tagName === "H3" || currentElement.tagName === "P") {
+          if (currentElement.tagName === "H3" || currentElement.tagName === "P" || currentElement.tagName === "LI") {
             // Use stable ID based on content instead of random timestamp
             uniqueClass = generateStableClassId(currentElement.textContent);
-            existingClasses = currentElement.className.trim();
-            currentElement.setAttribute("class", `${existingClasses} ${uniqueClass}`);
+            existingClasses = (currentElement.getAttribute("class") || "").trim();
+            if (!existingClasses.split(/\s+/).includes(uniqueClass)) {
+              currentElement.setAttribute("class", existingClasses ? `${existingClasses} ${uniqueClass}` : uniqueClass);
+            }
           }
         }
 
         if (currentSubsection !== "") {
-          subsectionElements.set(currentSubsection, { text: currentText, element: currentElement });
+          subsectionElements.set(currentSubsection, {
+            text: currentText.trim(),
+            element: currentHeadingElement || currentElement,
+            section: sectionIndex + 1,
+          });
         }
 
-        window.subsections = {...window.subsections, ...Object.fromEntries(subsectionElements) };
+        // Index MLSysBook callouts (foldboxes, callout divs, fallacy-pitfall blocks)
+        const callouts = section.querySelectorAll('details[class*="callout-"], div.callout, div.fallacy-pitfall');
+        callouts.forEach((callout) => {
+          if (
+            callout.closest?.(IGNORED_CONTEXT_SELECTOR) ||
+            callout.classList?.contains('callout-exercise') ||
+            callout.classList?.contains('custom-quiz-callout')
+          ) {
+            return;
+          }
+          const titleNode = callout.querySelector('summary, .callout-title-container, .callout-header');
+          const calloutKey = (titleNode ? extractReadableBookText(titleNode) || titleNode.textContent : '').trim();
+          const calloutText = (
+            extractReadableBookText(callout, { includeClosedDetails: true }) ||
+            extractReadableBookText(callout) ||
+            callout.textContent ||
+            ''
+          ).trim();
+          if (calloutKey && calloutText) {
+            subsectionElements.set(calloutKey, {
+              text: calloutText,
+              element: callout,
+              section: sectionIndex + 1,
+            });
+          }
+        });
+
+        window.subsections = { ...window.subsections, ...Object.fromEntries(subsectionElements) };
       });
     };
 
     const extractKeywords = () => {
       const keywords = {};
-
-      const keywordElements = Array.from(document.querySelectorAll("strong"));
+      const contentRoot = document.querySelector('main#quarto-document-content, main, article') || document.body;
+      const keywordElements = Array.from(contentRoot ? contentRoot.querySelectorAll("strong") : []);
       keywordElements.forEach((element) => {
+        if (element.closest?.(IGNORED_CONTEXT_SELECTOR)) {
+          return;
+        }
         let identifier = element.getAttribute("data-identifier");
         if (!identifier) {
           // Use stable ID based on the keyword text content
           identifier = generateStableClassId(element.textContent);
           element.setAttribute("data-identifier", identifier);
         }
-        const keyword = element.textContent.trim().replace(/[.,!?;:]$/g, '');
-        const parentElement = element.parentNode;
-        const textContent = Array.from(parentElement.childNodes).reduce(
-          (accumulator, node) => {
-            if (node.nodeType === Node.TEXT_NODE) {
-              return accumulator + node.textContent.trim();
-            }
-            return accumulator;
-          },
-          ""
-        );
+        const rawKeyword = extractReadableBookText(element) || element.textContent || "";
+        const keyword = rawKeyword.trim().replace(/[.,!?;:]$/g, '');
+        if (!keyword) return;
+
+        const summaryElement = element.closest?.('summary');
+        const detailsElement = summaryElement ? summaryElement.closest?.('details') : null;
+        let textContent = "";
+        if (detailsElement) {
+          textContent =
+            extractReadableBookText(detailsElement, { includeClosedDetails: true }) ||
+            extractReadableBookText(detailsElement);
+        } else {
+          const container =
+            element.closest?.('p, li, dd, blockquote, div[id^="fn"], .callout') ||
+            element.parentElement ||
+            element.parentNode;
+          textContent = container ? extractReadableBookText(container) : "";
+          if (!textContent && container?.textContent) {
+            textContent = container.textContent.replace(/\s+/g, ' ').trim();
+          }
+        }
+        if (!textContent) {
+          textContent = keyword;
+        }
         keywords[keyword] = { text: textContent, identifier };
       });
 

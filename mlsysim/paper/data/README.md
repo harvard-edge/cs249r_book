@@ -15,3 +15,67 @@ a decode prediction error, or sustained decode bandwidth utilization.
 the displayed request averages; the validation script labels the metric mismatch
 and does not impose a decode-error gate. These published measurements are
 separate from local Python execution timings in `../generated/timing_samples.json`.
+
+# Published decode latencies
+
+`nim-llama-70b-concurrency1.csv` preserves every concurrency-1 row for the 70B
+Llama models on NVIDIA's NIM benchmarking page (documentation version 1.0.0).
+The adjacent provenance file records the page URL, retrieval date, and the
+SHA-256 of the retrieved page and of the metrics page that defines ITL. Model,
+NIM version, GPU count and type, precision, tensor parallelism, and sequence
+lengths come from the section headings above each table; the four measured
+columns are the table cells, unchanged. `../scripts/check_nim_source.py` re-reads
+the page (or a saved copy) and checks every row against it.
+
+NIM reports inter-token latency as `(e2e_latency - TTFT) / (output_tokens - 1)`,
+so these rows do isolate decode. They are Llama-3.3-70B (and, at FP8 only,
+Llama-3.1-70B), not Llama-2-70B. `../scripts/paper_scenarios.py` compares the
+16-bit rows with the weight-read floor for `Models.Language.Llama3_70B`; the
+validation script checks that every floor lies below its measured ITL. Like the
+Argonne rows, these are measurements of particular serving releases: the same
+four-H100 configuration reports different ITL under NIM 1.5.0 and 1.8.0.
+
+# Measured GPU board energy
+
+`gpu-energy/` has a declared measurement plan and GPU board-energy
+measurements for single-GPU Llama-3.1-8B inference (vLLM) and ResNet-50
+training on H100 and A100 boards. Unlike the rows above, these measurements
+are made with committed code. `../scripts/measure_gpu_energy.py` records every
+trial and hashes it into a manifest, and `../scripts/analyze_gpu_energy.py`
+verifies the runs and compares their energy, through `RunFootprintModel`, with
+the package's two device-power assumptions: rated TDP and `Engine.solve`'s
+energy-proportional rule. `gpu-energy/README.md` documents the protocol and
+the measurement boundary.
+
+`gpu-energy-workloads/` is a second declared test with the same runner,
+protocol and analysis and a new seed, 2198. It adds Llama-2-7B, Llama-2-13B and
+Mixtral-8x7B, adds the H200 as a third GPU, and measures Llama-3.1-8B and
+ResNet-50 training again on new boards. Its README reports the results and the
+changes made after measuring began.
+
+`gpu-energy-boards/` is a third declared test with the same runner, protocol
+and analysis, and the seed of `gpu-energy/`. It measures Llama-3.1-8B and
+ResNet-50 training on four more boards each of the H100, A100 and H200, to
+find out how much energy differs between boards of one GPU.
+`../scripts/compare_gpu_energy_boards.py` collects each run's energy from all
+three tests into `gpu-energy-boards/board_energy.csv` and compares them.
+
+`gpu-energy-seeds/` is a fourth declared test with two plans that differ only
+in seed. Each container measures both on one GPU, so the seed can be compared
+on the same board. `../scripts/compare_gpu_energy_seeds.py` pairs the runs.
+
+The per-trial records (`trials.jsonl`, about 34 MB) of these three tests are
+not committed, to keep the repository small. Each run's `manifest.json` stays
+and records the SHA-256 of its `trials.jsonl`, so a copy of the records can be
+checked against it. The records are in the commits of pull request #2208 on
+GitHub. With them in place, `analyze_gpu_energy.py --check --root <folder>`
+and the two comparison scripts with `--check` replay the committed summaries;
+`make publication-check` replays `gpu-energy/` only.
+
+`serverless-gpu-energy/` has per-run GPU energy measurements from Modal
+serverless GPUs (T4 to B200): idle power with a model loaded, cold starts,
+keep-warm windows, pausing a training job, and 148 power runs of seven
+workloads. `../scripts/build_measured_gpu_energy.py` turns them into
+`mlsysim/engine/data/measured_gpu_energy.yaml`, the table behind the opt-in
+`mlsysim.engine.measured_energy` helpers. They return the measured standby
+power and cold-start energy, and a power model calibrated on these runs.

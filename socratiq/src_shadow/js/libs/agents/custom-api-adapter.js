@@ -1,4 +1,5 @@
 import { TokenCounter } from '../utils/tokenCounter.js';
+import { BYOK_SESSION_KEY, redactSecrets } from '../../../../src_shared/byok-provider.js';
 
 /**
  * Custom API Adapter for handling user-provided API endpoints
@@ -23,6 +24,22 @@ export class CustomAPIAdapter {
         saveLocally: session.saveLocally === true,
       }};
     }
+    try {
+      const byokSessionRaw = globalThis.sessionStorage?.getItem(BYOK_SESSION_KEY);
+      if (byokSessionRaw && byokSessionRaw.length <= 8192) {
+        const byok = JSON.parse(byokSessionRaw);
+        if (byok && typeof byok === 'object' && byok.enabled === true && typeof byok.provider === 'string') {
+          return {...saved, customAPI: {
+            enabled: true,
+            provider: byok.provider === 'openrouter' ? 'open-router' : byok.provider,
+            endpoint: typeof byok.endpoint === 'string' ? byok.endpoint : '',
+            model: typeof byok.model === 'string' ? byok.model : '',
+            apiKey: typeof byok.apiKey === 'string' ? byok.apiKey : '',
+            saveLocally: byok.saveLocally === true,
+          }};
+        }
+      }
+    } catch { /* Ignore blocked sessionStorage */ }
     // Honor an opted-out legacy record even if an older version wrote its key.
     if (saved.customAPI && saved.customAPI.saveLocally !== true) {
       saved = {...saved,customAPI:{...saved.customAPI,apiKey:''}};
@@ -93,11 +110,11 @@ export class CustomAPIAdapter {
   static _getDefaultModel(provider) {
     const defaultModels = {
       'ollama': 'gemma3:270m',
-      'openai': 'gpt-3.5-turbo',
-      'open-router': 'meta-llama/llama-4-scout:free',
-      'groq': 'openai/gpt-oss-20b',
+      'openai': 'gpt-4.1-mini',
+      'open-router': 'google/gemini-2.5-flash',
+      'groq': 'openai/gpt-oss-120b',
       'google-gemini': 'gemini-2.5-flash',
-      'anthropic': 'claude-3-sonnet-20240229'
+      'anthropic': 'claude-sonnet-4-20250514'
     };
     return defaultModels[provider] || 'default';
   }
@@ -133,7 +150,7 @@ export class CustomAPIAdapter {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...this._getHeadersForProvider(config.provider, config.apiKey)
+        ...this._getHeadersForProvider(config.provider, config.apiKey, config.endpoint)
       },
       body: JSON.stringify(requestBody)
     });
@@ -141,7 +158,7 @@ export class CustomAPIAdapter {
     if (!response.ok) {
       // Handle rate limit errors specifically
       if (response.status === 429) {
-        const errorText = await response.text();
+        const errorText = redactSecrets(await response.text());
         console.error(`[CUSTOM_API] Rate limit exceeded for ${config.provider}:`, errorText);
         throw new Error(`Rate limit exceeded for ${config.provider}. Please try again in a moment or reduce your request size.`);
       }
@@ -171,7 +188,7 @@ export class CustomAPIAdapter {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...this._getHeadersForProvider(config.provider, config.apiKey)
+        ...this._getHeadersForProvider(config.provider, config.apiKey, config.endpoint)
       },
       body: JSON.stringify(requestBody)
     });
@@ -179,7 +196,7 @@ export class CustomAPIAdapter {
     if (!response.ok) {
       // Handle rate limit errors specifically
       if (response.status === 429) {
-        const errorText = await response.text();
+        const errorText = redactSecrets(await response.text());
         console.error(`[CUSTOM_API] Rate limit exceeded for ${config.provider}:`, errorText);
         throw new Error(`Rate limit exceeded for ${config.provider}. Please try again in a moment or reduce your request size.`);
       }
@@ -235,6 +252,14 @@ export class CustomAPIAdapter {
         };
         
       case 'google-gemini':
+        if (String(config.endpoint || '').includes('/openai/')) {
+          return {
+            messages: messages,
+            model: config.model,
+            temperature: 0.7,
+            stream: streaming
+          };
+        }
         return {
           contents: conversation.map(message => ({
             role: message.role === 'assistant' ? 'model' : 'user',
@@ -272,22 +297,43 @@ export class CustomAPIAdapter {
    * @returns {string} - Endpoint URL
    */
   static _getEndpointForProvider(config, streaming = true) {
-    if (config.provider === 'google-gemini' && config.apiKey) {
-      // Gemini uses API key as query parameter
-      const model = config.model || 'gemini-2.5-flash';
-      const baseUrl = config.endpoint.replace(/\/$/, ''); // Remove trailing slash
-      return `${baseUrl}/models/${model}:${streaming ? 'streamGenerateContent' : 'generateContent'}?${streaming ? 'alt=sse&' : ''}key=${encodeURIComponent(config.apiKey)}`;
+    let parsed;
+    try {
+      parsed = new URL(String(config.endpoint || '').trim());
+    } catch {
+      throw new Error('Custom API endpoint must be a valid URL.');
     }
-    return config.endpoint;
+    const host = parsed.hostname.toLowerCase();
+    if (host === 'mlsysbook.ai' || host === 'www.mlsysbook.ai' || host === 'harvard-edge.github.io' || parsed.pathname.includes('/api/socratiq')) {
+      throw new Error('Refusing to send a personal API key to the shared SocratiQ gateway.');
+    }
+    const isLocal = host === 'localhost' || host === '127.0.0.1';
+    if (!isLocal && parsed.protocol !== 'https:') {
+      throw new Error('Custom API endpoints must use HTTPS.');
+    }
+    parsed.username = '';
+    parsed.password = '';
+    parsed.searchParams.delete('key');
+    parsed.searchParams.delete('api_key');
+    const cleanEndpoint = parsed.toString();
+
+    if (config.provider === 'google-gemini' && !cleanEndpoint.includes('/openai/')) {
+      // Native Gemini endpoint: never put API key in the URL query string; use x-goog-api-key header instead.
+      const model = config.model || 'gemini-2.5-flash';
+      const baseUrl = cleanEndpoint.replace(/\/$/, '');
+      return `${baseUrl}/models/${model}:${streaming ? 'streamGenerateContent?alt=sse' : 'generateContent'}`;
+    }
+    return cleanEndpoint;
   }
 
   /**
    * Get headers for different providers
    * @param {string} provider - Provider name
    * @param {string} apiKey - API key (if any)
+   * @param {string} endpoint - Endpoint URL
    * @returns {Object} - Headers object
    */
-  static _getHeadersForProvider(provider, apiKey = null) {
+  static _getHeadersForProvider(provider, apiKey = null, endpoint = '') {
     const headers = {};
     
     if (apiKey) {
@@ -298,12 +344,16 @@ export class CustomAPIAdapter {
           headers['Authorization'] = `Bearer ${apiKey}`;
           break;
         case 'google-gemini':
-          // Gemini uses API key as query parameter, not header
-          // This will be handled in the endpoint URL construction
+          if (String(endpoint || '').includes('/openai/')) {
+            headers['Authorization'] = `Bearer ${apiKey}`;
+          } else {
+            headers['x-goog-api-key'] = apiKey;
+          }
           break;
         case 'anthropic':
           headers['x-api-key'] = apiKey;
           headers['anthropic-version'] = '2023-06-01';
+          headers['anthropic-dangerous-direct-browser-access'] = 'true';
           break;
         default:
           headers['Authorization'] = `Bearer ${apiKey}`;
@@ -376,7 +426,7 @@ export class CustomAPIAdapter {
         return parsed.choices?.[0]?.delta?.content;
         
       case 'google-gemini':
-        return parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+        return parsed.choices?.[0]?.delta?.content ?? parsed.candidates?.[0]?.content?.parts?.[0]?.text;
         
       case 'anthropic':
         return parsed.delta?.text;
@@ -406,7 +456,7 @@ export class CustomAPIAdapter {
         return data.choices?.[0]?.message?.content;
         
       case 'google-gemini':
-        return data.candidates?.[0]?.content?.parts?.[0]?.text;
+        return data.choices?.[0]?.message?.content ?? data.candidates?.[0]?.content?.parts?.[0]?.text;
         
       case 'anthropic':
         return data.content?.[0]?.text;
@@ -434,7 +484,7 @@ export class CustomAPIAdapter {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...this._getHeadersForProvider(config.provider, config.apiKey)
+          ...this._getHeadersForProvider(config.provider, config.apiKey, config.endpoint)
         },
         body: JSON.stringify(requestBody)
       });

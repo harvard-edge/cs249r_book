@@ -23,7 +23,7 @@ Yet in modern deep learning systems, the core runtime is only the beginning. Whe
 1. **The Monolithic Framework Trap:** Shoveling every emerging systems optimization (low-rank adapters, activation checkpointing, custom GPU kernels, mixed-precision loss scaling, graph compilers) directly into the core framework causes it to balloon into a brittle monolith where bugs in experimental kernels destabilize the core autograd engine.
 2. **The Extensibility Model:** Keep the engine core minimal, stable, and transparent, while exposing strict, first-class extension points. Every specialized optimization lives as an autonomous extension that plugs cleanly into the core contracts.
 
-TinyTorch adopts the extensibility model. The 20 core modules constitute an immutable foundation. Specialized components, including vectorized C++ CPU kernels, Apple MPS dispatch, OpenAI Triton shaders, parameter-efficient fine-tuning, and graph fusion compilers, live in the `tinytorch.extensions` ecosystem.
+TinyTorch adopts the extensibility model. The 20 core modules constitute an immutable foundation. Specialized components, including vectorized C++ CPU kernels, Apple MPS dispatch, OpenAI Triton shaders, hand-written CUDA kernels, parameter-efficient fine-tuning, and graph fusion compilers, live in the `tinytorch.extensions` ecosystem.
 
 ---
 
@@ -69,7 +69,7 @@ TinyTorch exposes four native extension points that correspond to the four funda
 
 2. **The Architectural Boundary (`Layer`):** Subclassing `Layer` introduces custom architectural primitives, freezes pretrained weight matrices by toggling `requires_grad=False`, and exposes low-rank adapter parameters to the optimizer (as in LoRA).
 3. **The Training Dynamics Boundary (`Optimizer`):** Interfacing with `optimizer.params` enables custom gradient transformations, loss scaling for mixed-precision arithmetic, gradient clipping, and advanced update rules (such as Lion or Muon).
-4. **The Silicon Boundary (Backend FFI):** Extracting contiguous memory pointers from `Tensor.data` enables invoking native compiled C++ shared libraries via `ctypes`, launching GPU kernels in OpenAI Triton, or offloading computation to the Apple Silicon GPU through PyTorch's MPS backend (which requires `torch`).
+4. **The Silicon Boundary (Backend FFI):** Extracting contiguous memory pointers from `Tensor.data` enables invoking native compiled C++ shared libraries via `ctypes`, launching GPU kernels in OpenAI Triton or hand-written CUDA, or offloading computation to the Apple Silicon GPU through PyTorch's MPS backend (which requires `torch`).
 
 ### Repository Architecture: Core vs. Extensions
 
@@ -98,7 +98,9 @@ tinytorch/
 │       ├── compile.py  # Kernel fusion compiler
 │       ├── simd_ops.py # Vectorized C++ kernels
 │       ├── mps_ops.py  # Apple Silicon MPS
-│       └── triton_gelu.py
+│       ├── triton_gelu.py
+│       ├── cuda_ops.py # NVIDIA CUDA SGEMM wrapper
+│       └── cuda_sgemm.cu
 └── tests/extensions/   # Parity test suite
 ```
 
@@ -451,6 +453,78 @@ As predicted by the napkin math ($n/6$ FLOP/byte), offloading small matrices los
 
 ---
 
+### Extension 8: Writing the GPU Kernel Yourself (CUDA SGEMM)
+
+Extension 7 handed the matrix multiply to a vendor library: `torch.matmul` on MPS hides every decision about how threads map onto memory. Extension 8 makes those decisions explicit. `cuda_matmul` runs one of three hand-written CUDA kernels for single-precision GEMM (SGEMM), and each stage changes exactly one thing about how the GPU reaches memory. The arithmetic, $2MNK$ multiply-adds, never changes.
+
+**The Systems Bottleneck:** A GPU executes threads in *warps* of 32 that issue each load together. When the 32 addresses in a warp fall into a few adjacent 32-byte sectors, the memory system serves them in one transaction (a *coalesced* access); when they are scattered, it fetches a full sector for every 4-byte float the warp uses. Even fully coalesced, a kernel that loads every operand from global memory for each use does only $2$ FLOPs per $8$ bytes requested, or $0.25$ FLOP/byte. Most of those requests hit in the L1 and L2 caches rather than DRAM, but every one still occupies the SM's load/store path. The bottleneck is therefore memory traffic in two senses: how many sectors each request wastes, and how many times each useful byte is requested.
+
+**Architectural Strategy:** Three stages, each attacking one of those costs:
+
+1. **Naive:** one thread per output element, with `threadIdx.x` selecting the *row*. The 32 threads of a warp read `A[row*K + k]` from 32 different rows, $K$ floats apart: 32 sectors fetched to use 128 bytes.
+2. **Coalesced:** the same loop, but `threadIdx.x` selects the *column*. A warp now reads 32 adjacent floats of `B`, served as four full sectors, and `A[row*K + k]` becomes a single broadcast address. Only the index mapping changed.
+3. **Shared-memory tiling:** each 32 × 32 thread block stages a tile of `A` and a tile of `B` in on-chip shared memory, synchronizes, and does 32 multiply-adds per thread from the tile. Every float loaded from global memory is now reused 32 times, lifting the kernel from $0.25$ to about $8$ FLOP per byte requested.
+
+**Pedagogical Choice: Why raw CUDA through ctypes?** Triton (Extension 7) generates the thread-to-data mapping for you; that is its value in production and its cost in a course. `cuda_ops.py` follows the same pattern as `simd_ops.py`: it compiles `cuda_sgemm.cu` with `nvcc` on first use, loads it through `ctypes`, and needs no PyTorch. Each stage has its own `extern "C"` entry point that returns the `cudaError_t`, so a failed launch produces a warning before the NumPy fallback rather than a silently mislabeled timing.
+
+**The Implementation:**
+
+The Python wrapper picks a stage and passes host pointers across the FFI:
+
+{{< include _listings/21_extensions/cuda_matmul.qmd >}}
+
+Stage 1 assigns `threadIdx.x` to the row:
+
+{{< include _listings/21_extensions/sgemm_naive.qmd >}}
+
+Stage 2 is the same kernel with `x` and `y` swapped in the index computation:
+
+{{< include _listings/21_extensions/sgemm_coalesced.qmd >}}
+
+Stage 3 adds the shared-memory tiles and the two barriers that protect them:
+
+{{< include _listings/21_extensions/sgemm_tiled.qmd >}}
+
+::: {#nbk-extensions-cuda .callout-notebook title="Napkin Math: Bytes per FLOP in each stage"}
+For one warp at one step $k$ of the inner loop (32 threads, 32 multiply-adds, 64 FLOPs):
+
+- **Naive:** the `A` reads span 32 rows, so 32 sectors × 32 bytes $= 1024$ bytes for `A`; `B` is one broadcast sector. About $1056$ bytes for 64 FLOPs, or $0.06$ FLOP/byte of traffic requested.
+- **Coalesced:** `B` takes 4 sectors $= 128$ bytes, `A` one broadcast sector. About $160$ bytes for 64 FLOPs, $0.4$ FLOP/byte, a $6.6\times$ cut in traffic for identical arithmetic.
+- **Tiled (TILE = 32):** each thread loads one float of `A` and one of `B` per tile, then performs 32 multiply-adds (64 FLOPs) from shared memory: $64 / 8 = 8$ FLOP/byte from global memory.
+
+The first change removes wasted sectors; the second removes repeated requests.
+:::
+
+**The Empirical Scorecard:** @tbl-extensions-cuda times `benchmark_stages(n)` on an NVIDIA RTX 4060 Laptop GPU. Each entry is the median of five calls after a warm-up and includes both PCIe copies, as the MPS scorecard does.
+
+| Matrix Dimension ($n$) | `np.matmul` (CPU) | Naive | Coalesced | Tiled |
+| ---: | ---: | ---: | ---: | ---: |
+| 256 | 0.06 ms | 0.69 ms | 0.25 ms | 0.23 ms |
+| 1024 | 2.52 ms | 28.3 ms | 4.73 ms | 4.25 ms |
+| 2048 | 24.6 ms | 149 ms | 23.6 ms | 20.3 ms |
+| 4096 | 226 ms | 1,162 ms | 202 ms | 148 ms |
+
+: **CUDA SGEMM stages on one RTX 4060 Laptop GPU, PCIe copies included.** At $n = 2048$ the stages reach 115, 728, and 846 GFLOP/s. Coalescing alone is worth $6.3\times$; tiling adds another 16% at $n = 2048$ and 36% at $n = 4096$. All outputs match `np.matmul` within float32 tolerance. {#tbl-extensions-cuda tbl-colwidths="[24,19,19,19,19]"}
+
+@tbl-extensions-cuda-ncu shows *why*, using Nsight Compute counters for each kernel alone at $n = 2048$. Nsight Compute locks the GPU clocks while it profiles, so its kernel times run longer than the free-running timings above; compare the stages with each other, not with @tbl-extensions-cuda.
+
+| Metric (Nsight Compute) | Naive | Coalesced | Tiled |
+| :--- | ---: | ---: | ---: |
+| Kernel time (clocks locked) | 242 ms | 29.2 ms | 23.2 ms |
+| Global load requests | 537 M | 537 M | 16.8 M |
+| Sectors per request | 16.5 | 2.5 | 4.0 |
+| DRAM bytes read | 36.0 MB | 34.1 MB | 34.2 MB |
+| DRAM throughput (% of peak) | 0.07% | 0.59% | 0.74% |
+| SM throughput (% of peak) | 12.0% | 99.1% | 85.9% |
+
+: **What each stage changes, measured by Nsight Compute on the RTX 4060 Laptop GPU at $n = 2048$.** A global load request is one warp-wide load instruction; a sector is 32 bytes. {#tbl-extensions-cuda-ncu tbl-colwidths="[40,20,20,20]"}
+
+The counters confirm the napkin math. In the naive kernel each warp alternates a load of `A` that touches 32 sectors with a broadcast load of `B` that touches one, averaging 16.5 sectors per request. Coalescing makes the `B` load 4 sectors and the `A` load a broadcast, averaging 2.5, with exactly the same number of requests. Tiling leaves each request at 4 full sectors but issues 32 times fewer of them.
+
+Notice what does *not* change: DRAM reads stay near 34 MB in every stage, which is just $A$ and $B$ read once ($2 \times 2048^2 \times 4$ bytes $\approx 33.6$ MB). The thread blocks running at any moment share rows of `A` and columns of `B` that are still in the GPU's 32 MB L2 cache, so the re-reads in the first two stages are served on chip, and DRAM is almost idle. The real cost was the flood of requests through L1 and the load/store units: the coalesced kernel keeps the SM 99% busy doing it. Tiling cuts those requests, but the tiled kernel still reaches only a small fraction of the GPU's roughly 15 TFLOP/s float32 peak, because each multiply-add now waits on a shared-memory load. Closing that gap takes register tiling: each thread computes a small block of outputs from values held in registers, the same idea @sec-extensions-register-micro-tiling proposes for the CPU kernel and the step that separates `simd_matmul` from vendor BLAS in Extension 5. Like that project, a register-tiled CUDA stage is left as a next-level extension.
+
+---
+
 ## Evaluating an Extension: From Micro-benchmarks to End-to-End Milestones
 
 Authoring a new systems extension requires rigorous verification of correctness, performance benchmarking, and evaluation of real-world impact. In production systems engineering, an optimization cannot be evaluated in a vacuum. TinyTorch provides a structured **3-Tier Evaluation Ladder** from unit verification to full end-to-end model training:
@@ -562,7 +636,7 @@ Each project below addresses a real systems bottleneck and demonstrates how to r
   3. Reset a consecutive-success step counter.
   If $M$ consecutive steps complete without any overflow (e.g., $M = 2000$), double the scale factor ($S \leftarrow 2S$) to maintain maximum numerical dynamic range. Evaluate on Milestone 4 or 5 in FP16.
 
-### Register Micro-Tiling
+### Register Micro-Tiling {#sec-extensions-register-micro-tiling}
 
 * **Systems Limitation:** Stock `simd_matmul` tiles matrices at the L1 cache level ($64 \times 64$). However, the innermost loop accumulates scalar products back into memory, keeping CPU vector execution units waiting on L1 data cache load-store latency.
 * **The Project:** Implement an $8 \times 4$ register micro-kernel in `cpp_simd_gemm.cpp`. Unroll the inner loop so that an $8 \times 4$ block of intermediate accumulation registers is kept alive in CPU vector registers (AVX2/NEON) throughout the $K$-dimension reduction, storing results back to DRAM only when the tile is complete. Benchmark the micro-kernel against `simd_matmul` and quantify the GFLOP/s improvement.

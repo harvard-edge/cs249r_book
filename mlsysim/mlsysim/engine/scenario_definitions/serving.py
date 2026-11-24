@@ -457,7 +457,7 @@ class FleetMfuScenario(BaseScenario):
     >>> from mlsysim import Scenarios
     >>> case = Scenarios.Llama2_70BFleetMfu128
     >>> round(float(case.node_useful_work.to('flop').magnitude), 3)
-    925680000000000.0"""
+    930720000000000.0"""
 
     # Retain the public class identity used by Pydantic schemas and pickle.
     __module__ = "mlsysim.engine.scenario_types"
@@ -2449,7 +2449,7 @@ def _labeled_capacity(hardware: HardwareNode) -> Quantity:
     """The capacity a vendor label prints: binary gigabytes read as "GB" (an
     "80 GB" A100 holds 80 GiB). Shares of a labeled device divide decimal bytes
     by this figure, as the chapters do."""
-    return Q_(hardware.memory.capacity.to("GiB").magnitude, "GB")
+    return hardware.memory.labeled_capacity
 
 
 class PackedQkvProjectionScenario(BaseScenario):

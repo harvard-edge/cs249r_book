@@ -8,7 +8,7 @@ window.MLSysFigureLessons["original-v4-03-chunk-supply-horizon"]=async(root,cont
  root.classList.add("mlsys-original-v4-03-chunk-supply-horizon");
  const canvas=document.createElement('div');canvas.className='v4b-canvas';canvas.tabIndex=0;canvas.setAttribute('aria-label','Original artwork. Scroll to inspect; Expand opens a larger view.');canvas.append(svg);
  svg.setAttribute('role','img');svg.setAttribute('aria-label',"Why does buffered supply outlast permission?");
- const overlay=document.createElementNS(ns,'g');svg.append(overlay);
+ const overlay=document.createElementNS(ns,'g');svg.append(overlay);{const vb=svg.viewBox.baseVal,_fg=document.createElementNS(ns,'path');_fg.setAttribute('d',`M${(vb.x+vb.width*.08).toFixed(1)},${(vb.y+vb.height*.08).toFixed(1)}h${(vb.width*.84).toFixed(1)}v${(vb.height*.84).toFixed(1)}h-${(vb.width*.84).toFixed(1)}z`);_fg.setAttribute('fill','none');_fg.setAttribute('stroke','none');_fg.setAttribute('data-mlsys-focus','');overlay.append(_fg);}
  const add=(tag,attrs={},text)=>{const el=document.createElementNS(ns,tag);for(const[k,v]of Object.entries(attrs))el.setAttribute(k,String(v));if(text!=null)el.textContent=text;overlay.append(el);return el;};
  const readout=document.createElement('p');readout.className='v4b-readout';readout.setAttribute('aria-live','off');
  const equation=document.createElement('p');equation.className='v4b-equation';
@@ -17,7 +17,7 @@ window.MLSysFigureLessons["original-v4-03-chunk-supply-horizon"]=async(root,cont
  // Keep the endpoint in view when Expand or rotation changes the artwork scale.
  // Scrolling alone does not trigger this observer, so manual inspection persists.
  let focus=null,resizeFrame=0,disposed=false;
- function recenter(){if(!focus||disposed)return;const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=Math.max(0,focus[0]*scale-canvas.clientWidth/2);canvas.scrollTop=Math.max(0,focus[1]*scale-canvas.clientHeight/2);}
+ function recenter(){if(!focus||disposed)return;const scale=svg.getBoundingClientRect().width/width;canvas.scrollLeft=canvas.scrollWidth>canvas.clientWidth+2?Math.max(0,focus[0]*scale-canvas.clientWidth/2):0;canvas.scrollTop=canvas.scrollHeight>canvas.clientHeight+2?Math.max(0,focus[1]*scale-canvas.clientHeight/2):0;}
  function follow(x,y){focus=[x,y];recenter();}
  const cameraResize=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(!disposed&&!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;recenter();});}):null;
  cameraResize?.observe(canvas);cameraResize?.observe(svg);
@@ -38,14 +38,14 @@ window.MLSysFigureLessons["original-v4-03-chunk-supply-horizon"]=async(root,cont
  const handoff=dot(X(50),2290,'#B87333',27);handoff.style.display='none';
  const times=[0,D.latency,65,D.replacement,200,D.horizon,D.span];
  const steps=[
- ['Capture chunk 0 evidence','The capture clock starts before inference completes. Sixteen capture-relative setpoints span 400 ms; the elapsed prefix cannot be executed retroactively.'],
- ['Make chunk 0 available','Follow inference to its 40 ms endpoint. Only then can chunk 0 enter the direct-replacement stream under the stated assumption of no additional admission delay. Supply alone does not confer permission.'],
- ['Execute within the replacement interval','The active first-chunk segment grows from 40 ms toward 90 ms. Its evidence age is measured from capture, rather than from arrival. The original setpoint grid marks 0 and 25 ms as unavailable prefix, then hands off the 50 and 75 ms setpoints. Each handoff still requires a valid active lease and independent checks.'],
- ['Replace chunk 0 with its successor','At this endpoint chunk 1, captured 50 ms after chunk 0, is available and directly replaces it. Chunk 0’s evidence age is 90 ms; its 400 ms buffered tail is discarded from the active queue, shown dimmed in the original setpoint grid.'],
- ['Inspect the old chunk’s still-valid evidence','Continue inspecting chunk 0’s capture-relative evidence after it has been replaced. The original renewal lane is retained for context. This cursor does not put the old chunk back into force.'],
- ['Reach the first evidence horizon','At this endpoint the tracked-drift bound reaches grasp tolerance. The old chunk is already replaced; its now-expired remainder is explicitly withheld in the original grid. Its remaining buffered setpoints cannot extend that evidence horizon or create permission.'],
- ['Inspect the supply-only tail','The first chunk has 400 ms of capture-relative supply, but its evidence expired earlier. The hatched tail remains buffer, not permission. This inspection does not simulate continued execution of the old chunk.']
- ].map(([label,description],i)=>({label,get description(){return root.dataset.lessonCommittedIndex===String(i)?description:'Next endpoint, not yet completed: '+description;}}));
+ ['Capture chunk 0 evidence','At t = 0 ms, the dashed teal cursor marks chunk 0 capture while the tracked mug error starts at e₀ = 3.00 mm. Sixteen capture-relative setpoints span 400 ms at 25 ms spacing, before inference completes.'],
+ ['Make chunk 0 available','At t = 40 ms, inference finishes and chunk 0 enters force. Because the 0 ms and 25 ms setpoints elapsed during the 40 ms evaluation, the setpoint lane dims both as an unavailable prefix while slip drift reaches 3.40 mm.'],
+ ['Execute within the replacement interval','At t = 65 ms, the dark green bar tracks active execution between 40 ms and 90 ms as the copper dot hands off the 50 ms setpoint (followed by 75 ms). Evidence age is 65 ms from capture, with a 4.06 mm error bound.'],
+ ['Replace chunk 0 with its successor','At t = 90 ms (one 50 ms renewal period plus 40 ms inference), chunk 1 arrives from the t = 50 ms capture and replaces chunk 0 at 5.03 mm drift, dimming the 12 remaining setpoints in chunk 0.'],
+ ['Inspect the old chunk’s still-valid evidence','Sweeping the cursor to t = 200 ms inspects chunk 0 after replacement: its slip error bound reaches 13.00 mm, still inside the 15.0 mm grasp tolerance while newer chunks command the arm.'],
+ ['Reach the first evidence horizon','At t = 219.1 ms, tracked slip drift e₀ + ½ a_slip t² reaches the 15.00 mm grasp tolerance (red dashed line), so the 7 remaining setpoints from 225 ms to 375 ms are crossed out in red as expired.'],
+ ['Inspect the supply-only tail','At t = 400 ms, chunk 0 reaches the end of its H = 16 setpoint span with a 43.00 mm drift bound; the hatched tail beyond 219.1 ms is buffered setpoint supply for jitter, never permission to execute.']
+ ].map(([label,description])=>({label,description}));
  function frame(t){const valid=t<D.horizon,first=t<D.latency?'unavailable':t<D.replacement?'in force':'replaced',age=t,error=D.initial+.5*D.slip*(age/1000)**2*1000;
   cursor.setAttribute('x1',X(t));cursor.setAttribute('x2',X(t));used.setAttribute('x2',X(Math.min(D.replacement,Math.max(D.latency,t))));supply.setAttribute('x2',X(t));supply.setAttribute('stroke',valid?'#B87333':'#A51C30');
   const counts={unavailable:0,queued:0,consumed:0,replaced:0,withheld:0};ticks.forEach(({time,mark,slash})=>{const status=time<D.latency?'unavailable':time<D.replacement&&time<=t?'consumed':t>=D.horizon&&time>=D.horizon?'withheld':t>=D.replacement&&time>=D.replacement?'replaced':'queued';counts[status]++;mark.dataset.status=status;mark.setAttribute('fill',status==='unavailable'?'#A0AEC0':status==='consumed'?'#1A4D3E':status==='withheld'?'#A51C30':'#B87333');mark.setAttribute('opacity',status==='replaced'?'.22':status==='queued'?'.55':'1');slash.setAttribute('display',status==='withheld'?'':'none');});
@@ -57,6 +57,6 @@ window.MLSysFigureLessons["original-v4-03-chunk-supply-horizon"]=async(root,cont
  function render(i,{stage,details}){root.dataset.lessonCommittedIndex=String(i);mount(stage,details);frame(times[i]);follow(X(times[i]),i<2?1320:i<4?1650:1970);}
  function transition({from,to,onFrame}){if(to!==from+1)return;onFrame(p=>{frame(times[from]+(times[to]-times[from])*p);root.dataset.animationProgress=String(p);});}
 
- const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:"Why does buffered supply outlast permission?",scope:"Original direct-replacement timing strip. Exact chapter schedule and tracked-mug bound; no extra admission delay is charged. After replacement, the cursor inspects chunk 0 evidence and supply, not continued execution.",steps,render,transition});
+ const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',intro:'Trace one 400 ms action chunk from capture through its 40 ms inference, 90 ms replacement, and 219.1 ms evidence horizon.',title:"Why does buffered supply outlast permission?",scope:"Direct-replacement conveyor schedule: 50 ms renewal period (20 Hz), 40 ms p99 inference latency, and H = 16 setpoints spaced 25 ms apart (400 ms span), with no extra admission delay. Tracked mug error grows from e₀ = 3.00 mm under residual belt slip a_slip = 0.5 m/s² toward the r_tol = 15.0 mm grasp tolerance. After replacement at 90 ms, the cursor inspects chunk 0 evidence and buffered supply rather than continued execution.",steps,render,transition});
  const destroy=player.destroy;player.destroy=()=>{disposed=true;cameraResize?.disconnect();cancelAnimationFrame(resizeFrame);destroy();};return player;
 };})();

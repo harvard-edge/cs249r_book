@@ -612,7 +612,7 @@ def disparity_uncertainty(*, dossier="pilot", intersections=True, confidence=0.9
         raise ValueError("unknown audit dossier")
     confidence = _fraction(confidence, "confidence")
     if confidence == 0 or confidence == 1:
-        raise ValueError("confidence must be strictly between 0 and 1")
+        raise ValueError("confidence must lie in (0, 1)")
     if not isinstance(intersections, bool):
         raise ValueError("intersections must be boolean")
     cells = AUDIT_COUNT_DOSSIERS[dossier]
@@ -826,9 +826,12 @@ __all__ = [
     "assess_fairness",
     "audit_evidence",
     "check_privacy_profile",
+    "disparity_uncertainty",
     "evaluate_capacity",
+    "feedback_and_oversight",
     "mechanical_gate",
     "record_release_decision",
     "scored_fixture",
     "track_profile",
+    "unlearning_trace",
 ]

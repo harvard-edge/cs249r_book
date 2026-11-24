@@ -4,7 +4,7 @@
 Every drawn value comes from MLSysIM through calcs.py, which this script
 imports: the MLPerf Training v4.0 ResNet-50 runs and the Scenarios.* built on
 them (scores, Welch intervals, run counts, the paired accuracy comparison),
-the sample-size, run-order, beam, calibration, and acceptance-gate scenarios,
+the sample-size, run-order, beam, calibration, and acceptance-criterion scenarios,
 and the Literature entries and series of published results (AnandTech 2013;
 Recht et al. 2019; Zhang et al. 2024; Sandler et al. 2018; Chu et al. 2021;
 Guo et al. 2017; Koh et al. 2021). Labels print the values calcs.py records
@@ -210,14 +210,14 @@ for k in (1, 2, 3, 4, 5):
     a1.axvline(0, color=C['neutral'], lw=1.5, ls='--', alpha=on)
     a1.plot(w['d'], 0.5, 'o', ms=10, color=C['compute'], zorder=5, alpha=on)
     if k >= 3:
-        a1.annotate('', xy=(w['d'] - w['se'], 1.15), xytext=(w['d'] + w['se'], 1.15), arrowprops=dict(arrowstyle='|-|', color=C['neutral'], lw=1.5))
-        a1.text(w['d'] + w['se'] + 0.008, 1.15, '±1 SE', va='center', fontsize=10.5, color=C['neutral'], fontweight='bold')
+        a1.annotate('', xy=(w['d'] - w['se'], 1.12), xytext=(w['d'] + w['se'], 1.12), arrowprops=dict(arrowstyle='|-|,widthA=0.25,widthB=0.25', color=C['neutral'], lw=1.5))
+        a1.text(w['d'], 1.42, '±1 SE', ha='center', va='bottom', fontsize=10, color=C['neutral'], fontweight='bold')
     if k >= 4:
-        a1.plot([w['lo'], w['hi']], [0.5, 0.5], color=C['compute'], lw=6, solid_capstyle='butt', zorder=4)
-        a1.text(w['hi'] + 0.006, 0.5, '0.026 to 0.182', va='center', fontsize=11, fontweight='bold', color=C['compute'])
+        a1.plot([w['lo'], w['hi']], [0.46, 0.46], color=C['compute'], lw=6, solid_capstyle='butt', zorder=4)
+        a1.text(w['hi'] + 0.008, 0.46, '95% CI:\n0.026 to 0.182', va='center', fontsize=10, fontweight='bold', color=C['compute'], linespacing=1.0)
     a1.text(-0.075, 0.5, 'Eos − Dell', ha='right', va='center', fontsize=11, fontweight='bold', color=C['compute'], alpha=on)
-    a1.set_xlim(-0.07, 0.36)
-    a1.set_ylim(-0.2, 1.5)
+    a1.set_xlim(-0.07, 0.40)
+    a1.set_ylim(-0.2, 2.0)
     a1.set_yticks([])
     a1.spines['left'].set_visible(False)
     a1.set_xticks([0, 0.1, 0.2, 0.3])
@@ -230,7 +230,7 @@ for k in (1, 2, 3, 4, 5):
     a2.axvline(0, color=C['neutral'], lw=1.5, ls='--', alpha=al)
     a2.plot([h['lo'], h['hi']], [0.5, 0.5], color=C['data'], lw=6, solid_capstyle='butt', alpha=al)
     a2.plot(h['d'], 0.5, 'o', ms=10, color=C['data'], alpha=al, zorder=5)
-    a2.text(h['lo'] - 0.03, 0.5, '1.16 to 1.31', ha='right', va='center', fontsize=11, fontweight='bold', color=C['data'], alpha=al)
+    a2.text(h['lo'] - 0.035, 0.5, '95% CI: 1.16 to 1.31', ha='right', va='center', fontsize=10.5, fontweight='bold', color=C['data'], alpha=al)
     a2.text(-0.075 * 1.45 / 0.43, 0.5, 'Eos − H200', ha='right', va='center', fontsize=11, fontweight='bold', color=C['data'], alpha=al)
     a2.set_xlim(-0.07 * 1.45 / 0.43, 1.45)
     a2.set_ylim(-0.2, 1.5)
@@ -438,21 +438,50 @@ for k in (1, 2):
     sp.save(fig, out / f'pareto_step{k}.svg')
 chu = [('MobileNetV1', 54.7, 3.72), ('MobileNetV2', 38.8, 4.97), ('MobileNetV3 Large', 20.3, 4.51), ('MobileNet-EdgeTPU', 59.3, 4.29)]
 col = {'MobileNetV1': 'memory', 'MobileNetV2': 'neutral', 'MobileNetV3 Large': 'data', 'MobileNet-EdgeTPU': 'network'}
-fig, ax = plt.subplots(figsize=(5.8, 2.2))
 cpu_rank = {n: i for i, (n, _, _) in enumerate(sorted(chu, key=lambda r: r[1]))}
 dsp_rank = {n: i for i, (n, _, _) in enumerate(sorted(chu, key=lambda r: r[2]))}
-for n, cpu, dsp in chu:
-    y0, y1 = (3 - cpu_rank[n], 3 - dsp_rank[n])
-    ax.plot([0, 1], [y0, y1], color=C[col[n]], lw=3, marker='o', ms=10)
-    ax.text(-0.09, y0, f'{n}  {cpu:.1f} ms', ha='right', va='center', fontsize=11, fontweight='bold', color=C[col[n]])
-    ax.text(1.09, y1, f'{dsp:.2f} ms  {n}', ha='left', va='center', fontsize=11, fontweight='bold', color=C[col[n]])
-ax.text(0, 3.6, 'CPU (float)', ha='center', fontsize=12, fontweight='bold')
-ax.text(1, 3.6, 'DSP', ha='center', fontsize=12, fontweight='bold')
-ax.text(0.5, -0.75, 'fastest at top; top-1 75.1 to 76.2% for all four', ha='center', fontsize=10, color=C['neutral'])
-ax.set_xlim(-1.4, 2.4)
-ax.set_ylim(-0.9, 3.9)
-ax.axis('off')
-sp.save(fig, out / 'lottery.svg')
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.2))
+    # Invisible corner anchors keep exact bounding box across step 1 and step 2
+    ax.plot([-1.35, 2.35], [-0.85, 3.85], alpha=0.0)
+    for n, cpu, dsp in chu:
+        y0, y1 = (3 - cpu_rank[n], 3 - dsp_rank[n])
+        ax.plot([0], [y0], 'o', ms=10, color=C[col[n]])
+        ax.text(-0.09, y0, f'{n}  {cpu:.1f} ms', ha='right', va='center', fontsize=11, fontweight='bold', color=C[col[n]])
+        if k >= 2:
+            ax.plot([0, 1], [y0, y1], color=C[col[n]], lw=3)
+            ax.plot([1], [y1], 'o', ms=10, color=C[col[n]])
+            ax.text(1.09, y1, f'{dsp:.2f} ms  {n}', ha='left', va='center', fontsize=11, fontweight='bold', color=C[col[n]])
+    ax.text(0, 3.6, 'CPU (float)', ha='center', fontsize=12, fontweight='bold')
+    if k >= 2:
+        ax.text(1, 3.6, 'DSP', ha='center', fontsize=12, fontweight='bold')
+    ax.text(0.5, -0.75, 'fastest at top; top-1 75.1 to 76.2% for all four', ha='center', fontsize=10, color=C['neutral'])
+    ax.set_xlim(-1.4, 2.4)
+    ax.set_ylim(-0.9, 3.9)
+    ax.axis('off')
+    sp.save(fig, out / f'lottery_step{k}.svg')
+
+# Log-exponent visual for Verification Gap slide (F26)
+fig, ax = plt.subplots(figsize=(4.2, 1.25))
+ax.barh(1, 4.7, color=C['memory'], height=0.52)
+ax.barh(0, 362508, color=C['danger'], height=0.52)
+ax.text(-0.02, 1, 'ImageNet val set', transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=13, fontweight='bold', color=C['text'])
+ax.text(-0.02, 0, '224×224 RGB space', transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=13, fontweight='bold', color=C['text'])
+ax.text(4.7 * 1.6, 1, 'exp 4.7 (50K images)', va='center', fontsize=13, fontweight='bold', color=C['memory'])
+ax.text(362508 * 1.6, 0, 'exp 362,508', va='center', fontsize=13, fontweight='bold', color=C['danger'])
+ax.set_xscale('log')
+ax.set_xlim(1, 3e7)
+ax.set_ylim(-0.55, 1.55)
+ax.set_yticks([])
+ax.set_xticks([10, 1000, 100000])
+ax.set_xticklabels(['10', '1,000', '100,000'])
+ax.tick_params(labelsize=13)
+ax.minorticks_off()
+ax.spines['left'].set_visible(False)
+ax.grid(axis='x', color=C['grid'], lw=0.6)
+ax.set_axisbelow(True)
+ax.set_xlabel('Base-10 exponent of image count (log scale)', fontsize=13)
+sp.save(fig, out / 'verif_gap.svg')
 bins = [(20, 0.65, 0.6), (30, 0.85, 0.8), (50, 0.97, 0.84)]
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(3.4, 2.6))

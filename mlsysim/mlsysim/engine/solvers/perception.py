@@ -578,7 +578,7 @@ class ConformalInsetModel(ForwardModel):
         Parameters
         ----------
         alpha : float
-            Desired miscoverage fraction, strictly between zero and one.
+            Desired miscoverage fraction in the open interval (0, 1).
         calibration_count : int
             Positive number of held-out calibration residuals; large enough for
             the requested order statistic to exist.
@@ -706,7 +706,7 @@ class VisibilityRangeModel(ForwardModel):
         extinction : Quantity
             Positive homogeneous extinction coefficient, in inverse length units.
         contrast_threshold : float
-            Detection contrast fraction, strictly between zero and one.
+            Detection contrast fraction in the open interval (0, 1).
 
         Returns
         -------

@@ -1,0 +1,197 @@
+% Study sheet: Volume III, Chapter 4, Context Engineering.
+% Numbers: \val{...} from context_engineering_studysheet_numbers.tex, written by context_engineering_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{context_engineering_studysheet_numbers}
+\sheetvolume{3}
+\sheetchapter{4}{Context Engineering}
+\sheetsources{Numbers from mlsysim and the chapter's repair-harness scenarios (scenario token counts, not measurements).}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+The runtime rebuilds every request, and fitting is not the goal. Each call needs a \hl{selected working
+set}: the evidence the next decision needs, bound to its revision, laid out for prefix reuse, withdrawn
+once stale.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Admitted is not usable.}{The window sets what fits; usable context is measured per model and workload,
+  and every staged key competes for attention.}
+\idea{Select for the next decision.}{Relevance, not recency. Bulky payloads stay outside behind a handle,
+  re-read by a checked tool call.}
+\idea{Order by change rate.}{Root, trunk, leaf. Prefix reuse ends at the first changed token, but a
+  stale trunk is never kept to save a cache hit.}
+\idea{Every observation keeps its scope.}{It supports claims only for the revision and run conditions
+  that produced it. Labels guide the model; host gates enforce.}
+\idea{Compact from raw records, then audit.}{Keep the raw records and an inventory of protected fields. A
+  model-written record is a candidate, checked against both.}
+\idea{Invalidate, do not delete.}{A write marks bound observations historical and flags the conclusions
+  built on them. A missing edge never proves freshness.}
+\end{ideas}
+
+\vspace{10pt}
+\sheetsec{An observation went stale: three choices}
+\begin{sheettable}{@{}l L L@{}}
+\thead{Choice} & \thead{Next request holds} & \thead{Cost}\\ \midrule
+Remove & the rest, without it & suffix re-prefilled\\
+Replace & fresh read or short marker & suffix re-prefilled\\
+Append notice & stale text plus a notice & cache kept; stale tokens stay\\
+\end{sheettable}
+\vspace{3pt}
+{\fontsize{8.4}{10.4}\selectfont\color{muted}Replace what the next edit targets; append only for history
+cited as background.\par}
+
+\vspace{10pt}
+\fcard{Survival across compactions}%
+  {\Pr(\text{constraint survives } \CompactionBoundaryCount \text{ passes}) = (1-\CompactionLossProbability)^{\CompactionBoundaryCount}}%
+  {Over $\TurnHorizon$ turns a run makes $\CompactionBoundaryCount = \lfloor \TurnHorizon / \CompactionCycleTurnCount \rfloor$
+   passes; loss $\CompactionLossProbability$ per pass compounds. Check protected fields in host code at every pass.}{}{}
+
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Formulas you will use}
+\fcard{Input budget}%
+  {\SystemInstructionTokenCount + \ToolDeclarationTokenCount + \TaskStateTokenCount + \ObservationTokenCount
+   \le \ContextWindow - \OutputLimit}%
+  {Four roles share window $\ContextWindow$ less reply reserve $\OutputLimit$.}%
+  {}%
+  {\begin{tikzpicture}[sheet]
+     \pgfmathsetmacro\u{232/\val{kwindow}}
+     \pgfmathsetmacro\a{\val{ksystem}*\u} \pgfmathsetmacro\b{\a+\val{ktools}*\u}
+     \pgfmathsetmacro\c{\b+\val{kstate}*\u} \pgfmathsetmacro\d{\c+\val{kbudget}*\u}
+     \pgfmathsetmacro\e{\d+\val{kreserve}*\u} \pgfmathsetmacro\s{\val{kperturn}*\u}
+     \draw[nbox] (0,10) rectangle (\a,24); \draw[nbox] (\a,10) rectangle (\b,24);
+     \draw[accbox] (\b,10) rectangle (\c,24);
+     \draw[hotbox] (\c,10) rectangle (\d,24);
+     \foreach \i in {1,...,\val{fit}}{\draw[white, line width=0.4pt] ({\c+\i*\s},10) -- ({\c+\i*\s},24);}
+     \draw[nbox, dashed] (\d,10) rectangle (\e,24);
+     \node[small, anchor=north west] at (0,7) {instructions \val{ksystem}k, tools \val{ktools}k};
+     \node[small, anchor=south] at ({(\b+\c)/2},27) {state \val{kstate}k};
+     \node[lab, anchor=south] at ({(\c+\d)/2},27) {observations \val{kbudget}k: \val{fit} results of \val{kperturn}k};
+     \node[small, anchor=north east] at (\e,7) {reserve \val{kreserve}k};
+   \end{tikzpicture}}
+\fcard{Re-sent input over a trajectory}%
+  {\text{append: } \TurnHorizon\BasePromptLength + \TurnAppendLength\,\frac{\TurnHorizon(\TurnHorizon-1)}{2}
+   \qquad \text{select: } \TurnHorizon\,\SequenceLength}%
+  {Over $\TurnHorizon$ turns; the first request $\BasePromptLength$ holds one result, then $\TurnAppendLength$
+   per turn. Selecting sends $\SequenceLength$ per call.}{}{}
+\fcard{Compaction spacing}%
+  {\CompactionCycleTurnCount = \left\lceil \frac{\CompactionTriggerLength - \CompactionTargetLength}{\TurnAppendLength} \right\rceil}%
+  {Trigger $\CompactionTriggerLength$, target $\CompactionTargetLength$. Each pass rewrites the trunk.}%
+  {Judge policies by $\CostPerAcceptedTask = \mathbb{E}[\AttemptCost]/\AcceptanceProbability$, every pass charged.}{}
+\fcard{Attention dilution}%
+  {\TargetKeyAttentionWeight = \frac{e^{\TargetKeyLogit}}{e^{\TargetKeyLogit} + \sum_{j=1}^{\CompetingKeyCount} e^{\CompetingKeyLogit_j}}}%
+  {Target logit $\TargetKeyLogit$ against $\CompetingKeyCount$ competing keys; each admitted key adds a term $e^{\CompetingKeyLogit_j}$ below.}{}{}
+\vspace{10pt}
+\sheetsec{Root, trunk, leaf}
+\begin{sheettable}{@{}l L L r@{}}
+\thead{Zone} & \thead{Holds} & \thead{Changes when} & \thead{Tokens}\\ \midrule
+Root & instructions, tool declarations & the tool interface changes & \val{root}\\
+Trunk & constraints, progress record, current excerpts & a file is edited or the record refreshed & \val{trunk}\\
+Leaf & newest observation, per-call fields & every call & \val{leaf}\\
+\end{sheettable}
+\vspace{3pt}
+{\fontsize{8.4}{10.4}\selectfont\color{muted}A call prefills from the first changed token on; the first
+call is cold.\par}
+
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{\val{limit} $-$ \val{yfixed} = \val{ybudget}; $\lfloor$\val{ybudget} $\div$ \val{perturn}$\rfloor$ = \val{yfit}
+  results, overflow at turn \val{yoverflow}; digests $\le$ \val{ybudget} $\div$ \val{turns} = \val{ydigest} tokens.
+  Change the per-turn observation (digest plus handle), not the window (input budget).}
+\ans{1}{(a) Nothing reused: \val{total} uncached. (b) Cold call, rewrites prefill trunk and leaf, the rest the leaf:
+  \val{request} + \val{rewrites} $\times$ \val{suffix} + \val{warm} $\times$ \val{leaf} = \val{stable}; (a) is
+  \val{unstableratio}$\times$ (b) (root, trunk, leaf table).}
+\ans{2}{(a) Wide: $\lceil$\val{gap} $\div$ \val{perturn}$\rceil$ = \val{cycle} turns, \val{passes} passes,
+  \val{qkeep}$^{\val{passes}}$ = \val{qwide}\%. Narrow: $\lceil$\val{altgap} $\div$ \val{perturn}$\rceil$ = \val{altcycle},
+  \val{altpasses} passes, \val{qkeep}$^{\val{altpasses}}$ = \val{qnarrow}\%: more rewrites, worse retention. (b) A: \val{qcosta} $\div$ \val{qpa} = \$\val{qeffa}; B:
+  \val{qcostb} $\div$ \val{qpb} = \$\val{qeffb}. B costs more per attempt, less per accepted repair (spacing card).}
+\columnbreak
+\ans{3}{Replace: the next edit targets it, and a notice leaves \val{excerpt} stale tokens in every later call;
+  then read \texttt{r18}. Keep the failure as \texttt{r17} history; flag the hypothesis for reassessment (three choices).}
+\ans{4}{Compare the request sent at that decision with the host's field inventory. Absent: trace the records pass
+  by pass to where it vanished. Present: the model did not comply. An executed deploy means a host gate was missing.}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{How long can the repair agent append raw results?}
+Window \val{window}, reserve \val{reserve}; instructions \val{system}, tools \val{tools}, state \val{state};
+\val{perturn} tokens per result; \val{turns} turns. Selecting keeps \val{selected}.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\sx{196/29}
+  \pgfmathsetmacro\sy{58/\val{kappendbill}}
+  \draw[dim] (26,0) -- (226,0);
+  \draw[dim] (26,0) -- (26,62);
+  \foreach \t in {1,10,20,30}{\draw[dim] ({26+(\t-1)*\sx},0) -- ({26+(\t-1)*\sx},-2.5);
+    \node[small, anchor=north] at ({26+(\t-1)*\sx},-4) {\t};}
+  \node[small, anchor=north] at (126,-13) {turn};
+  \node[small, anchor=south west] at (2,63) {million input tokens, cumulative};
+  \edef\drawappend{\noexpand\draw[accent, line width=1.1pt, x=\sx pt, y=\sy pt, shift={(26pt,0)}]
+    plot coordinates {\val{curveappend}};}
+  \edef\drawselect{\noexpand\draw[muted, line width=0.9pt, x=\sx pt, y=\sy pt, shift={(26pt,0)}]
+    plot coordinates {\val{curveselect}};}
+  \edef\drawlate{\noexpand\draw[accent, dashed, line width=0.9pt, x=\sx pt, y=\sy pt, shift={(26pt,0)}]
+    plot coordinates {\val{curveappendlate}};}
+  \begin{scope}[shift={({-\sx},0)}]\drawappend\drawlate\drawselect\end{scope}
+  \pgfmathsetmacro\ox{26+(\val{overflow}-1)*\sx} \pgfmathsetmacro\oy{\val{koverflowbill}*\sy}
+  \filldraw[fill=accent, draw=accent] (\ox,\oy) circle (1.8pt);
+  \node[lab, anchor=south east] at ({\ox-3},{\oy+2}) {window full, turn \val{overflow}};
+  \node[lab, anchor=east] at (212,57) {append, if it fit: \val{kappendbill}M};
+  \node[lab, anchor=north west] at (170,12) {select: \val{kselectbill}M};
+\end{tikzpicture}\par}\vspace{6pt}
+\begin{steps}
+\item Input limit \val{window} $-$ \val{reserve} = \val{limit}; less \val{fixed} fixed leaves
+  \res{\val{budget}} for observations.
+\item \val{budget} $\div$ \val{perturn} = \res{\val{fit} results}: the request overflows at turn \val{overflow}.
+  To last \val{turns} turns, digest each to \val{budget} $\div$ \val{turns} = \res{\val{digest}}.
+\item Even with a \val{finalneed}-token window, no reuse: append \val{turns} $\times$ \val{first} + \val{perturn}
+  $\times$ \val{pairs} = \res{\val{appendbill}}; select \val{turns} $\times$ \val{requestsize} = \val{selectbill}.
+  Appending sends \res{\val{billratio}$\times$} the input.
+\end{steps}
+\takeaway{Per-turn observation size is the lever.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Common mistakes}
+\mistake{``If every token fits, every fact is usable.''}%
+  {Fixed logits (target \val{ztarget}, others $\val{zback}$): the target holds \val{shortweight}\% of the weight
+   among \val{shortkeys} keys in all, \val{longweight}\% among \val{longkeys}, though all fit.}{}
+\mistake{``The record passes the schema, so the constraints survived.''}%
+  {Schemas check presence. At \val{rho}\% loss per pass a constraint survives \val{roundslong} passes with
+   \val{survivelong}\%, every record still valid.}{}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{A larger tool catalog}
+\assumed{} tool declarations grow to \val{ytools} tokens; everything else as in the worked example.\par\vspace{4pt}
+\textbf{Given:} fixed part \val{system} + \val{ytools} + \val{state} = \val{yfixed}.\par
+\textbf{You:} find the observation budget, how many appended results fit, the largest digest that lasts all
+\val{turns} turns, and which term to change instead.\par\vspace{30pt}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item Root \val{root}, trunk \val{trunk}, leaf \val{leaf} tokens; \val{turns} calls; after the first, the trunk is
+  rewritten \val{rewrites} times; cached state is kept. Count uncached input tokens with a per-call ID placed (a) at the
+  very start of the request, (b) in the leaf.
+\item \assumed{} each pass loses a constraint with probability \val{qrho}\%. Arrivals \val{perturn} per turn,
+  trigger \val{high}. (a) Target \val{low} or \val{alt}: turns between passes, passes in \val{turns} turns, survival?
+  (b) \assumed{} over \val{qtrials} trials, policy A costs \$\val{qcosta} per attempt and \val{qacca} are accepted;
+  B costs \$\val{qcostb} and \val{qaccb} are accepted. Which is cheaper per accepted repair?
+\item The patch writes \texttt{r18}. An \val{excerpt}-token \texttt{r17} excerpt the next edit targets opens the
+  trunk. A \val{marker}-token marker re-prefills \val{replsuffix} tokens; a notice, \val{notice}. Which, and why? What
+  happens to the \texttt{r17} failure and the hypothesis built on it?
+\item A trial deployed despite the no-deploy rule. What evidence separates ``compaction dropped the rule'' from
+  ``the model ignored it''? What should have stopped it?
+\end{qs}
+\end{rightcol}
+\end{document}

@@ -411,7 +411,7 @@ def evaluate_freshness(
     if any(not math.isfinite(t) for t in times + queries):
         raise ValueError("trace times must be finite")
     if times != sorted(set(times)):
-        raise ValueError("state trace times must be strictly increasing")
+        raise ValueError("state trace times must be monotonically increasing without duplicates")
     decisions = []
     for query in queries:
         observed_at = query - age.magnitude

@@ -99,7 +99,11 @@ class ClearanceQueryModel(ForwardModel):
         Notes
         -----
         Equation: t_query = collision_allocation / hulls; reads_budget =
-            t_query * sram_bandwidth / esdf_cell_bytes. Dense storage counts
+            t_query * sram_bandwidth / esdf_cell_bytes. The read budget counts
+            esdf_cell_bytes-wide SRAM transactions (e.g., 800 8-byte bus
+            transactions / 6.4 kB raw ceiling on a 400 MHz controller), so
+            smaller occupancy_cell_bytes records still consume one transaction
+            cycle per independent lookup. Dense storage counts
             slab_volume / ``pitch**3`` cells; octree reads multiply sphere-scan cells
             by tree depth, while the ESDF reads trilinear_reads corners.
         Assumptions: one equal time allocation per hull, uniform cubic voxels,

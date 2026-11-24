@@ -26,6 +26,7 @@
   layer=distributed,
   logo={../../assets/img/logo-mlsysbook.png},
   instlogo={../../assets/img/logo-harvard.png},
+  dividerstack,
 }
 \usepackage[T1]{fontenc}
 \usepackage[scaled=0.9]{helvet}
@@ -54,21 +55,27 @@
 % =============================================================================
 % TITLE
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Last lecture fed and saved the fleet from storage; today the accelerators exchange data with each other, every training step. The notes total 70 minutes, of which 58 are core. FLEX: notes tagged [OPTIONAL] can be cut; cutting all of them leaves a complete lecture of 58 minutes.}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Lecture 4 moved data between storage and the fleet. This lecture opens Part II by analyzing how accelerators exchange gradients and activations with one another on every training step. A collective defines a contract on what each rank, meaning each participating worker process, holds afterward. Its runtime follows the $\alpha$-$\beta$ cost model, where $\alpha$ is fixed startup latency and $\beta$ is per-direction link bandwidth, paid once per communication round on each chunk.
+
+  \notecue{Teach}{Read the subtitle thesis aloud. Full notes total 70 minutes, and skipping the Optional slides (12 minutes) leaves a 58-minute Core lecture adaptable to a 50-minute session.}
+
+  \notecue{Next}{Moving up the fleet stack from Part I's hardware layers, Section 1 asks which traffic a training step must send between accelerators.}
+}
 \mlsystitle{Collective Communication}{A collective is a contract on what each rank holds afterward, and its time is the $\alpha$-$\beta$ price paid once per round on a chunk.}{cover_collective_communication_blueprint.png}
 
 % =============================================================================
 % SECTION: TRAFFIC
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] Open on a real system that stopped scaling, then name the traffic each way of splitting a model creates.}
+\mlsysnote{%
+  \mlsysnotemeta{1 min}{Core}%
+  Part I built the fleet's physical layers across accelerators (Lecture 2), fabrics (Lecture 3), and storage (Lecture 4). Part II enters the Distributed Execution layer, where logical model splits become network traffic charged to the Fleet Law's communication term $T_{\text{comm}}(N)$ and credited to $T_{\text{overlap}}$ when hidden behind compute. This opening section asks which data must cross between accelerators on each training step and which collective contract each exchange requires.
+
+  \notecue{Next}{Why can the exact same GPUs and wires deliver half their ideal speed under one communication design?}
+}
 \mlsysdivider{Which data must cross between accelerators, and who must agree on it?}{Collective Communication, \S5.1, \S5.3, and \S5.4}
 \section{Traffic}
-
-\begin{frame}{Collectives live on the Distributed Execution layer}
-  \centering
-  \mlsyskitfig[height=5.4cm,keepaspectratio]{stack_distributed.pdf}
-  \note{[0.5 min] [CORE] NARRATE: the fleet stack from facility at the bottom to governance at the top. Lectures 2 to 4 built the bottom two rows: accelerators, the fabric, and storage. Today moves up one row, to Distributed Execution, where a training job's logical split becomes physical traffic on that fabric. LINK: Lecture 1's Fleet Law charges this traffic to its communication term and credits whatever is hidden to its overlap term; every mechanism today shortens one of those two. FLEX: [CORE].}
-\end{frame}
 
 \begin{frame}{How much of 128 GPUs did TensorFlow use?}
   \mlsysactivity{Predict}{2 min}
@@ -78,13 +85,22 @@
   {\small Uber, 2017: a central parameter server sums every gradient. 128 Pascal GPUs, 25 Gb Ethernet.}\\[0.1cm]
   {\large\choice{A}{90\%}\qquad\choice{B}{70\%}\qquad\choice{C}{50\%}\qquad\choice{D}{25\%}}
   \mlsyscredit{Sergeev and Del Balso 2018 (Horovod), Figure 6, redrawn; bar heights read from the figure. Collective Communication, War Story 5.1.}
-  \note{[2.5 min] [CORE] Step 1: dashed outlines are ideal throughput, the one-GPU rate times 128, for two image models. Ask students to vote on the share of ideal that standard distributed TensorFlow reached. Step 2: about half. Read from the paper's figure, Inception V3 reached about 53 percent and ResNet-101 about 41 percent; the paper's own words are that Uber lost about half its resources to communication overhead at 128 GPUs. TensorFlow's stock scheme was a parameter server, in which every worker sent its gradient to a central tier, which summed and sent back. ENGAGE: the GPUs are fast and the models fit. Where did half the hardware go? (Expected: waiting on gradient exchange.) WARN: students blame the network speed. Hold that thought; the next slide keeps the same network. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    In 2017, Alexander Sergeev and Mike Del Balso's team at Uber needed to scale training in the TensorFlow framework across many GPUs on Uber's Michelangelo ML platform (War Story 5.1; Sergeev and Del Balso, 2018). TensorFlow's stock parameter-server scheme funneled every gradient through a central tier. On 128 Pascal GPUs over 25 Gb Ethernet (25 GbE), ideal scaling reaches $128\times$ one-GPU throughput on two image-classification models, Inception V3 and ResNet-101. Before reading on, predict which share of ideal throughput from A through D TensorFlow achieved.
+
+    \notecue{Check}{The answer is choice C, about 50\%. The measured bars show Inception V3 at about 53\% and ResNet-101 at about 41\%, losing roughly half of the 128 GPUs to gradient communication overhead and port concentration. Tempting answers of 70 to 90\% assume fast GPUs stay busy, while blaming 25 Gb Ethernet overlooks what the same wires achieve next.}
+
+    \notecue{Teach}{Poll choices A through D before revealing the measured bars, and hold off blaming link bandwidth because the next slide keeps the identical 128 GPUs and 25 GbE wires.}
+
+    \notecue{Next}{How much of that lost throughput did Uber recover by changing only the collective algorithm on the exact same hardware?}
+  }
 \end{frame}
 
 \begin{frame}{Horovod reached 88\% on the same GPUs and network}
   \begin{columns}[c]
     \begin{column}{0.45\textwidth}
-      \centering\safeimg[width=\textwidth,height=5.3cm,keepaspectratio]{horovod_col.pdf}
+      \centering\safeimg[width=\textwidth,height=4.7cm,keepaspectratio]{horovod_col.pdf}
     \end{column}
     \begin{column}{0.53\textwidth}
       \footnotesize\ttfamily
@@ -95,39 +111,70 @@
         opt = tf.train.AdagradOptimizer(0.01)\\
         \textcolor{commamber}{\textbf{opt = hvd.DistributedOptimizer(opt)}}\\
         hvd.BroadcastGlobalVariablesHook(0)
-      \end{tabular}\\[0.3cm]
-      \normalfont\small Horovod replaced the parameter server with a ring AllReduce.
+      \end{tabular}\\[0.18cm]
+      \normalfont\small Horovod replaced the parameter server with a ring AllReduce.\\[0.14cm]
+      \centering\safeimg[width=0.58\textwidth,height=1.7cm,keepaspectratio]{photo-p100-gp100.jpg}\\[0.02cm]
+      {\scriptsize\textcolor{midgray}{NVIDIA Pascal GP100 die (128 Pascal GPUs over 25GbE)}}
     \end{column}
   \end{columns}
-  \mlsyscredit{Sergeev and Del Balso 2018: Figure 6 (bars read from the figure; 25GbE TCP), Section 8 (88 percent), Listing 1 (abridged).}
-  \note{[2 min] [CORE] Same 128 GPUs, same 25 Gb Ethernet over TCP. Horovod, Uber's open-source library, reached the 88 percent efficiency mark on both models, about twice as fast as standard distributed TensorFlow. The code on the right is the paper's own listing, abridged: one wrapper around the optimizer, plus a broadcast of the initial weights from rank 0. Inside the wrapper, gradients are combined with ring AllReduce, the algorithm Baidu had popularized for deep learning earlier in 2017. NARRATE: only the communication schedule changed. The lecture's driving question follows. ENGAGE: if the bytes per GPU were the same, what else could differ? (Expected: where the bytes concentrate and how many rounds they take; both are today's topics.) FLEX: [CORE]. The synthesis returns to three more Horovod measurements.}
+  \mlsyscredit{Sergeev and Del Balso 2018: Figure 6 (25GbE TCP), \S8 (88\%), Listing 1 (abridged). Photo: FritzchensFritz, CC0, Wikimedia Commons.}
+  \note{%
+    \mlsysnotemeta{2 min}{Core}%
+    To remove that central bottleneck without forcing model authors to rewrite training code, Uber open-sourced Horovod in 2017, adopting Baidu's ring AllReduce algorithm behind a lightweight wrapper. On the identical 128 Pascal GPUs (the GP100 die is shown) and the same 25 GbE network running TCP, Horovod lifted scaling efficiency to 88\% on both models, nearly doubling throughput. Wrapping the optimizer in \texttt{hvd.DistributedOptimizer} and broadcasting initial weights from rank 0 replaced the parameter server with a peer-to-peer ring AllReduce, where workers pass and sum gradients directly around a loop. Hardware and total gradient volume stayed identical, yet removing port concentration doubled performance. The closing synthesis returns to Horovod's three published measurements in all, adding Tensor Fusion and RDMA alongside this ring result.
+
+    \notecue{Next}{To explain quantitatively why a peer-to-peer ring beat a central server, we first need our single-link cost model and bandwidth tiers in hand.}
+  }
 \end{frame}
 
 \begin{frame}{Recall: what does one message cost?}
   \mlsysactivity{Retrieval}{1.5 min}
   \centering
-  {\Large\bfseries Question of the day}\\[0.3cm]
-  {\normalsize Write the time to send one message of $n$ bytes over one link,\\and the per-GPU bandwidth inside a node and across nodes.}\\[0.5cm]
+  {\Large\bfseries Question of the day}\\[0.18cm]
+  {\normalsize Write the time to send one message of $n$ bytes over one link,\\and the per-GPU bandwidth inside a node and across nodes.}\\[0.22cm]
   \uncover<2->{%
-    {\Large $T(n) = \alpha + n/\beta$}\\[0.25cm]
-    {\normalsize $\alpha$: startup time per message\quad $\beta$: link bandwidth\\[0.1cm]
-    DGX H100 GPU: NVLink 450 GB/s, InfiniBand port 50 GB/s (one direction)}}
+    {\Large $T(n) = \alpha + n/\beta$}\\[0.18cm]
+    \safeimg[width=0.92\textwidth,height=1.95cm,keepaspectratio]{recall_ab_strip.pdf}}
   \mlsyscredit{Collective Communication, \S5.5 and \S5.7.1.}
-  \note{[1.5 min] [CORE] Give 60 seconds. Step 2: Lecture 3's alpha-beta model. Alpha is the fixed startup cost of a message (software, PCIe, switching), about 1.5 microseconds on InfiniBand NDR; beta is the sustained bandwidth in one direction, 50 GB/s per port. LINK: Lecture 2's bandwidth hierarchy put NVLink at 450 GB/s per direction inside a DGX H100 node, about nine times one InfiniBand port. Lecture 4 moved bytes between storage and accelerators; today every byte moves between accelerators, every step. WARN: in this course alpha and beta always mean latency and bandwidth. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{1.5 min}{Core}%
+    Before pricing any collective schedule, recall Lecture 3's single-link transfer model and Lecture 2's DGX H100 bandwidth tiers. Before reading on, write from memory the time to send one message of $n$ bytes over one link, along with the per-GPU bandwidth inside a DGX H100 node and across nodes.
+
+    \notecue{Check}{The transfer time is $T(n) = \alpha + n/\beta$. On InfiniBand NDR (Lecture 3), fixed startup latency is $\alpha \approx 1.5$ \textmu s and link rate is $\beta = 50$ GB/s per direction per port. That rate sits $9\times$ below intra-node NVLink (Lecture 2) at 450 GB/s per direction. Common mistakes are swapping $\alpha$ and $\beta$ or forgetting the per-direction basis by quoting 900 GB/s bidirectional NVLink, which misprices every collective equation ahead.}
+
+    \notecue{Watch for}{Throughout this course, $\alpha$ always denotes startup latency and $\beta$ denotes one-way sustained bandwidth.}
+
+    \notecue{Teach}{Give 60 seconds of silent writing before revealing the formula and the 450 versus 50 GB/s DGX H100 pair.}
+
+    \notecue{Next}{With startup latency and both DGX H100 bandwidth tiers recalled, we can now frame the lecture's driving question and running scoreboard.}
+  }
 \end{frame}
 
-\begin{frame}{How long do N accelerators take to agree on a gradient?}
-  \normalsize
-  By the end of today, you will be able to:\\[0.05cm]
-  \begin{itemize}\setlength{\itemsep}{0.04cm}
-    \item Name the collective each parallelism split needs, by what each rank (one GPU) must hold.
-    \item Price a collective round by round, and say whether a chunk is latency- or bandwidth-bound.
-    \item Choose ring, tree, or hierarchical AllReduce for a message size and topology.
-    \item Decide when compression or overlap shortens a step, and what stays exposed.
-  \end{itemize}
-  {\footnotesize\textcolor{midgray}{Running case: one gradient synchronization on DGX H100 nodes;\\the 1 GB reference buffer on 64 GPUs (8 nodes of 8); a 70B model's 140 GB BF16 gradient.}}
+\begin{frame}{How long do $N$ accelerators take to agree on a gradient?}
+  \begin{columns}[c]
+    \begin{column}{0.66\textwidth}
+      \small
+      \begin{itemize}\setlength{\itemsep}{0.06cm}
+        \item Match each parallelism split to its collective contract.
+        \item Price rounds with $\alpha + n/\beta$; spot latency vs.\ bandwidth bounds.
+        \item Choose ring, tree, or hierarchical AllReduce for size and topology.
+        \item Judge when compression or overlap shortens step time.
+      \end{itemize}
+      \vspace{0.04cm}
+      {\footnotesize\textcolor{midgray}{Running case: DGX H100 (8 $\times$ 8), 1 GB buffer; 70B 140 GB BF16 gradient.}}
+    \end{column}
+    \begin{column}{0.31\textwidth}
+      \centering\mlsyskitfig[width=\textwidth,height=3.6cm,keepaspectratio]{stack_distributed}
+    \end{column}
+  \end{columns}
   \fleetterm{$T_{\text{comm}}(N)$ and $T_{\text{overlap}}$}{Communication ($C_2$)}
-  \note{[1 min] [CORE] The title is the driving question. Each goal is one or two segments. The running case: DGX H100 nodes, eight GPUs each, NVLink inside the node, one 50 GB/s InfiniBand port per GPU. The chapter's 1 GB reference buffer, one large fused reduction, carries a scoreboard that returns after each segment; a 70-billion-parameter model's full gradient in BF16 (2 bytes per parameter, 140 GB) is the large case. WARN: the 140 GB case is communication arithmetic only; such a model's training state does not fit on one GPU, and Lecture 6 splits it. The accent line at the bottom names the Fleet Law term and C$^3$ axis that today's mechanisms act on; say it once. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{1 min}{Core}%
+    This lecture asks how long $N$ accelerators take to agree on a gradient and which algorithm they should use. Four goals trace the answer, moving from mapping parallelism to collective contracts, to pricing rounds with $\alpha + n/\beta$, to choosing ring, tree, or hierarchical schedules, and finally to evaluating compression and overlap. The running scoreboard prices a 1 GB reference buffer across 64 DGX H100 GPUs arranged as $8 \times 8$, using 450 GB/s NVLink inside nodes and 50 GB/s NDR across nodes, while a 70B model's 140 GB BF16 gradient serves as the large case. Along the Communication ($C_2$) axis, every mechanism here acts on $T_{\text{comm}}(N)$ and $T_{\text{overlap}}$.
+
+    \notecue{Watch for}{The 140 GB 70B example isolates communication arithmetic. Fitting a 70B model across GPUs through sharding and model splits belongs to Lecture 6.}
+
+    \notecue{Next}{Before pricing any collective schedule, we must see which traffic each way of splitting a model puts onto the wire.}
+  }
 \end{frame}
 
 \begin{frame}{Each way of splitting a model creates its own traffic}
@@ -138,24 +185,35 @@
   reduce\_scatter\_tensor\enspace send\enspace recv\enspace all\_to\_all\_single
   \end{tabular}}
   \mlsyscredit{Collective Communication, table 1 (\S5.3), abridged. Function names: PyTorch v2.4.0, torch/distributed/distributed\_c10d.py.}
-  \note{[2.5 min] [CORE] The map from strategy to traffic; Lecture 6 designs the strategies, today prices their traffic. Step 1: five splits. Data parallel copies the model and splits the batch, so replicas must agree on one gradient. Sharded data parallel (FSDP, ZeRO-3) also splits weights, gradients, and optimizer state across the replicas. Tensor parallel splits each layer's matrices inside a node. Pipeline gives each group of layers to a stage. Expert parallel sends each token to the GPU that holds its expert, as do recommendation models with sharded embedding tables. Step 2: the primitive each needs. Step 3: the term that binds; the narrowest cut is Lecture 3's bisection, the bandwidth across the thinnest slice that splits the fabric in two. Large gradients bind on bandwidth; pipeline messages are small and sit on the critical path, so latency binds; AllToAll binds on skew and on that cut. The monospaced line names PyTorch's own functions for these primitives. ENGAGE: which row repeats every step on the full gradient? (Expected: data parallel.) FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    Previewing the parallelism strategies of Lecture 6, five ways of splitting a model map onto the \texttt{torch.distributed} primitives listed below. Data parallelism replicates weights and synchronizes full gradients with AllReduce, making it bandwidth-limited. Sharded data parallelism, such as PyTorch's Fully Sharded Data Parallel (FSDP) and Stage 3 of the Zero Redundancy Optimizer (ZeRO-3), shards weights, gradients, and optimizer state across ranks to save memory, splitting synchronization into many per-layer AllGather and ReduceScatter calls. Tensor parallelism splits weight matrices inside a layer and must sum partial outputs with AllReduce before the next layer can run, placing that collective on the critical path and typically keeping it on fast intra-node links such as NVLink. Pipeline parallelism hands small activations between layer stages with point-to-point Send and Recv, where latency dominates. Expert or embedding parallelism routes Mixture-of-Experts (MoE) tokens or recommender lookups with AllToAll, limited by routing skew and fabric bisection bandwidth, the capacity across the narrowest cut dividing the network in half (Lecture 3).
+
+    \notecue{Next}{What exact result must each of the four main collectives leave on every rank afterward?}
+  }
 \end{frame}
 
 \begin{frame}{A collective names what each rank holds afterward}
   \centering
   \mlsyssteps[width=0.95\textwidth,height=5.6cm,keepaspectratio]{contracts_step}{4}
   \mlsyscredit{Collective Communication, \S5.4 and figure 2. Ranks R0 to R3; color marks the source rank; numbers in AllToAll cells are chunk indices.}
-  \note{[2.5 min] [CORE] Each panel shows four ranks before and after. Step 1, AllReduce: every rank contributes a full tensor and every rank ends with the same sum. Gradient synchronization is this case, in which every replica receives the reduced gradient, so all apply the same update. Step 2, AllGather: each rank holds one shard; afterward every rank holds all shards. Step 3, ReduceScatter: every rank contributes a full tensor; afterward rank $i$ holds only the $i$-th part of the sum. Step 4, AllToAll: rank $i$ sends its $j$-th chunk to rank $j$, a distributed transpose. Broadcast and Reduce, one root to all and all to one root, complete the set of six. ENGAGE: which two panels, run in order, give the first? (Expected: ReduceScatter then AllGather.) The contract fixes the result; ring, tree, and hierarchy are schedules for it. WARN: a collective is not a barrier. Ranks may enter at different times; a late rank delays only the ranks that need its data. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    Once a split selects a primitive, that collective specifies a mathematical outcome across participating ranks R0 to R3, independent of the wire schedule used to achieve it. In AllReduce, every rank contributes a full tensor and receives the identical global sum. In AllGather, each rank starts with one shard and finishes holding all shards. In ReduceScatter, every rank contributes a full tensor and rank $i$ retains only the $i$-th summed shard; notice that running ReduceScatter followed by AllGather equals AllReduce. Finally, AllToAll performs a distributed transpose in which rank $i$ sends chunk $j$ to rank $j$. Broadcast, where one rank sends to all, and Reduce, where all ranks aggregate data to one root, round out the core six primitives.
+
+    \notecue{Watch for}{A collective defines a data-dependency contract rather than a strict barrier. Ranks can enter asynchronously, and a late rank stalls only the ranks waiting on its chunks.}
+
+    \notecue{Next}{Next, an optional slide shows why sharded data parallelism decomposes AllReduce into separate AllGather and ReduceScatter calls.}
+  }
 \end{frame}
 
 \begin{frame}{AllReduce is a ReduceScatter followed by an AllGather}
   \centering
-  {\large AllReduce $=$ ReduceScatter $+$ AllGather}\\[0.15cm]
+  \safeimg[width=0.88\textwidth,height=1.35cm,keepaspectratio]{rs_ag_strip.pdf}\\[0.08cm]
   {\footnotesize\ttfamily\begin{tabular}{@{}l@{}}
   class ShardingStrategy(Enum):\quad\textcolor{midgray}{\# torch/distributed/fsdp/api.py}\\
-  \hspace*{1em}\textcolor{commamber}{\textbf{FULL\_SHARD = auto()}}\quad SHARD\_GRAD\_OP = auto()\\
-  \hspace*{1em}NO\_SHARD = auto()\quad HYBRID\_SHARD = auto()
-  \end{tabular}}\\[0.2cm]
+  \hspace*{1em}\textcolor{commamber}{\textbf{FULL\_SHARD = auto()}}\quad SHARD\_GRAD\_OP = auto()\quad NO\_SHARD\quad HYBRID\_SHARD
+  \end{tabular}}\\[0.12cm]
   \small
   \begin{tabular}{@{}lccc@{}}
     \toprule
@@ -165,10 +223,19 @@
     FSDP & $2L$ & $\approx 2M$ & $2L\,\alpha_{\text{call}}$ \\
     FSDP, reshard after forward & $3L$ & $\approx 3M$ & $3L\,\alpha_{\text{call}}$ \\
     \bottomrule
-  \end{tabular}\\[0.3cm]
+  \end{tabular}\\[0.15cm]
   {\normalsize Sharding barely changes the bytes; it multiplies the calls.}
   \mlsyscredit{Collective Communication, \S5.4.1 and \S5.4.2 ($M$: model-sized payload, large group, equal widths). Code: PyTorch v2.4.0, lines 65 to 68.}
-  \note{[2 min] [OPTIONAL] The two halves of AllReduce are exactly the two calls sharded data parallelism needs. FSDP keeps $1/N$ of each layer's weights per rank, so before a layer runs it calls AllGather to assemble the full weights, and after backward it calls ReduceScatter so each rank keeps only the gradient for its own shard. The code line is PyTorch's own enum: FULL\_SHARD shards weights, gradients, and optimizer state; NO\_SHARD falls back to an all-reduce like DDP; HYBRID\_SHARD shards inside a node and replicates across nodes. One AllReduce becomes $2L$ calls, or $3L$ if weights are freed after forward and gathered again for backward. Bytes per rank barely move, about $2M$ or $1.5\times$ that; the call count is what grows, and every call pays a startup cost. For a 32-layer model, 96 calls per step (derived). LINK: Lecture 6 explains why FSDP saves memory; today shows what it costs on the wire. WARN: calling a full AllReduce when each rank updates only its shard sends twice the bytes the step needs. FLEX: cut if short; the vote slide covers the primitives.}
+  \note{%
+    \mlsysnotemeta{2 min}{Optional}%
+    That ReduceScatter-plus-AllGather split lets PyTorch's FSDP (shown via \texttt{ShardingStrategy}) and ZeRO-3 store $1/N$ of each layer's weights per rank, running AllGather before compute and ReduceScatter after backward. Section 2 derives why AllReduce sends $\approx 2M$ bytes per rank ($\approx M$ per half), while $\alpha_{\text{call}}$ denotes one collective call's total startup cost across its rounds. Here ``unbucketed'' data parallelism means one whole-model AllReduce of size $M$ in 1 call; standard FSDP moves about $M/L$ bytes per call across $2L$ calls (one AllGather and one ReduceScatter per layer) for the same $\approx 2M$ bytes. Resharding after forward frees and re-gathers weights for backward, sending $\approx 3M$ bytes in $3L$ calls (96 calls for 32 layers, derived). Sharding trades memory (Lecture 6) mainly by multiplying startup calls rather than wire bytes.
+
+    \notecue{Watch for}{Calling AllReduce when each rank updates only its own shard wastes half the bytes assembling data every rank discards.}
+
+    \notecue{Teach}{For a 50-minute class, skip this slide; the next slide's vote reinforces the four core primitives directly.}
+
+    \notecue{Next}{How do you match a concrete training exchange to the narrowest primitive it needs?}
+  }
 \end{frame}
 
 \begin{frame}{Which primitive does each exchange need?}
@@ -186,17 +253,36 @@
     \bottomrule
   \end{tabular}
   \mlsyscredit{Collective Communication, \S5.3 and \S5.4.1.}
-  \note{[2 min] [CORE] Students write one primitive per row, compare with a neighbor, then reveal. Step 2: AllReduce for the replicated gradient; ReduceScatter when each rank keeps only its shard of the sum; AllGather to assemble sharded weights; AllToAll for destination-specific tokens. The rule is to choose the narrowest contract whose output the next computation consumes. ENGAGE: a student proposes AllReduce for the second row. What does it waste? (Expected: half the bytes; it assembles a full sum each rank immediately discards.) WARN: students reach for AllReduce for MoE routing. AllReduce sums matching elements; it cannot send different data to different ranks. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2 min}{Core}%
+    The design rule is to select the narrowest collective contract whose output satisfies the next computation. Before reading on, match each of the four training exchanges in the table to the collective primitive it requires.
+
+    \notecue{Check}{Replicated gradient averaging requires AllReduce. Updating only a local weight shard on row 2 requires ReduceScatter. Assembling sharded layer weights requires AllGather. Dispatching tokens to destination-specific MoE experts on row 4 requires AllToAll. A tempting mistake on row 2 is choosing AllReduce, which wastes half the bytes because each rank discards every shard except its own. A tempting mistake on row 4 is choosing AllReduce for MoE routing, because AllReduce sums matching positions across ranks and cannot route distinct tokens to distinct destinations.}
+
+    \notecue{Teach}{Have students write one primitive per row and compare with a neighbor before revealing the second column.}
+
+    \notecue{Next}{Section 1 fixed what each rank must hold afterward; Section 2 now asks what one collective costs and which term dominates.}
+  }
 \end{frame}
 
 % =============================================================================
 % SECTION: PRICING
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] We know what must move. Now put a price on each round.}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Knowing which collective contract a split requires does not yet tell us how long it takes or which hardware limit binds it. This section applies Lecture 3's $\alpha$-$\beta$ model round by round to ring AllReduce, locates the crossover where startup overtakes bandwidth, and shows why a parameter server stalls beside a bandwidth-optimal ring.
+
+  \notecue{Next}{How do startup rounds and per-round chunk transfers combine into one formula for ring AllReduce time?}
+}
 \mlsysdivider{What does one collective cost, and which term dominates?}{Collective Communication, \S5.5, \S5.6.1 to \S5.6.3}
 \section{Pricing}
 
-\mlsysnote{[1 min] [CORE] The equation of the lecture. Read it term by term. A ring has $2(N-1)$ rounds; each round pays one startup $\alpha$ and moves one chunk of $M/N$ bytes at bandwidth $\beta$. The first term grows with $N$. The second approaches $2M/\beta$ however large $N$ grows. Every algorithm today changes one of these: the number of rounds, the chunk size, or the $\beta$ of the link a round uses. LINK: this is Lecture 1's communication term for one gradient synchronization. FLEX: [CORE].}
+\mlsysnote{%
+  \mlsysnotemeta{1 min}{Core}%
+  Because AllReduce decomposes into ReduceScatter followed by AllGather, a logical ring splits an $M$-byte tensor into $N$ chunks of size $M/N$ and runs $N-1$ ReduceScatter rounds clockwise to finish one chunk per rank, then $N-1$ AllGather rounds to circulate those sums, giving $2(N-1)$ rounds in all (traced concretely in Example 5.1 ahead). Each round pays startup latency $\alpha$ plus one chunk transfer at rate $\beta$, giving Lecture 1's $T_{\text{comm}}$ for one gradient synchronization. The latency term $2(N-1)\alpha$ grows linearly with $N$, whereas the bandwidth term $2\frac{N-1}{N}\frac{M}{\beta}$ approaches $2M/\beta$ regardless of cluster size. Every optimization ahead targets round count, chunk size, or the link rate $\beta$ used per round.
+
+  \notecue{Next}{When does a ring round spend more time starting the transfer than sending its chunk?}
+}
 \mlsysfocus{Ring AllReduce time}{%
 $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}} \;+\; \underbrace{2\,\frac{N-1}{N}\,\frac{M}{\beta}}_{\text{one chunk per round}}$\\[0.4cm]
 {\normalsize $N$ ranks\quad $M$ bytes per rank\quad $\alpha$ startup\quad $\beta$ bandwidth}}
@@ -206,12 +292,19 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
   \only<1|handout:0>{\safeimg[width=0.95\textwidth,height=5.6cm,keepaspectratio]{chunk_step1.pdf}}%
   \only<2-|handout:1>{\safeimg[width=0.95\textwidth,height=5.6cm,keepaspectratio]{chunk_step2.pdf}}
   \mlsyscredit{Collective Communication, table 4 (vendor latency and bandwidth ranges, midpoints) and Napkin Math 5.1.}
-  \note{[2.5 min] [CORE] Step 1: the critical size $n^* = \alpha\beta$ for five interconnects. Below it, a message spends more time starting than transferring, so it is latency-bound; above it, bandwidth-bound. InfiniBand NDR: 1.5 microseconds times 50 GB/s is 75 KB. NVLink stays latency-bound up to about 0.7 MB because its bandwidth is so high. Step 2: the chunk size sets the regime. A 25 MB gradient bucket in a 64-rank ring travels in 390.6 KB chunks, above the NDR knee. On the 1,024-GPU reference cluster the chunk is 24.4 KB, below it. ENGAGE: on the 1,024-rank ring, does a faster link help much? (Expected: little; startup dominates each round.) WARN: students classify by tensor size. A 25 MB bucket is 333 times the knee, yet its ring steps are latency-bound at 1,024 ranks. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    To see which term of the ring equation dominates, compare each round's chunk against the link's critical chunk size $n^* = \alpha\beta$, where startup and transfer cost the same (Table 4 midpoints across five interconnects). Below $n^*$, startup latency dominates; above $n^*$, bandwidth dominates. InfiniBand NDR crosses at $1.5\text{ \textmu s} \times 50\text{ GB/s} = 75\text{ KB}$, whereas high-bandwidth NVLink stays latency-bound up to about 0.7 MB. Applying Napkin Math 5.1 to a 25 MB gradient bucket shows how group size shifts the regime. In a 64-GPU ring, each chunk is $25\text{ MB} / 64 = 390.6\text{ KB}$, which sits above 75 KB and is bandwidth-bound. In a 1,024-GPU ring, each chunk shrinks to 24.4 KB, falling below 75 KB into the latency-bound regime where faster links barely help.
+
+    \notecue{Watch for}{Classify a collective by its per-round chunk size $M/N$ rather than the whole-tensor size $M$. A 25 MB bucket is $333\times$ larger than 75 KB yet becomes latency-bound at 1,024 ranks.}
+
+    \notecue{Next}{The next slide computes the exact 3.5$\times$ slowdown of that 25 MB bucket at 1,024 GPUs and names the latency levers.}
+  }
 \end{frame}
 
 \begin{frame}{The same 25 MB bucket takes 3.5$\times$ longer on 1,024 GPUs}
   \centering
-  \normalsize
+  \small
   \begin{tabular}{@{}lrrrr@{}}
     \toprule
     Ring of a 25 MB bucket, NDR & Chunk & Rounds & Byte term & Total \\
@@ -219,15 +312,27 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
     64 GPUs & 390.6 KB & 126 & 1.0 ms & 1.2 ms \\
     1,024 GPUs & \textbf{24.4 KB} & \textbf{2,046} & 1.0 ms & \textbf{4.1 ms} \\
     \bottomrule
-  \end{tabular}\\[0.3cm]
-  \uncover<2->{{\normalsize Latency-bound levers: \textbf{fusion}, \textbf{fewer rounds}, \textbf{hierarchy}.}\\[0.1cm]
-  {\small Fusing 100 messages of 4 KB: $100\alpha = 150~\mu$s becomes $\alpha + 400~\text{KB}/\beta = 9.5~\mu$s.}}\\[0.25cm]
-  \begin{minipage}{0.92\textwidth}\footnotesize\ttfamily
-  \$ ./build/all\_reduce\_perf -b 8 -e 128M -f 2 -g 8\\
-  \textcolor{midgray}{\# small sizes measure the constant overhead (nccl-tests docs)}
-  \end{minipage}
-  \mlsyscredit{Collective Communication, Napkin Math 5.1 ($\alpha = 1.5~\mu$s, $\beta = 50$ GB/s) and \S5.5. Ratio derived (calcs.py). Command: NVIDIA nccl-tests README; comment paraphrases doc/PERFORMANCE.md.}
-  \note{[2 min] [CORE] Napkin Math 5.1. Ring time is $2(N-1)(\alpha + M/(N\beta))$. On 64 ranks, 126 rounds of 9.3 microseconds give 1.2 ms, of which 1.0 ms is bytes. On 1,024 ranks the byte term is still 1.0 ms, but 2,046 rounds each pay 1.5 microseconds of startup, and the total is 4.1 ms (derived ratio 3.5 from the unrounded times, calcs.py). Step 2: the levers for latency-bound steps. Fusion packs many small messages into one: 100 routing messages of 4 KB cost about 150 microseconds separately and about 9.5 together, roughly 16 times less. Horovod's Tensor Fusion and PyTorch's gradient buckets are this lever. Fewer rounds is the tree; hierarchy is the next segment. The command is NVIDIA's own benchmark, sweeping sizes from 8 bytes to 128 MB on 8 GPUs; its documentation says small sizes measure the fixed overhead, which is $\alpha$. ENGAGE: does compression help the 4 KB messages? (Expected: no; it shrinks bytes, and their cost is startup.) FLEX: [CORE].}
+  \end{tabular}\\[0.2cm]
+  \uncover<2->{{\normalsize Latency-bound levers: \textbf{fusion}, \textbf{fewer rounds}, \textbf{hierarchy}.}\\[0.06cm]
+  {\small Fusing 100 messages of 4 KB: $100\alpha = 150~\mu$s becomes $\alpha + 400~\text{KB}/\beta = 9.5~\mu$s.}}\\[0.16cm]
+  \begin{columns}[c]
+    \begin{column}{0.68\textwidth}
+      {\footnotesize\ttfamily
+      \$ ./build/all\_reduce\_perf -b 8 -e 128M -f 2 -g 8\\
+      \textcolor{midgray}{\# small sizes measure the constant overhead (nccl-tests docs)}}
+    \end{column}
+    \begin{column}{0.26\textwidth}
+      \centering\safeimg[width=\textwidth,height=1.5cm,keepaspectratio]{qsfp-optical-module.jpg}\\[0.02cm]
+      {\scriptsize\textcolor{midgray}{QSFP optical module}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Collective Communication, Napkin Math 5.1 ($\alpha = 1.5~\mu$s, $\beta = 50$ GB/s), \S5.5. Command: nccl-tests. Photo: Jesseschulman, CC BY-SA 3.0, Wikimedia Commons.}
+  \note{%
+    \mlsysnotemeta{2 min}{Core}%
+    Pricing that 25 MB bucket round by round in Napkin Math 5.1 (InfiniBand NDR, $\alpha = 1.5$ \textmu s, $\beta = 50$ GB/s) shows the cost of dropping below 75 KB. At 64 GPUs, 126 rounds of 9.3 \textmu s take 1.2 ms in total, including 1.0 ms for bytes. At 1,024 GPUs, the byte term stays at 1.0 ms, yet 2,046 rounds of 1.5 \textmu s add 3.1 ms of startup. Total time rises to 4.1 ms, which is $3.5\times$ slower from unrounded values (derived). Three levers address latency-bound traffic, namely fusion, fewer rounds via trees, and hierarchy. Fusion packs 100 transfers of 4 KB together, cutting $100\alpha = 150$ \textmu s down to $\alpha + 400\text{ KB}/\beta = 9.5$ \textmu s, about 16$\times$ faster, as used in Horovod Tensor Fusion and PyTorch buckets. The \texttt{all\_reduce\_perf} sweep from NCCL's benchmark suite isolates fixed $\alpha$ at small sizes, where compression cannot help.
+
+    \notecue{Next}{The next slide places the ring on the 64-GPU, 1 GB scoreboard beside Uber's parameter server.}
+  }
 \end{frame}
 
 \begin{frame}{A parameter server pushes 32.5$\times$ the ring's bytes through one port}
@@ -236,35 +341,26 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
   \only<2-|handout:1>{\safeimg[width=0.92\textwidth,height=4.6cm,keepaspectratio]{scoreboard_step3.pdf}}\\[0.15cm]
   {\small\uncover<2->{Some rank must send at least $2\frac{N-1}{N}M$ bytes; the ring meets that bound.}}
   \mlsyscredit{Collective Communication, \S5.6.1 and \S5.6.2. 1 GB buffer, 64 workers, 50 GB/s. Server time $N M/\beta$ derived; ring byte term 39.4 ms; tree 240 ms (\S5.6.4).}
-  \note{[2 min] [CORE] This is the running scoreboard, with the chapter's 1 GB reference buffer on 64 GPUs at 50 GB/s. Step 1: a parameter server receives 64 GB and sends 64 GB through its one port, 64 GB over 50 GB/s, about 1,280 ms each way (derived). Step 2: the ring spreads the same reduction so every rank sends about $2M$, 39.4 ms. The ratio is 32.5 (derived), close to $N/2 = 32$. The bound has two halves. Combining $N$ contributions takes at least $N-1$ transfers, and delivering the result to $N-1$ other ranks takes $N-1$ more, so $2(N-1)M$ bytes in total, of which some rank sends at least its share. The simple tree, 240 ms, is the next segment. ENGAGE: total bytes are the same order for star and ring. Why is the star slow? (Expected: concentration in one port.) WARN: this is Uber's problem, and sharding the server spreads it only by adding servers. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2 min}{Core}%
+    On large, bandwidth-bound payloads, topology sets the byte ceiling, explaining why Uber's parameter server stalled. On the 64-worker, 1 GB scoreboard over 50 GB/s ports, a single parameter server must receive 64 GB and return 64 GB through one port. That takes $64\text{ GB} / 50\text{ GB/s} = 1{,}280\text{ ms}$ each way (derived), setting a 1,280 ms one-direction bottleneck even if receive and send overlap on a full-duplex link. That is $32.5\times$ slower (near $N/2 = 32$) than the ring's $2\frac{N-1}{N}M/\beta = 39.4\text{ ms}$ byte term, alongside a simple tree at 240 ms (derived in Section 3). Combining $N$ tensors and distributing the result requires moving at least $2(N-1)M$ bytes across all ranks, so at least one rank must send $2\frac{N-1}{N}M$ bytes. The ring meets this full-duplex lower bound, whereas the star topology funnels all traffic through one port.
+
+    \notecue{Watch for}{Sharding parameter servers reduces port concentration only by adding extra server ports, whereas a peer-to-peer ring uses every worker's port automatically.}
+
+    \notecue{Next}{How does a peer-to-peer ring actually reach that $2\frac{N-1}{N}M$ byte bound step by step?}
+  }
 \end{frame}
 
 \begin{frame}{Ring AllReduce takes six steps, one chunk per GPU each}
-  \begin{columns}[c]
-    \begin{column}{0.33\textwidth}
-      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{ring.pdf}\\[0.1cm]
-      {\footnotesize GPU 0 to 3 hold\\{[1,5,3,7]}, {[2,6,4,8]},\\{[3,7,5,9]}, {[4,8,6,10]}.\\Sum $=$ [10, 26, 18, 34].}
-    \end{column}
-    \begin{column}{0.64\textwidth}
-      \centering\small
-      \begin{tabular}{@{}lcccc@{}}
-        \toprule
-        Step & GPU 0 & GPU 1 & GPU 2 & GPU 3 \\
-        \midrule
-        \uncover<2->{ReduceScatter 1} & \uncover<2->{d: 17} & \uncover<2->{a: 3} & \uncover<2->{b: 13} & \uncover<2->{c: 11} \\
-        \uncover<3->{ReduceScatter 2} & \uncover<3->{c: 14} & \uncover<3->{d: 25} & \uncover<3->{a: 6} & \uncover<3->{b: 21} \\
-        \uncover<4->{ReduceScatter 3} & \uncover<4->{\textbf{b: 26}} & \uncover<4->{\textbf{c: 18}} & \uncover<4->{\textbf{d: 34}} & \uncover<4->{\textbf{a: 10}} \\
-        \midrule
-        \uncover<5->{AllGather 1} & \uncover<5->{a: 10} & \uncover<5->{b: 26} & \uncover<5->{c: 18} & \uncover<5->{d: 34} \\
-        \uncover<6->{AllGather 2} & \uncover<6->{d: 34} & \uncover<6->{a: 10} & \uncover<6->{b: 26} & \uncover<6->{c: 18} \\
-        \uncover<7->{AllGather 3} & \uncover<7->{c: 18} & \uncover<7->{d: 34} & \uncover<7->{a: 10} & \uncover<7->{b: 26} \\
-        \bottomrule
-      \end{tabular}\\[0.2cm]
-      {\small Cell: the chunk each GPU received and the value it now holds.}
-    \end{column}
-  \end{columns}
-  \mlsyscredit{Collective Communication, Example 5.1 and table 5. Chunks a to d are the four elements.}
-  \note{[3.5 min] [CORE] Example 5.1. Each GPU splits its vector into four chunks, a to d. Step 1 (ReduceScatter 1): every GPU sends one running chunk to its right neighbor, which adds its own. GPU 0 receives GPU 3's d (10) and adds its own 7: 17. Steps 2 and 3: each partial sum moves on and grows. After step 3 each GPU owns one fully reduced chunk, in bold: GPU 0 holds b = 26. Steps 4 to 6 (AllGather): finished chunks circulate without arithmetic until every GPU holds [10, 26, 18, 34]. Point out three properties: $2(N-1) = 6$ steps; every GPU sends and receives in every step; each step moves one chunk, $M/N$. So each GPU sends $2(N-1)M/N$, the lower bound. ENGAGE: one GPU runs at half speed. What happens to the whole AllReduce? (Expected: every step waits for it; the ring runs at its slowest member.) FLEX: [CORE].}
+  \centering
+  \mlsyssteps[width=0.98\textwidth,height=5.2cm,keepaspectratio]{ring_allreduce_step}{4}
+  \mlsyscredit{Collective Communication, Example 5.1 and table 5 (interactive Explore figure: Ring AllReduce). Chunks a to d are the four elements.}
+  \note{%
+    \mlsysnotemeta{3.5 min}{Core}%
+    Example 5.1 traces how four GPUs hit that lower bound on four chunks (a to d), starting from $[1, 5, 3, 7]$, $[2, 6, 4, 8]$, $[3, 7, 5, 9]$, and $[4, 8, 6, 10]$ on GPUs 0 through 3, summing to $[10, 26, 18, 34]$. In ReduceScatter rounds 1 and 2, each GPU sends one chunk clockwise and adds its incoming value, so chunk a grows $1 \to 3 \to 6$ across GPUs 0 to 2 before adding 4 on GPU 3. Round 3 finishes ReduceScatter ($N-1 = 3$ rounds, $0.75M$ bytes sent per GPU), leaving each GPU one complete sum, namely $b=26$ on GPU 0, $c=18$ on GPU 1, $d=34$ on GPU 2, and $a=10$ on GPU 3. Next, $N-1 = 3$ AllGather rounds circulate those finished sums without arithmetic until every GPU holds $[10, 26, 18, 34]$. Across $2(N-1) = 6$ steps, every GPU sends and receives concurrently, sending $1.5M$ bytes total, yet one half-speed GPU paces the entire ring.
+
+    \notecue{Next}{How long does that ring formula predict for a 70B model's 140 GB BF16 gradient on 64 GPUs?}
+  }
 \end{frame}
 
 \begin{frame}{How long does one 140 GB AllReduce take?}
@@ -290,22 +386,55 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
   \vspace{0.2cm}\centering
   {\footnotesize\ttfamily B = algbw * (2*(n-1)/n)\quad\textcolor{midgray}{\# nccl-tests bus bandwidth}}
   \mlsyscredit{Collective Communication, Napkin Math 5.2 (communication-only baseline; each rank reduces the full gradient). Formula: nccl-tests doc/PERFORMANCE.md.}
-  \note{[2.5 min] [CORE] Give students 90 seconds with the card. Step 2: 140 GB of gradient. Step 3: the byte term, 1.96875 times 140 GB over 50 GB/s, 5,512.5 ms. Step 4: 126 rounds of 1.5 microseconds, 0.2 ms. Step 5: about 5.5 seconds per synchronization, and startup is 0.0034 percent (calcs.py). The bottom line is from NVIDIA's nccl-tests documentation, whose bus bandwidth multiplies measured algorithm bandwidth by the same $2(n-1)/n$, so a healthy ring reports close to the link's peak. If fully exposed, halving it saves 2.76 seconds per step; 2.76 s times 64 GPUs times 100,000 steps is about 4,900 GPU-hours (calcs.py). ENGAGE: which levers help here? (Expected: byte levers: fewer bytes per link, more links in parallel, overlap. Fusion does nothing.) WARN: this assumes every rank holds the full gradient; partitioned training reduces shards in smaller groups (Lecture 6). FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    Napkin Math 5.2 tests that formula at 70B scale ($\beta = 50$ GB/s, $\alpha = 1.5$ \textmu s). Compute payload, byte term, startup term, total time, and useful levers. Recall Lecture 3's bus bandwidth: \texttt{nccl-tests} scales algorithm bandwidth (\texttt{algbw}, size over time) by $2(n-1)/n$ so healthy rings match link rate.
+
+    \notecue{Check}{Payload is $M = 70 \times 10^9 \times 2\text{ B} = 140\text{ GB}$. Bytes take $2 \cdot \frac{63}{64} \cdot \frac{140}{50}\text{ s} = 5{,}512.5\text{ ms}$ and startup takes $126 \times 1.5\text{ \textmu s} = 0.2\text{ ms}$ (0.0034\%), about 5.5 s per step. Halving exposed time saves 4,900 GPU-hours over 100,000 steps. Only byte levers help, such as compression, overlap, hierarchical shard rings over parallel links (Section 3), or model partitioning (Lecture 6); fusion is tempting yet saves little against 0.2 ms of 5,513 ms.}
+
+    \notecue{Watch for}{This communication-only baseline assumes every rank reduces the full 140 GB gradient. Lecture 6 splits large models into smaller shards.}
+
+    \notecue{Teach}{Give 90 seconds to compute both terms before revealing the arithmetic, then ask which levers help.}
+
+    \notecue{Next}{Section 2 priced a flat ring; Section 3 asks which schedules beat it across scales and fabric tiers.}
+  }
 \end{frame}
 
 % =============================================================================
 % SECTION: ALGORITHMS
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] The ring is optimal in bytes and linear in rounds. Can we keep the bytes and cut the rounds, and use the fast links inside a node?}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  A flat ring hits the byte floor yet carries two structural weaknesses, paying $2(N-1)$ startup rounds on large groups and crawling at the speed of its slowest off-node link. This section answers when trees beat rings on round count, how hybrid schedules keep both logarithmic rounds and $2M$ bytes, and how hierarchy keeps heavy traffic on intra-node NVLink.
+
+  \notecue{Next}{How sharply do startup rounds drop when a binary tree replaces a flat ring at 1,024 GPUs?}
+}
 \mlsysdivider{Which AllReduce schedule wins, and when?}{Collective Communication, \S5.6.4 to \S5.6.7 and \S5.7}
 \section{Algorithms}
 
 \begin{frame}{A tree needs 20 rounds where a ring needs 2,046}
-  \centering
-  \safeimg[width=0.92\textwidth,height=5.2cm,keepaspectratio]{rounds.pdf}\\[0.1cm]
-  {\normalsize The simple tree pays in bytes, because the full message crosses every level.}
-  \mlsyscredit{Collective Communication, \S5.6.4 and its round-count figure, redrawn.}
-  \note{[2 min] [OPTIONAL] A tree reduces pairs up to a root in $\log_2 N$ rounds and broadcasts back down in $\log_2 N$ more. At 1,024 ranks: 20 rounds against the ring's 2,046, about 100 times fewer. The cost is bytes. In the simple tree each level forwards the whole message, so the byte term is $2\log_2 N \cdot M/\beta$. On the 64-GPU scoreboard that is 12 full transfers of 1 GB, 240 ms against the ring's 39.4 ms. ENGAGE: which payloads want the tree? (Expected: small ones: scalar reductions, control messages, small activations, where rounds dominate.) WARN: 'tree' names a family. Recursive halving-doubling and NCCL's double binary tree keep log rounds with ring-level bytes; the simple tree is the teaching baseline. FLEX: if short, cut this slide; the predict slide that follows states both round counts.}
+  \begin{columns}[c]
+    \begin{column}{0.71\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.7cm,keepaspectratio]{rounds.pdf}
+    \end{column}
+    \begin{column}{0.27\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{cscs-alps-hall.jpg}\\[0.05cm]
+      {\scriptsize\textcolor{midgray}{CSCS Alps hall: thousands of GPUs across racks}}
+    \end{column}
+  \end{columns}
+  \vspace{0.08cm}
+  \centering{\normalsize The simple tree pays in bytes, because the full message crosses every level.}
+  \mlsyscredit{Collective Communication, \S5.6.4 (round count redrawn). Photo: Marco Abram, CSCS, CC BY-SA 3.0, Wikimedia Commons.}
+  \note{%
+    \mlsysnotemeta{2 min}{Optional}%
+    To cut the ring's linear round count, a binary tree reduces pairs up to a root in $\log_2 N$ rounds and broadcasts back down in $\log_2 N$ rounds. At 1,024 GPUs, that cuts 2,046 ring rounds down to 20, about 100$\times$ fewer. The trade-off in a simple tree is byte volume, because each level forwards the entire message $M$. That inflates the byte term to $2\log_2 N \cdot M/\beta$, which takes 240 ms on the 64-GPU, 1 GB scoreboard against 39.4 ms for the ring. Simple trees therefore excel on small control and scalar payloads where rounds dominate.
+
+    \notecue{Watch for}{``Tree'' names a broad family of algorithms. Recursive halving-doubling and NCCL's double binary trees combine logarithmic rounds with ring-optimal $2M$ byte volume.}
+
+    \notecue{Teach}{For a 50-minute class, skip this slide; state the tree's $2\log_2 N$ rounds and $2\log_2 N \cdot M/\beta$ bytes before polling on the next slide.}
+
+    \notecue{Next}{Given fewer rounds but heavier per-level byte traffic, does a ring or a simple tree win on 1 MB across 64 GPUs?}
+  }
 \end{frame}
 
 \begin{frame}{Ring or tree for a 1 MB buffer on 64 GPUs?}
@@ -325,19 +454,30 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
         \midrule
         Startup & 1,260 & 120 \\
         Bytes & 196.9 & 1,200 \\
-        \textbf{Total} & 1,456.9 & \textbf{1,320} \\
+        \textbf{Total} & 1,457 & \textbf{1,320} \\
         \bottomrule
-      \end{tabular}}\\[0.2cm]
+      \end{tabular}}\\[0.18cm]
       \uncover<3->{{\scriptsize\ttfamily NCCL\_ALGO=Ring\textbar{}Tree\textbar{}NVLS\textbar{}...}}
     \end{column}
     \begin{column}{0.62\textwidth}
       \centering
-      \uncover<3->{\safeimg[width=\textwidth,height=4.4cm,keepaspectratio]{crossover.pdf}\\[0.05cm]
+      \uncover<3->{\safeimg[width=\textwidth,height=4.15cm,keepaspectratio]{crossover.pdf}\\[0.04cm]
       {\small $M^* \approx \dfrac{N\alpha\beta}{\log_2 N}$: 1.1 MB here, 7.7 MB on 1,024 NDR GPUs.}}
     \end{column}
   \end{columns}
   \mlsyscredit{Collective Communication, Napkin Math 5.3 and \S5.6.7. Curves: the chapter's two cost models. NCCL\_ALGO: NCCL User Guide, environment variables.}
-  \note{[2.5 min] [CORE] Students vote ring or tree. Step 2: ring startup is 126 rounds of 10 microseconds, 1,260; tree startup is 12 rounds, 120. Ring bytes are 196.9 microseconds; tree bytes are 12 full transfers, 1,200. Tree wins by about 9 percent. Step 3: the two models against message size. Below the crossover the tree's saved rounds win; above it the ring's saved bytes win. Setting the two equal and keeping the large-$N$ terms gives $M^* \approx N\alpha\beta/\log_2 N$: about 1.1 MB here, and 7.7 MB on the 1,024-GPU NDR reference cluster. So a 25 MB bucket or a full gradient goes to the ring; a few hundred kilobytes go to the tree. ENGAGE: the crossover grows with $N$. Why? (Expected: the ring's round count grows linearly.) The bottom line is NCCL's real setting. By default the library picks the algorithm per call, and NCCL\_ALGO restricts it to Ring, Tree, NVLS (in-switch reduction over NVLink), and others. WARN: NCCL chooses among more than two schedules; the model names a candidate to benchmark, and an override stays only if measured step time improves. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    A ring pays $2(N-1)$ startups and sends $\approx 2M$ bytes, whereas a simple tree uses $2\log_2 N$ rounds but forwards the full payload each level ($2\log_2 N \cdot M/\beta$). Napkin Math 5.3 tests both for $N = 64$, $M = 1$ MB, $\alpha = 10$ \textmu s, and $\beta = 10$ GB/s. Before reading on, predict which finishes faster.
+
+    \notecue{Check}{The simple tree wins. The ring takes $1{,}260 + 196.9 = 1{,}457$ \textmu s against the tree's $120 + 1{,}200 = 1{,}320$ \textmu s (about 9\% faster), because 126 startups outweigh 12 transfers. Picking ring is tempting for 1 MB, yet equating both times gives $M^* \approx N\alpha\beta / \log_2 N$, yielding 1.1 MB here and 7.7 MB on 1,024 NDR GPUs. Tree wins below $M^*$ and ring above. NCCL chooses dynamically among ring, tree, and NVSwitch-assisted (\texttt{NVLS}) schedules, while \texttt{NCCL\_ALGO} overrides it.}
+
+    \notecue{Watch for}{Treat analytical crossovers as benchmark hypotheses; keep \texttt{NCCL\_ALGO} overrides only if measured step time improves.}
+
+    \notecue{Teach}{Poll ring versus tree before revealing the table and crossover plot.}
+
+    \notecue{Next}{Can a schedule keep logarithmic rounds without paying the simple tree's byte penalty?}
+  }
 \end{frame}
 
 \begin{frame}{Two schedules keep log rounds and ring-level bytes}
@@ -356,7 +496,14 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
   \end{tabular}\\[0.3cm]
   {\normalsize Fewer rounds bring a placement cost, because distant partners share the fabric.}
   \mlsyscredit{Collective Communication, table 6 and \S5.6.5 to \S5.6.6.}
-  \note{[1 min] [OPTIONAL] Halving-doubling (butterfly) pairs rank $i$ with rank $i$ XOR $2^k$ and halves the region exchanged each round, so it reaches the byte bound in log rounds; but its last rounds pair distant ranks, which may sit on different racks and share the inter-rack fabric. NCCL's double binary tree runs two trees at once, each on half the data; ranks that are interior in one tree are leaves in the other, and each tree pipelines small chunks, so every rank sends about $2M$. ENGAGE: on 8 GPUs, 4 per node, which halving-doubling round crosses the node? (Expected: the third, partner distance 4.) FLEX: cut if short; the takeaway is that the libraries pick among these by message size, rank count, and topology.}
+  \note{%
+    \mlsysnotemeta{1 min}{Optional}%
+    Simple trees pay a $\log_2 N$ byte penalty, yet two production schedules avoid that inflation. Recursive halving-doubling, also called a butterfly schedule, pairs rank $i$ with the partner found by flipping bit $k$ of its rank index (bitwise exclusive-OR, $i \oplus 2^k$) while halving exchanged chunks each round. For power-of-two $N$, it achieves $2\log_2 N$ rounds and the optimal $2\frac{N-1}{N}M$ bytes, although wide steps such as round 3 at distance 4 on 4-GPU nodes pair distant racks across the fabric. NCCL's double binary tree instead pipelines small chunks across two complementary trees so that interior nodes in one tree act as leaves in the other, reaching $\approx 2\log_2 N$ rounds and $\approx 2M$ bytes.
+
+    \notecue{Teach}{For a 50-minute class, skip this slide and note orally that NCCL selects automatically among ring, tree, and pipelined double-tree schedules.}
+
+    \notecue{Next}{Flat schedules assume uniform link speed; what happens when intra-node NVLink is 9$\times$ faster than an off-node port?}
+  }
 \end{frame}
 
 \begin{frame}{Inside a node, NVLink carries 9$\times$ an InfiniBand port}
@@ -368,20 +515,35 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
     \end{column}
     \begin{column}{0.48\textwidth}
       \centering
-      \safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{bw_tiers.pdf}\\[0.1cm]
-      {\small DGX H100, per GPU. A flat ring runs at its slowest edge.}
+      \safeimg[width=\textwidth,height=3.7cm,keepaspectratio]{bw_tiers.pdf}\\[0.08cm]
+      {\small DGX H100, per GPU. A flat ring runs at its slowest edge.\\[0.06cm]
+      \footnotesize\textcolor{midgray}{Fabric energy: $\approx$35 pJ/bit ($\approx$5.6 kJ per 1 GB ring at 10k ranks).}}
     \end{column}
   \end{columns}
-  \mlsyscredit{Photo: Pokiiri, CC BY-SA 4.0, Wikimedia Commons (HGX B200; the lecture's numbers use the H100 generation). Bandwidths: Collective Communication, \S5.7.1.}
-  \note{[2 min] [OPTIONAL] Real, then abstract. The photo is an eight-GPU board of the generation after the H100; the eight heat sinks cover eight GPUs, and NVLink switches on the board join them. The running case uses DGX H100 numbers: 450 GB/s per GPU per direction over NVLink (the 900 GB/s on the datasheet counts both directions), and one 50 GB/s InfiniBand port per GPU to leave the node. LINK: Lecture 2's bandwidth hierarchy. Every ordering of a flat ring over 64 GPUs on 8 nodes has at least one edge per node that crosses InfiniBand, and every edge carries the same traffic each step, so the whole ring runs at 50 GB/s and takes about 40 ms for the 1 GB buffer. ENGAGE: which links sit idle during that flat ring? (Expected: most NVLink capacity, and seven of each node's eight ports.) FLEX: if short, say the 450 against 50 GB/s line on the next slide and skip the photo.}
+  \mlsyscredit{Photo: Pokiiri, CC BY-SA 4.0, Wikimedia Commons (HGX B200; numbers use H100). Bandwidths \& energy: Collective Communication, \S5.5, \S5.7.1.}
+  \note{%
+    \mlsysnotemeta{2 min}{Optional}%
+    Every flat ring or tree so far ignored that bandwidth cliff from Lectures 2 and 3, shown beside an eight-GPU HGX B200 baseboard. Inside a DGX H100 node, NVLink delivers 450 GB/s per direction (quoted as 900 GB/s bidirectional on datasheets), against 50 GB/s per InfiniBand NDR port outside. Crossing the external fabric also consumes about 35 pJ/bit, which amounts to about 5.6 kJ per 1 GB ring at 10,000 ranks. Because a flat 64-GPU ring across 8 nodes must traverse InfiniBand on at least some hops, the whole ring slows to 50 GB/s, taking about 40 ms for 1 GB while leaving intra-node NVLink and seven of each node's eight uplinks largely idle.
+
+    \notecue{Teach}{For a 50-minute class, skip this slide and state the 450 versus 50 GB/s NVLink-to-NDR ratio directly on the hierarchical slide.}
+
+    \notecue{Next}{How does three-phase hierarchical AllReduce put both NVLink and all eight uplinks to work?}
+  }
 \end{frame}
 
 \begin{frame}{Hierarchical AllReduce turns 40 ms into 8.3 ms on 8 $\times$ 8 GPUs}
   \centering
-  \mlsyssteps[width=0.95\textwidth,height=5.0cm,keepaspectratio]{hier_step}{3}\\[0.15cm]
+  \mlsyssteps[width=0.95\textwidth,height=4.75cm,keepaspectratio]{hier_step}{3}\\[0.12cm]
   {\normalsize\uncover<3->{1.94 $+$ 4.40 $+$ 1.94 $=$ \textbf{8.3 ms}, against about 40 ms for a flat ring on one port per hop.}}
-  \mlsyscredit{Collective Communication, \S5.7.1, figure 7, and Napkin Math 5.4 (1 GB, 8 nodes of 8, one 50 GB/s port per GPU). Drawn with 4 nodes of 4.}
-  \note{[3 min] [CORE] Drawn with four nodes of four GPUs; the numbers are for eight of eight. Step 1: inside each node, a ReduceScatter over NVLink leaves each GPU one eighth of the node's partial sum. Each GPU sends 875 MB at 450 GB/s, about 1.94 ms. Step 2: GPUs in the same position on every node form a ring and AllReduce their 125 MB shard over InfiniBand, about 4.40 ms. The eight rings run at once, one per port. Step 3: an AllGather over NVLink rebuilds the full sum in each node, 1.94 ms. Total 8.3 ms against about 40 ms, 4.8 times faster. The scoreboard's last bar. On the 1,024-GPU reference cluster, Archetype A's 175B gradient (350 GB in BF16) drops from about 14.0 s to 3.1 s. ENGAGE: what if the node's eight GPUs shared one uplink? (Expected: the eight shard rings run one after another and most of the gain disappears.) FLEX: [CORE].}
+  \mlsyscredit{Collective Communication, \S5.7.1, figure 7, and Napkin Math 5.4 (interactive Explore figure: Hierarchical AllReduce). Drawn with 4 nodes of 4.}
+  \note{%
+    \mlsysnotemeta{3 min}{Core}%
+    A flat multi-node ring runs at one 50 GB/s uplink (about 40 ms for 1 GB) while leaving 450 GB/s NVLink mostly idle. To use both tiers and all $G = 8$ GPUs per node (with one uplink each), hierarchical AllReduce splits Napkin Math 5.4's $8 \times 8$ DGX H100 exchange (drawn as $4 \times 4$) into three phases. First, intra-node NVLink ReduceScatter sends 875 MB ($\frac{7}{8}$ GB) per GPU in 1.94 ms, leaving each GPU a $1/G$ (125 MB) shard. Second, eight parallel inter-node InfiniBand rings, one per GPU rail (linking matching GPUs across nodes), each reduce 125 MB across 8 nodes, moving $2 \cdot \frac{7}{8} \times 125\text{ MB}$ at 50 GB/s plus startup in 4.40 ms. Third, NVLink AllGather finishes in 1.94 ms. Total time falls from about 40 ms to $1.94 + 4.40 + 1.94 = 8.3\text{ ms}$ ($4.8\times$ faster). For Lecture 1's Archetype A dense-LLM model, a 350 GB gradient on 1,024 GPUs drops from about 14.0 s to 3.1 s.
+
+    \notecue{Watch for}{If all eight GPUs shared one uplink, the eight shard rings would serialize and nearly eliminate the speedup.}
+
+    \notecue{Next}{What physical wiring keeps those eight inter-node shard rings from colliding?}
+  }
 \end{frame}
 
 \begin{frame}{Rail alignment gives each shard ring its own NIC}
@@ -400,13 +562,27 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
     \end{column}
   \end{columns}
   \mlsyscredit{Photo: ChrisDag, CC BY 2.0, Wikimedia Commons. Rails: Collective Communication, \S5.7.4 and table 8.}
-  \note{[1.5 min] [OPTIONAL] Step 2 of the hierarchical schedule depends on wiring. In a DGX cluster, GPU $k$ of every node connects through its own NIC to rail switch $k$, so the eight shard rings travel on eight independent rails. LINK: Lecture 3 introduced rail-optimized topology. If the scheduler numbers ranks without regard to the hardware, the shard groups and the rails drift apart; in the worst case all eight exchanges converge on one NIC, one eighth of the rail-aligned bandwidth. A common symptom is that nccl-tests shows full bandwidth while the training job gets a fraction. WARN: contiguous rank numbers on a node do not prove rail alignment. LINK: Lecture 8 places jobs on the topology. Two other ways to shrink payloads before the slow tier, torus reduction on TPU pods and in-switch reduction (SHARP), are in the reading, \S5.7.2 and \S5.7.3. FLEX: cut if short.}
+  \note{%
+    \mlsysnotemeta{1.5 min}{Optional}%
+    The inter-node phase of hierarchical AllReduce reaches full speed only when logical rank numbering matches Lecture 3's physical rail wiring. GPU $k$ on every node connects through NIC $k$ to rail switch $k$, keeping all eight shard rings independent. If the job scheduler misplaces ranks (Lecture 8), all eight rings can collide onto one NIC, collapsing injection bandwidth, the rate a node pushes bytes into the fabric, to $1/8$ even while standalone \texttt{nccl-tests} benchmarks look healthy. Record rank, GPU, NIC, node, and rail mapping together before trusting a measurement. For two further schedules, see \S5.7.2 for dimension-by-dimension reduction on wrap-around torus links and \S5.7.3 for NVIDIA's Scalable Hierarchical Aggregation and Reduction Protocol (SHARP), which sums partial gradients inside InfiniBand switches.
+
+    \notecue{Watch for}{Contiguous rank numbering on each host does not guarantee rail alignment across nodes.}
+
+    \notecue{Teach}{For a 50-minute class, skip this slide and transition directly to non-uniform AllToAll traffic.}
+
+    \notecue{Next}{Section 3 cut rounds with trees and protected slow links with hierarchy and aligned rails; what breaks when traffic is no longer uniform?}
+  }
 \end{frame}
 
 % =============================================================================
 % SECTION: ALLTOALL
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] Hierarchy, trees, and rails were built for AllReduce's uniform payload. Expert routing sends different data to every rank.}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Every AllReduce schedule so far assumed identical tensor shapes and symmetric exchanges across ranks. This section examines AllToAll, where data-dependent expert routing sends different tokens to different GPUs, and establishes which physical limit can stall AllToAll before AllReduce does.
+
+  \notecue{Next}{Start with uniform MoE token dispatch across 8 GPUs to establish the four-term AllToAll bound before skew enters.}
+}
 \mlsysdivider{Why can AllToAll stall before AllReduce does?}{Collective Communication, \S5.8}
 \section{AllToAll}
 
@@ -419,17 +595,22 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
       \small
       8 GPUs, 64 experts, 512 tokens each.\\
       Token: 2,048 values in BF16, 4.096 KB.\\[0.2cm]
-      Sent per GPU: $7 \times 64 \times 4.096$ KB $=$ \textbf{1.84 MB}\\[0.2cm]
-      \uncover<2->{Bound: $\geq 1.84$ MB $/$ 50 GB/s $=$ \textbf{36.7 $\mu$s}\\[0.15cm]
+      Sent per GPU: $7 \times 64 \times 4.096$ KB $=$ \textbf{1.835 MB}\\[0.2cm]
+      \uncover<2->{Bound: $\geq 1.835$ MB $/$ 50 GB/s $=$ \textbf{36.7 $\mu$s}\\[0.15cm]
       {\footnotesize It ends at the largest of four terms: startup, injection, reception, and bytes over the bisection.}}\\[0.15cm]
       {\footnotesize\ttfamily\begin{tabular}{@{}l@{}}dist.all\_to\_all\_single(output, input,\\\hspace*{1em}output\_split\_sizes,\\\hspace*{1em}input\_split\_sizes)\end{tabular}}
     \end{column}
   \end{columns}
   \mlsyscredit{Collective Communication, Napkin Math 5.5 and Systems Perspective 5.1 (uniform routing, InfiniBand NDR). Code: PyTorch v2.4.0 distributed\_c10d.py.}
-  \note{[2.5 min] [CORE] A mixture-of-experts layer with 64 experts on 8 GPUs, 8 experts per GPU. A gating network picks one expert per token. Uniform routing: each GPU keeps 64 of its 512 tokens and sends 64 to each of the 7 others; the matrix is the AllToAll's traffic, sender by receiver. That is 1.84 MB per GPU, and the results come back by a second AllToAll. Step 2: even if all seven sends start at once they share one 50 GB/s port, so dispatch takes at least 36.7 microseconds. The four-term bound: per-message startup, the sender's injection port, the receiver's port, and the bytes crossing the fabric's narrowest cut. $N(N-1)$ logical pairs grow quadratically, but per-rank bytes can stay flat. ENGAGE: seven concurrent sends at 50 GB/s each: 350 GB/s? (Expected: no; one port.) The code line is PyTorch's AllToAll; the split sizes let each destination receive a different count, the variable-size form skewed routing needs. LINK: Lecture 6 designs expert parallelism; today prices its exchange. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    Napkin Math 5.5 models an MoE layer with 64 experts across 8 GPUs linked by 50 GB/s InfiniBand NDR ports (8 experts per GPU; Lecture 6 designs expert parallelism). Each GPU holds 512 BF16 tokens of 4.096 KB each. Under uniform routing, a gating router keeps 64 tokens local and sends 64 to each of the 7 peer GPUs, or $7 \times 64 = 448$ remote tokens ($448 \times 4.096\text{ KB} = 1.835\text{ MB}$ per GPU) before a second AllToAll combines outputs. Because all seven sends share one 50 GB/s port rather than $7 \times 50$ GB/s, transfer time is at least $1.835\text{ MB} / 50\text{ GB/s} = 36.7\text{ \textmu s}$. In general, AllToAll ends at the largest of four bounds, namely startup, maximum per-rank sent bytes over port rate (injection), maximum per-rank received bytes over port rate (reception), and cross-cut bytes over fabric bisection bandwidth, which can bind on oversubscribed fabrics. PyTorch's \texttt{all\_to\_all\_single} accepts split-size lists for non-uniform routing.
+
+    \notecue{Next}{What happens to that 36.7 \textmu s bound when real data routes $1.5\times$ the tokens to one popular GPU?}
+  }
 \end{frame}
 
-\begin{frame}{One rank gets 1.5$\times$ the tokens. What happens?}
+\begin{frame}{What if one rank receives 1.5$\times$ the tokens?}
   \mlsysactivity{Diagnose}{2.5 min}
   \centering
   {\normalsize Routing is data dependent. One GPU's experts receive 672 remote tokens, not 448.\\How long does dispatch take for the whole layer?}\\[0.3cm]
@@ -437,13 +618,27 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
   \only<2-|handout:1>{\safeimg[width=0.92\textwidth,height=2.9cm,keepaspectratio]{a2a_hot_step2.pdf}}\\[0.2cm]
   {\normalsize\uncover<2->{Every rank waits for the hottest receiver, \textbf{1.5$\times$ longer}.}}
   \mlsyscredit{Collective Communication, Napkin Math 5.6 (assumed skew on one rank; 50 GB/s receive port).}
-  \note{[2.5 min] [CORE] Ask: the other seven GPUs finish their receives sooner. Does the layer? Step 2: no. The receive bound for the hot GPU is 672 tokens times 4.096 KB, 2.75 MB, over 50 GB/s: 55.1 microseconds against 36.7. Work that needs the hot expert's outputs waits, so the whole layer's dispatch rises by the same 1.5 times. Its expert computation may also grow, and becomes a straggler. Remedies follow the bound. Variable-size AllToAll avoids sending padded empty slots but not the hot receive. Hierarchical AllToAll coalesces small chunks by destination node to amortize startup, but cannot shrink bytes. Balancing the router attacks the skew itself. ENGAGE: a capacity factor of 1.25 reserves 25 percent more slots per expert. What does it cost if every slot is sent? (Expected: about 1.25 times the bytes.) FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    Unlike the uniform baseline, real MoE routing is data-dependent. In Napkin Math 5.6, one popular GPU receives 672 remote tokens instead of 448, or $1.5\times$ the average. Before reading on, judge whether the layer finishes sooner because the other seven GPUs receive fewer tokens, or how long dispatch takes overall.
+
+    \notecue{Check}{The whole layer takes $1.5\times$ longer, stretching dispatch from 36.7 \textmu s to 55.1 \textmu s. The hot receiver must ingest $672 \times 4.096\text{ KB} = 2.75\text{ MB}$ through one 50 GB/s port while downstream layers wait and its expert compute becomes a straggler. Averaging across all 8 GPUs is tempting, yet misses the maximum-over-receivers bound. Variable-size AllToAll avoids padded zeros (a 1.25 capacity factor, sizing fixed expert buffers, costs about $1.25\times$ bytes if padded) and hierarchical AllToAll coalesces small messages, yet only balancing the MoE gating router removes this bottleneck.}
+
+    \notecue{Teach}{Ask whether the layer finishes sooner because the other seven GPUs receive fewer tokens, then reveal the hot-receiver bar.}
+
+    \notecue{Next}{Section 4 showed that AllToAll finishes only when its hottest receiver or narrowest cut does; once the schedule is set, how can a step wait for less of the remaining communication?}
+  }
 \end{frame}
 
 % =============================================================================
 % SECTION: EXPOSED TIME
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] After the schedule is chosen, two levers remain: send fewer bytes, or hide the transfer under computation.}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Once the collective contract and schedule are chosen, only two levers cut exposed communication time further. A system can send fewer bytes through gradient compression or hide transfers behind backward computation, and this section tests when either lever shortens wall-clock training time.
+
+  \notecue{Next}{When does compressing a gradient save more network time than encoding and decoding cost?}
+}
 \mlsysdivider{How much of the remaining communication must the step wait for?}{Collective Communication, \S5.9 to \S5.11}
 \section{Exposed Time}
 
@@ -451,10 +646,15 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
   \centering
   \safeimg[width=0.92\textwidth,height=3.2cm,keepaspectratio]{payback.pdf}\\[0.3cm]
   {\normalsize Pays only if $t_{\text{codec}} < T_{\text{comm}}\,(1 - 1/r)$, with compression ratio $r$.}\\[0.15cm]
-  {\small INT8: up to 4$\times$ vs FP32.\quad Top-1\% values + indices: up to 50$\times$.\quad 1-bit: up to 32$\times$.}\\[0.15cm]
+  {\small INT8: up to 4$\times$ vs.\ FP32.\quad Top-1\% values + indices: up to 50$\times$.\quad 1-bit: up to 32$\times$.}\\[0.15cm]
   {\footnotesize\ttfamily ddp\_model.register\_comm\_hook(process\_group, fp16\_compress\_hook)}
   \mlsyscredit{Collective Communication, Napkin Math 5.7 (assumed 8$\times$ effective, 2 ms codec) and table 12. Code: PyTorch v2.4.0, ddp\_comm\_hooks/default\_hooks.py docstring.}
-  \note{[1.5 min] [CORE] Compression shrinks only the byte term, so it helps payloads far above $\alpha\beta$, such as a full gradient. Napkin Math 5.7: a 40 ms synchronization (the scoreboard's flat ring) compressed with an assumed effective 8 times becomes 5 ms of transfer plus 2 ms of encoding, 7 ms, about 5.7 times faster. On NVLink, where the same reduction might take 1 ms, 2 ms of encoding makes it slower. The ratios on the bottom line are against FP32; the 70B gradient is already BF16, so each ratio halves. Top-k keeps the largest 1 percent of values but must send an index with each, which halves its headline ratio. The code line is PyTorch's own example, a DDP communication hook that casts each bucket to FP16 before the AllReduce, a 2$\times$ compression against FP32. ENGAGE: compress a 4 KB control message? (Expected: no; its cost is startup.) FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{1.5 min}{Core}%
+    Because compression shrinks only the bandwidth term, it helps large payloads well above $\alpha\beta$ and never 4 KB control packets. It pays off only when compression and decompression overhead, called codec time, satisfies $t_{\text{codec}} < T_{\text{comm}}(1 - 1/r)$. In Napkin Math 5.7, compressing the 40 ms flat ring by an effective $8\times$ with a 2 ms codec cuts time to $5 + 2 = 7$ ms, which is $5.7\times$ faster. On a 1 ms NVLink collective, that same 2 ms codec makes the step slower. Headline ratios of $4\times$ for INT8 integer quantization, $50\times$ for keeping Top-1\% values plus indices, and $32\times$ for 1-bit sign encoding are measured against single-precision FP32 and halve against BF16. PyTorch's Distributed Data Parallel (DDP) \texttt{fp16\_compress\_hook} provides a $2\times$ FP32-to-FP16 half-precision cast.
+
+    \notecue{Next}{Even when compression passes that per-step codec test, can slower convergence still turn a speedup into a slowdown?}
+  }
 \end{frame}
 
 \begin{frame}{Does compression help on a fast network?}
@@ -463,40 +663,69 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
   \only<1|handout:0>{\safeimg[width=0.88\textwidth,height=4.4cm,keepaspectratio]{runlevel_step1.pdf}}%
   \only<2|handout:0>{\safeimg[width=0.88\textwidth,height=4.4cm,keepaspectratio]{runlevel_step2.pdf}}%
   \only<3-|handout:1>{\safeimg[width=0.88\textwidth,height=4.4cm,keepaspectratio]{runlevel_step3.pdf}}\\[0.15cm]
-  {\normalsize 100,000 steps, 300 ms compute each. Compression cuts communication 4$\times$\\but needs 10\% more steps to reach the same quality.}
+  {\normalsize Scenario inputs: 100,000 steps, 300 ms compute. Compression cuts comm.\ 4$\times$\\but needs 10\% more steps to reach the same quality.}
   \mlsyscredit{Collective Communication, \S5.9.5 (serial compute plus communication; scenario inputs).}
-  \note{[2.5 min] [CORE] Step 1: two networks. Ask students to predict, for each, whether compression shortens time to target. Step 2, slow network: 500 ms steps (300 compute, 200 communication) take 50,000 s. Compression cuts communication to 50 ms, but 110,000 steps at 350 ms take 38,500 s, 23 percent faster. Step 3, fast network: 330 ms steps take 33,000 s; compression saves 22.5 ms per step, but 110,000 steps at 307.5 ms take 33,825 s, 2.5 percent slower. ENGAGE: what decides the verdict? (Expected: the share of the step that communication takes, against the extra steps.) WARN: the chapter's pitfall is judging compression by communication speedup. Judge it by time to the same quality. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    Even after passing the codec test, lossy compression can slow convergence. The run-level scenario in \S5.9.5 takes 100,000 baseline steps with 300 ms of compute per step. Compression cuts communication $4\times$, yet requires 10\% more steps (110,000) to reach the same validation quality. Before reading on, predict whether compression shortens total training on a slow network (200 ms communication) versus a fast one (30 ms).
+
+    \notecue{Check}{Compression wins on the slow network ($100\text{k} \times 500\text{ ms} = 50{,}000\text{ s}$ uncompressed against $110\text{k} \times 350\text{ ms} = 38{,}500\text{ s}$ compressed, 23\% faster) and loses on the fast one (33,000 s against $110\text{k} \times 307.5\text{ ms} = 33{,}825\text{ s}$, 2.5\% slower), because a 6.8\% step saving ($22.5 / 330$) cannot offset 10\% extra steps. The chart's ``error feedback'' preserves dropped rounding residuals to limit step inflation, explained next. Judging by the $4\times$ communication speedup rather than wall-clock time to matched quality is a tempting error.}
+
+    \notecue{Teach}{Ask students to predict both networks before revealing the two pairs of bars.}
+
+    \notecue{Next}{How does error feedback keep aggressive rounding from erasing small gradients altogether?}
+  }
 \end{frame}
 
 \begin{frame}{Error feedback carries what rounding dropped into the next step}
-  \centering
-  \small
-  {\normalsize Compressor: send each value rounded to a whole number.}\\[0.2cm]
-  \begin{tabular}{@{}cccccc@{}}
-    \toprule
-    Step & Gradient $g$ & Residual $e$ & $g + e$ & Sent $v$ & New $e = g + e - v$ \\
-    \midrule
-    1 & 0.4 & 0 & 0.4 & 0 & 0.4 \\
-    \uncover<2->{2} & \uncover<2->{0.3} & \uncover<2->{0.4} & \uncover<2->{0.7} & \uncover<2->{\textbf{1}} & \uncover<2->{$-0.3$} \\
-    \uncover<2->{3} & \uncover<2->{0.2} & \uncover<2->{$-0.3$} & \uncover<2->{$-0.1$} & \uncover<2->{0} & \uncover<2->{$-0.1$} \\
-    \uncover<2->{4} & \uncover<2->{0.4} & \uncover<2->{$-0.1$} & \uncover<2->{0.3} & \uncover<2->{0} & \uncover<2->{0.3} \\
-    \uncover<2->{5} & \uncover<2->{0.3} & \uncover<2->{0.3} & \uncover<2->{0.6} & \uncover<2->{\textbf{1}} & \uncover<2->{$-0.4$} \\
-    \bottomrule
-  \end{tabular}\\[0.3cm]
-  {\normalsize\uncover<3->{Without the residual, 0 of a true 1.6 arrives.\quad With it, 2 is sent and $-0.4$ kept: $2 + (-0.4) = 1.6$.}}
+  \begin{columns}[c]
+    \begin{column}{0.53\textwidth}
+      \centering\footnotesize
+      {\small Compressor: round each value to an integer.}\\[0.14cm]
+      \begin{tabular}{@{}cccccc@{}}
+        \toprule
+        Step & $g$ & $e$ & $g{+}e$ & Sent $v$ & New $e$ \\
+        \midrule
+        1 & 0.4 & 0 & 0.4 & 0 & 0.4 \\
+        \uncover<2->{2} & \uncover<2->{0.3} & \uncover<2->{0.4} & \uncover<2->{0.7} & \uncover<2->{\textbf{1}} & \uncover<2->{$-0.3$} \\
+        \uncover<2->{3} & \uncover<2->{0.2} & \uncover<2->{$-0.3$} & \uncover<2->{$-0.1$} & \uncover<2->{0} & \uncover<2->{$-0.1$} \\
+        \uncover<2->{4} & \uncover<2->{0.4} & \uncover<2->{$-0.1$} & \uncover<2->{0.3} & \uncover<2->{0} & \uncover<2->{0.3} \\
+        \uncover<2->{5} & \uncover<2->{0.3} & \uncover<2->{0.3} & \uncover<2->{0.6} & \uncover<2->{\textbf{1}} & \uncover<2->{$-0.4$} \\
+        \bottomrule
+      \end{tabular}\\[0.18cm]
+      {\footnotesize\uncover<3->{Without $e$: 0 of 1.6 arrives. With $e$: $2 + (-0.4) = 1.6$.}}
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.7cm,keepaspectratio]{errfb_step}{3}
+    \end{column}
+  \end{columns}
   \mlsyscredit{Collective Communication, Example 5.2 and tables 10 and 11.}
-  \note{[2.5 min] [CORE] Example 5.2. The compressor rounds to the nearest whole unit, so any value below 0.5 is sent as zero. Without a residual, all five gradients (0.4, 0.3, 0.2, 0.4, 0.3) round to zero, so the model never sees a true total of 1.6. Step 1: with error feedback, the worker keeps what it did not send. Step 2: at step 2 the residual pushes 0.7 over the threshold and 1 is sent; at step 5 again. Step 3: sent plus residual equals the true sum, every step. Summed over steps, transmitted updates equal the true gradients plus the first residual minus the last, so if the residual stays bounded the averages agree. ENGAGE: the gradient is 0.3 every step. How often is a 1 sent? (Expected: about three times in ten steps.) WARN: error feedback is not automatic; the system must store and re-add the residual. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    To keep aggressive compression from adding extra steps or stalling learning, error feedback carries dropped values forward instead of discarding them. Example 5.2 tests an integer-rounding compressor in which any gradient below 0.5 rounds to zero. Across five steps whose values ($0.4, 0.3, 0.2, 0.4, 0.3$) sum to 1.6, naive rounding sends 0 every step and prevents learning. Error feedback retains the dropped residual $e = +0.4$ locally at step 1, so adding $e$ pushes $g + e$ past 0.5 at steps 2 and 5, firing transmitted green pulses of 1. For a constant 0.3 gradient, roughly three 1s fire every ten steps. At every step, the transmitted total plus the stored residual conserves the true sum, giving $2 + (-0.4) = 1.6$.
+
+    \notecue{Watch for}{Error feedback is not automatic inside generic quantization hooks. The runtime must allocate memory to store and accumulate residuals per parameter.}
+
+    \notecue{Next}{Next, an optional slide shows measured throughput gains from Microsoft's DeepSpeed 1-bit Adam using error feedback.}
+  }
 \end{frame}
 
 \begin{frame}{1-bit Adam cut communication volume up to 5$\times$}
   \centering
-  \safeimg[width=0.92\textwidth,height=3.0cm,keepaspectratio]{onebit.pdf}\\[0.2cm]
+  \safeimg[width=0.94\textwidth,height=3.1cm,keepaspectratio]{onebit.pdf}\\[0.10cm]
   \begin{columns}[c]
-    \begin{column}{0.5\textwidth}
-      \small Full-precision Adam until the variance settles; then send 1-bit momentum with a local residual.
+    \begin{column}{0.50\textwidth}
+      \begin{columns}[c]
+        \begin{column}{0.38\textwidth}
+          \centering\mlsysphoto[width=\textwidth,height=1.5cm,keepaspectratio]{datacenter-server-racks.jpg}
+        \end{column}
+        \begin{column}{0.59\textwidth}
+          \footnotesize Full-precision Adam until variance settles; then 1-bit momentum with a local residual (up to 256 GPUs).
+        \end{column}
+      \end{columns}
     \end{column}
-    \begin{column}{0.46\textwidth}
-      \footnotesize\ttfamily
+    \begin{column}{0.48\textwidth}
+      \scriptsize\ttfamily
       "optimizer": \{\\
       \hspace*{1em}"type": "OneBitAdam",\\
       \hspace*{1em}"params": \{ "lr": 4e-4,\\
@@ -504,16 +733,30 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
       \hspace*{2em}"comm\_backend\_name": "nccl" \}\}
     \end{column}
   \end{columns}
-  \mlsyscredit{Tang et al. 2021 (1-bit Adam), experiments up to 256 GPUs, via Collective Communication, \S5.9.4. Config: DeepSpeed v0.14.0, docs/\_tutorials/onebit-adam.md (abridged).}
-  \note{[1 min] [OPTIONAL] These numbers are measured. Adam divides momentum by the square root of a running variance; noise from 1-bit gradients distorts that denominator. DeepSpeed's team observed the variance settles early, so 1-bit Adam runs normal Adam for a warmup, freezes the variance, then sends only the sign of the momentum plus a scale, keeping the residual locally. Tang et al. report up to 5 times less communication volume (less than the raw 32 times, because warmup and other traffic are counted), up to 3.3 times higher throughput for BERT-Large pretraining and 2.9 times for SQuAD fine-tuning, with convergence matching uncompressed Adam. The config is DeepSpeed's tutorial example, in which freeze\_step is the warmup, 23,000 steps, after which compression begins. ENGAGE: why only 5 times, when 1 bit is 32 times smaller than FP32? (Expected: the uncompressed warmup and the rest of the step's traffic.) LINK: Lecture 11 applies update compression to phone uplinks. FLEX: cut if short.}
+  \mlsyscredit{Tang et al. 2021 (1-bit Adam), via Collective Communication, \S5.9.4. Config: DeepSpeed v0.14.0. Photo: Carl Lender, CC BY 2.0, Wikimedia Commons.}
+  \note{%
+    \mlsysnotemeta{1 min}{Optional}%
+    Error feedback alone is not enough for adaptive optimizers. Because the Adam optimizer divides momentum by the square root of a running variance, raw 1-bit gradient noise destabilizes early training. Microsoft's DeepSpeed distributed training library addresses this with 1-bit Adam (Tang et al., 2021), running uncompressed Adam during an initial warmup phase controlled by \texttt{freeze\_step: 23000} until variance settles, then freezing the variance and compressing momentum to 1-bit signs plus a scale with local error feedback. Across up to 256 GPUs, Tang et al. measured up to $5\times$ less total communication volume, below the raw $32\times$ ratio because of warmup and uncompressed traffic, with up to $3.3\times$ higher throughput on BERT-Large pretraining and 2.9$\times$ on Stanford Question Answering Dataset (SQuAD) fine-tuning at matched convergence. Lecture 11 extends update compression to phone uplinks.
+
+    \notecue{Teach}{For a 50-minute class, skip this slide and move directly to hiding communication behind backward compute.}
+
+    \notecue{Next}{The next slide quantifies how overlapping AllReduce behind the backward pass shrinks exposed time.}
+  }
 \end{frame}
 
 \begin{frame}{Overlap hides each reduction under the next layer's backward}
   \centering
-  \mlsyssteps[width=0.95\textwidth,height=5.0cm,keepaspectratio]{overlap_step}{3}\\[0.05cm]
-  {\small Exposed communication is the transfer time the step still waits for after overlap.}
-  \mlsyscredit{Collective Communication, Napkin Math 5.9 (7B model, 32 layers, 64 GPUs, 100 MB buckets at an assumed 3 ms each) and \S5.10.4. 487.6 ms derived from 0.85 ms per bucket.}
-  \note{[3 min] [CORE] Backward runs from the output layer to the input layer, so a layer's gradient is ready while earlier layers still compute. Step 1: sequential. 32 layers of 15 ms of backward, then 32 reductions of 27 ms: 1,344 ms. Step 2: overlapped. Each reduction starts when its layer finishes. But 27 ms is longer than 15 ms, so a backlog of 12 ms grows each layer, and the last reduction has no compute left to hide under: 480 + 27 + 31 times 12 = 879 ms, 34.6 percent less. Step 3: at the hierarchical schedule's rate, about 0.85 ms per 100 MB bucket, a layer's reductions take 7.6 ms, under the 15 ms window, so all but the last hide: 487.6 ms (derived). ENGAGE: what is always exposed? (Expected: the last bucket's transfer.) LINK: this is the Fleet Law's overlap term, $T_{\text{overlap}}$. FLEX: [CORE].}
+  \mlsyssteps[width=0.95\textwidth,height=4.35cm,keepaspectratio]{overlap_step}{3}\\[0.05cm]
+  {\small Faster buckets: 9 buckets/layer $\times$ 0.85 ms $=$ 7.6 ms hides under 15 ms backward; exposed time is what remains.}
+  \mlsyscredit{Collective Communication, Napkin Math 5.9 and \S5.10.4 (interactive Explore figure: Communication-Compute Overlap). 487.6 ms derived from 9 buckets/layer $\times$ 0.85 ms.}
+  \note{%
+    \mlsysnotemeta{3 min}{Core}%
+    Once payload size is set, overlap hides transfers behind ongoing backward compute, which flows from output to input so ready layers can communicate while earlier layers compute. Napkin Math 5.9 models a 7B model on 64 GPUs with 32 layers of 15 ms backward compute each; 9 buckets of 100 MB at 3 ms per bucket take 27 ms per layer. Sequential execution adds 480 ms compute to $32 \times 27\text{ ms}$ communication for 1,344 ms. Launching each reduction immediately leaves a 12 ms backlog per layer ($27 > 15$ ms) plus the final reduction, totaling $480 + 27 + 31 \times 12 = 879$ ms (34.6\% faster). A hierarchical schedule speeds each 100 MB bucket from 3 ms to 0.85 ms, or 7.6 ms per layer under 15 ms compute. Only the final 7.6 ms stays exposed, giving 487.6 ms total (derived) and maximizing $T_{\text{overlap}}$.
+
+    \notecue{Watch for}{Even with ideal overlap, at least the final bucket and its fixed launch overhead remain exposed after backward finishes.}
+
+    \notecue{Next}{How do runtimes bucket gradients in code, and what overhead remains in a live trace?}
+  }
 \end{frame}
 
 \begin{frame}{Runtimes bucket gradients and trace every AllReduce}
@@ -533,19 +776,31 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
     \end{column}
     \begin{column}{0.54\textwidth}
       \centering
-      \safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{horovod_trace.pdf}\\[0.05cm]
-      {\footnotesize Horovod Timeline: bytes move for 19 of 325 ms.}
+      \mlsyssteps[width=\textwidth,height=4.5cm,keepaspectratio]{horovod_trace_step}{2}\\[0.05cm]
+      {\footnotesize\uncover<2->{Horovod Timeline: bytes move for 19 of 325 ms (6\%).}}
     \end{column}
   \end{columns}
   \mlsyscredit{Code: PyTorch v2.4.0, torch/nn/parallel/distributed.py, lines 793 to 799 (comment line split for the slide). Trace: Sergeev and Del Balso 2018, Figure 5, redrawn (phase edges read to about 2 ms).}
-  \note{[2 min] [OPTIONAL] Left: real PyTorch source. DistributedDataParallel groups gradients into buckets, 25 MiB by default, and launches one asynchronous AllReduce per bucket from gradient hooks as soon as all its gradients are ready. Larger buckets amortize per-call startup; smaller ones start earlier and widen the overlap window. One late gradient holds its whole bucket. Right: a real trace from Horovod's timeline tool, redrawn from the paper's screenshot. Each row is one gradient tensor's AllReduce across all ranks. Violet is negotiation, the wait until every rank reports that tensor ready; gray is waiting for the gradient data on the GPU, its own or that of tensors fused with it; amber is NCCL moving bytes. Tensors 0 and 1 finish in 115 ms. Tensors 2 to 4 negotiate for 131 ms, and of the 325 ms from first request to finish, NCCL moves bytes for 19, about 6 percent (derived in calcs.py; the 184 ms AllReduce span is printed in the screenshot). WARN: async\_op=True only returns control to Python; LogP separates network time, which compute can hide, from the processor overhead of starting and finishing each transfer, which it cannot. Calibrate $\alpha$ and $\beta$ with nccl-tests on the job's own placement; Lecture 9 attributes step time. FLEX: cut if short.}
+  \note{%
+    \mlsysnotemeta{2 min}{Optional}%
+    To overlap without paying one startup per parameter tensor, PyTorch \texttt{DistributedDataParallel} fuses ready gradients into default 25 MiB (mebibytes) buckets. Larger buckets pay fewer $\alpha$ startups while smaller buckets start overlap earlier, though one late gradient stalls its whole bucket. Even with bucketing, non-transfer overhead remains. Horovod's measured timeline (Sergeev and Del Balso, 2018, Figure 5) separates rank-readiness negotiation (violet), GPU wait (gray), and NCCL transfer (amber). Across tensors 2 to 4 (325 ms total), negotiation takes 131 ms while the 184 ms AllReduce bracket spans post-negotiation wait and just 19 ms of NCCL byte transfer (about 6\% of the 325 ms total, derived). Passing PyTorch's non-blocking flag \texttt{async\_op=True} to \texttt{dist.all\_reduce} only returns control to Python; processor overhead (term $o$ in \S5.10's LogP model, unlike network transit) cannot hide behind compute. Lecture 9 analyzes full step timelines.
+
+    \notecue{Teach}{For a 50-minute class, skip this slide; the synthesis slide two frames ahead still shows the Horovod timeline banner.}
+
+    \notecue{Next}{Section 5 judged compression and overlap by exposed step time and time to quality; Section 6 now tests the full cost model.}
+  }
 \end{frame}
 
 % =============================================================================
 % SECTION: WRAP-UP
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] Check the misconceptions, then return to Horovod.}
-\mlsysdivider{What decides how long N accelerators take to agree?}{Collective Communication, \S5.12 and \S5.13}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Every piece of the communication cost model is now in place, from contracts and per-round pricing to hierarchy, AllToAll bounds, compression, and overlap. We close by testing four common misconceptions against our numbers and returning to Uber's 128-GPU Horovod run to see which cost term each speedup moved.
+
+  \notecue{Next}{Which four rules of thumb from \S5.12 break down under the numbers we just computed?}
+}
+\mlsysdivider{What decides how long $N$ accelerators take to agree?}{Collective Communication, \S5.12 and \S5.13}
 \section{Wrap-Up}
 
 \begin{frame}{True or false?}
@@ -563,15 +818,24 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
     \bottomrule
   \end{tabular}
   \mlsyscredit{Collective Communication, \S5.12 (Fallacies and Pitfalls).}
-  \note{[2 min] [CORE] Students vote on each claim, then reveal. Each verdict carries the lecture's number. Bandwidth: Napkin Math 5.1's 24.4 KB chunks on 1,024 ranks are below the 75 KB knee, so more bandwidth helps little. Compression: Example 5.2's rounding sends nothing at all without a residual. Async: Napkin Math 5.9 leaves the last transfer exposed, and LogP's processor overhead cannot be hidden. Flat ring: Napkin Math 5.4. ENGAGE: which claim did your neighbor believe at the start? FLEX: [CORE]. An extension, if time remains: 'rank-to-GPU mapping does not affect collective performance' (false; misplaced rails give one eighth the injection bandwidth).}
+  \note{%
+    \mlsysnotemeta{2 min}{Core}%
+    Decide whether each statement below is true or false, and name the number from this lecture that settles it before reading on.
+
+    \notecue{Check}{All four claims are false. First, a 25 MB bucket split across 1,024 ranks becomes 24.4 KB chunks, below the 75 KB NDR crossover and latency-bound; treating it as bandwidth-bound ignores per-round chunk size. Second, rounding without error feedback dropped 100\% of the 1.6 signal in Example 5.2, ignoring residual conservation. Third, asynchronous overlap still leaves the last bucket exposed (and 7.6 ms for the final layer under \S5.10.4's faster hierarchical buckets) along with LogP processor launch overhead. Fourth, a flat multi-node ring runs at one port's speed, taking 40 ms against 8.3 ms for hierarchical AllReduce. A bonus claim that rank-to-GPU mapping does not matter is also false, because misplacing ranks collapses eight parallel uplinks onto one NIC ($1/8$ bandwidth).}
+
+    \notecue{Teach}{Have students vote on all four statements before revealing the verdicts; raise the rank-to-GPU mapping bonus claim if time permits.}
+
+    \notecue{Next}{With those pitfalls cleared, how do these cost terms account for every speedup Uber measured on 128 Pascal GPUs?}
+  }
 \end{frame}
 
 \begin{frame}{Each Horovod measurement moved one term}
   \centering
-  \safeimg[trim=170 151 194 90,clip,width=\textwidth,height=2.8cm,keepaspectratio]{horovod-timeline.png}\\[0.02cm]
-  {\footnotesize ResNet-101 in Horovod's timeline: long negotiate and wait phases; NCCL moves bytes only at the end.}\\[0.05cm]
+  \safeimg[width=0.96\textwidth,height=2.45cm,keepaspectratio]{horovod_trace_banner.pdf}\\[0.04cm]
+  {\footnotesize ResNet-101 in Horovod's timeline: long negotiate and wait phases; NCCL moves bytes only at the end.}\\[0.08cm]
   \footnotesize
-  \renewcommand{\arraystretch}{1.0}
+  \renewcommand{\arraystretch}{1.05}
   \begin{tabular}{@{}>{\raggedright\arraybackslash}p{6.8cm}>{\raggedright\arraybackslash}p{6.8cm}@{}}
     \toprule
     Horovod measured & Term it moved \\
@@ -581,12 +845,16 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
     \leavevmode\uncover<3->{RDMA: +3--4\% ResNet, +30\% VGG-16} & \leavevmode\uncover<3->{per-message cost; VGG-16 is byte-heavy} \\
     \bottomrule
   \end{tabular}
-  \mlsyscredit{Sergeev and Del Balso 2018, Sections 7 and 8 (128 Pascal GPUs; Tensor Fusion on TCP; RDMA against 25GbE TCP) and Figure 5 (timeline).}
-  \note{[2.5 min] [CORE] Return to the hook. Step 1: replacing the parameter server with a ring removed the concentration that sends $N$ times the bytes through one port, as on our scoreboard (1,280 ms against 39.4 ms, and 8.3 ms with hierarchy); efficiency went from about half to 88 percent. Step 2: Horovod's timeline showed ResNet-101 issuing many tiny AllReduces; Tensor Fusion packs ready tensors into a 64 MB buffer, the fusion lever for startup-bound messages, and gave up to 65 percent on models with many layers over TCP. Step 3: RDMA, kernel-bypass networking, added only 3 to 4 percent for Inception V3 and ResNet-101 but 30 percent for VGG-16. The paper explains that VGG-16's many parameters and few layers shift its critical path from GPU computation to communication, so only there does a cheaper transfer shorten the step. ENGAGE: why did RDMA help one model ten times more than the others? (Expected: only VGG-16 had communication on its critical path.) FLEX: [CORE].}
+  \mlsyscredit{Sergeev and Del Balso 2018, Sections 7 and 8 (128 Pascal GPUs; Tensor Fusion on TCP; RDMA against 25GbE TCP) and Figure 5 (vector redrawn).}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    In Uber's Horovod study (Sergeev and Del Balso, 2018, on 128 Pascal GPUs), three published speedups each moved one distinct term of the cost model. First, replacing parameter servers with ring AllReduce lifted scaling from about 50\% to 88\% by removing single-port concentration, illustrating the same bottleneck as the 1,280 ms versus 39.4 ms scoreboard. Second, adding 64 MB Tensor Fusion addressed the long negotiation and wait spans on small ResNet-101 tensors shown in the timeline banner, cutting $\alpha$ startups for gains of up to 65\% over TCP. Third, enabling RDMA (Lecture 3's kernel-bypass transport) lowered per-message cost, accelerating compute-heavy ResNet-101 by only 3 to 4\% while speeding the byte-heavy VGG-16 model by 30\%, because only VGG-16 had communication on its critical path.
+
+    \notecue{Next}{What core rules stay with you from this cost model when designing any distributed training run?}
+  }
 \end{frame}
 
 \begin{frame}{Takeaways}
-  \normalsize
   \small
   \begin{itemize}\setlength{\itemsep}{0.15cm}
     \item Choose the narrowest contract the next computation consumes.
@@ -595,7 +863,12 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
     \item An AllToAll finishes when its hottest receiver or its narrowest cut finishes.
     \item Compression and overlap act on what remains; judge them by step time and time to quality.
   \end{itemize}
-  \note{[1 min] [CORE] One line per segment. Ask students to star the one they would have gotten wrong before today.}
+  \note{%
+    \mlsysnotemeta{1 min}{Core}%
+    Five takeaways answer the driving question of how long $N$ accelerators take to agree on a gradient and which algorithm to choose. Pick the narrowest collective contract, price $2(N-1)$ ring rounds on $M/N$ chunks, cut rounds with trees and each port's slow-tier payload to $M/G$ with hierarchy (where $G$ is the number of GPUs per node, assuming one port per GPU), bound AllToAll by its hottest receiver or narrowest cut, and judge compression and overlap by wall-clock time to matched quality.
+
+    \notecue{Next}{Where do today's collective mechanisms still leave unresolved design tensions across switches, routers, and memory?}
+  }
 \end{frame}
 
 \begin{frame}{Open questions}
@@ -605,19 +878,32 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
     \item Routing skew is set by the data. Should the router balance load, or should the fabric absorb skew?
     \item Overlap needs memory for in-flight buffers. When does hiding communication cost more memory than it saves time?
   \end{itemize}
-  \note{[0.5 min] [OPTIONAL] No single answer. FLEX: use one as a two-minute discussion if time remains, or as a written assignment. For the first, point students to SHARP's limits in \S5.7.3: supported operators and formats, and a finite number of aggregation trees per switch. For the second, the auxiliary load-balancing loss changes the model to fit the network; Lecture 6 returns to it.}
+  \note{%
+    \mlsysnotemeta{0.5 min}{Optional}%
+    Three open engineering trade-offs extend the mechanisms of this lecture. The first weighs in-switch SHARP reduction, which aggregates contributions as packets traverse network switches, against operator and precision limits and limited switch memory for active reduction trees (\S5.7.3). The second asks whether auxiliary load-balancing losses, extra training penalties that encourage balanced token routing, should reshape MoE models to protect the network (Lecture 6). The third balances the memory cost of in-flight overlap buffers against saved step time.
+
+    \notecue{Teach}{For a 50-minute class, skip this slide or assign one prompt as a brief reflection.}
+
+    \notecue{Next}{The next slide lists Chapter 5 reading, practice exercises, and primary papers.}
+  }
 \end{frame}
 
 \begin{frame}{Read and explore}
-  \small
+  \footnotesize
   \begin{itemize}\setlength{\itemsep}{0.08cm}
     \item \textbf{Read:} Collective Communication, \S5.3 to \S5.10 and the self-checks. \textbf{Practice:} redo Napkin Math 5.3 for 10 MB; run nccl-tests on two GPUs and fit $\alpha$, $\beta$.
+    \item \textbf{Explore:} \emph{Ring AllReduce} (\S5.6.2), \emph{Hierarchical AllReduce} (\S5.7.1), and \emph{Communication-Compute Overlap} (\S5.10.1) on mlsysbook.ai/vol2/.
     \item Sergeev and Del Balso, ``Horovod: Fast and Easy Distributed Deep Learning in TensorFlow,'' 2018.
     \item Patarasuk and Yuan, ``Bandwidth Optimal All-reduce Algorithms for Clusters of Workstations,'' JPDC 2009.
     \item Karimireddy et al., ``Error Feedback Fixes SignSGD and Other Gradient Compression Schemes,'' ICML 2019.
     \item Li et al., ``PyTorch Distributed: Experiences on Accelerating Data Parallel Training,'' VLDB 2020.
   \end{itemize}
-  \note{[0.5 min] [CORE] The chapter first; its napkin math repeats today's numbers. Horovod is the hook's source; Patarasuk and Yuan prove the ring's byte bound; Karimireddy et al. is the error-feedback analysis; Li et al. describe DDP's buckets and overlap from the PyTorch team.}
+  \note{%
+    \mlsysnotemeta{0.5 min}{Core}%
+    Read Chapter 5 (\S5.3 to \S5.10) and work through the self-checks. For practice, redo Napkin Math 5.3 for a 10 MB payload, run \texttt{nccl-tests} on two GPUs to fit $\alpha$ and $\beta$, and explore \emph{Ring AllReduce}, \emph{Hierarchical AllReduce}, and \emph{Communication-Compute Overlap} online. The four primary papers cover Horovod (Sergeev and Del Balso), ring optimality (Patarasuk and Yuan), error feedback (Karimireddy et al.), and PyTorch DDP bucketing (Li et al.).
+
+    \notecue{Next}{The closing slide hands these collective prices to Lecture 6 to design full distributed training plans.}
+  }
 \end{frame}
 
 \begin{frame}[c]
@@ -625,9 +911,14 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
   {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} DISTRIBUTED TRAINING}}\\[0.5cm]
   {\LARGE\bfseries How should a model too large for one node\\be split across a thousand accelerators?}\\[0.3cm]
   \mlsysphoto[height=2.6cm,keepaspectratio]{google-tpu-v4-board.jpg}\\[0.15cm]
-  {\normalsize\textcolor{midgray}{Today priced every exchange. Next, choose the split that creates them.}}
+  {\normalsize\textcolor{midgray}{With collectives priced, the next lecture chooses the parallelism split that creates them.}}
   \mlsyscredit{Photo: a TPU v4 board; Norman P. Jouppi et al., CC BY 4.0, Wikimedia Commons.}
-  \note{[0.5 min] [CORE] Today took the traffic as given and priced it. Lecture 6 chooses the split: data, sharded, tensor, pipeline, and expert parallelism, and uses today's prices to judge when each repays the communication it creates. The photo is a Google TPU v4 board; pods of such chips reduce along the axes of a torus, the schedule in \S5.7.2.}
+  \note{%
+    \mlsysnotemeta{0.5 min}{Core}%
+    This lecture took the model partition as given and priced its collectives. Lecture 6 chooses the parallelism split itself across data, sharded, tensor, pipeline, and expert axes, using these prices to test when each split pays back its wire cost. The Google TPU v4 board shown here recalls Lecture 3's 3D torus and the dimension-by-dimension torus reductions of \S5.7.2.
+
+    \notecue{Next}{Lecture 6 opens with Goyal et al.'s one-hour ImageNet run and asks why adding GPUs can slow training or hurt accuracy.}
+  }
 \end{frame}
 
 \end{document}

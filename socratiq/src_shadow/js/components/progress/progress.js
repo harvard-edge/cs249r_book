@@ -122,7 +122,7 @@ export function injectMenu(shadowEle) {
   
   if(turnOffProgress) return
 
-  const progress = clone.querySelector("#progress");
+  const progress = shadowEle?.querySelector("#progress");
 
   if (progress && originalprogressContent) {
     // Clear and append the cloned original content
@@ -142,14 +142,17 @@ function addItem(shadowEle, text, index) {
     const item = document.createElement("div");
     item.className =
       "flex items-center text-blue-400 dark:text-blue-400 bg-transparent p-1 rounded-lg border-b border-zinc-300 dark:border-zinc-700 animate-fadeInUp";
-    item.innerHTML = `
-    <div class="flex justify-between w-full items-center bg-white>
-      <span class="font-mono">• ${text}</span>
-      <svg class="w-6 h-6 hidden" id=${
-        "progress" + index
-      } fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-        </div>
-      `;
+    const row = document.createElement("div");
+    row.className = "flex justify-between w-full items-center bg-white";
+    const span = document.createElement("span");
+    span.className = "font-mono";
+    span.textContent = `• ${text}`;
+    row.appendChild(span);
+    row.insertAdjacentHTML(
+      "beforeend",
+      `<svg class="w-6 h-6 hidden" id="${"progress" + index}" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>`
+    );
+    item.appendChild(row);
 
     checklist.appendChild(item);
   }
@@ -219,8 +222,8 @@ export function removeTopItem(shadowEle) {
   if(turnOffProgress) return
 
 
-  const checklist = shadowEle.querySelector("#checklist");
-  if (checklist.firstChild) {
+  const checklist = shadowEle?.querySelector("#checklist");
+  if (checklist && checklist.firstChild) {
     const item = checklist.firstChild;
     item.classList.add("animate-fadeOutDown");
     item.addEventListener("animationend", function handler() {

@@ -87,35 +87,35 @@ class Svg:
         (out / name).write_text(svg)
 
 def saga(k):
-    s = Svg(900, 400)
-    s.rect(10, 8, 880, 174, P['band'][0], P['band'][1], rx=8)
+    s = Svg(900, 426)
+    s.rect(10, 8, 880, 198, P['band'][0], P['band'][1], rx=8)
     s.text(28, 34, 'Forward operation', 20, bold=True, anchor='start')
-    s.rect(10, 198, 880, 194, P['band'][0], P['band'][1], rx=8)
-    s.text(28, 224, 'Registered cleanup', 20, bold=True, anchor='start')
+    s.rect(10, 222, 880, 196, P['band'][0], P['band'][1], rx=8)
+    s.text(28, 248, 'Registered cleanup', 20, bold=True, anchor='start')
     s.box(30, 46, 240, 68, 'Register obligation', 'target unbound', 'store')
-    s.box(330, 270, 260, 70, 'Release', 'release_test_env_r18', 'tool', mono_sub=True, ssize=18, dash=k == 1)
-    s.arrow([(150, 114), (150, 190), (440, 190), (440, 268)], P['store'][1])
-    s.text(162, 152, 'registers first', 19, P['store'][2], anchor='start')
+    s.box(330, 294, 260, 70, 'Release', 'release_test_env_r18', 'tool', mono_sub=True, ssize=18, dash=k == 1)
+    s.arrow([(150, 114), (150, 214), (440, 214), (440, 292)], P['store'][1])
+    s.text(162, 162, 'registers first', 19, P['store'][2], anchor='start')
     sh2 = k >= 2
     s.arrow([(270, 80), (318, 80)], show=sh2)
     s.box(320, 46, 260, 68, 'Dispatch', 'provision_test_env_r18', 'tool', mono_sub=True, ssize=18, show=sh2)
     s.arrow([(580, 80), (628, 80)], show=sh2)
     s.box(630, 46, 240, 68, 'Bind on evidence', 'env_r18_01', 'store', mono_sub=True, show=sh2)
-    s.arrow([(450, 114), (450, 128)], P['fault'][1], show=sh2)
-    s.text(462, 128, 'reply lost', 18, P['fault'][2], anchor='start', show=sh2)
-    s.box(320, 130, 260, 44, 'Outcome unknown: owned', None, 'fault', show=sh2, tsize=19, dash=True)
-    s.arrow([(750, 114), (750, 190), (560, 190), (560, 268)], P['store'][1], dash=True, show=sh2)
-    s.text(572, 226, 'binds target', 19, P['store'][2], anchor='start', show=sh2)
+    s.arrow([(450, 114), (450, 146)], P['fault'][1], show=sh2)
+    s.text(464, 136, 'reply lost', 18, P['fault'][2], anchor='start', show=sh2)
+    s.box(320, 150, 260, 46, 'Outcome unknown: owned', None, 'fault', show=sh2, tsize=19, dash=True)
+    s.arrow([(750, 114), (750, 214), (560, 214), (560, 292)], P['store'][1], dash=True, show=sh2)
+    s.text(572, 250, 'binds target', 19, P['store'][2], anchor='start', show=sh2)
     sh3 = k >= 3
-    s.box(30, 238, 240, 48, 'Test ended', None, 'plain', tsize=20, show=sh3)
-    s.box(30, 294, 240, 48, 'Artifacts preserved', None, 'plain', tsize=20, show=sh3)
-    s.box(30, 350, 240, 36, 'Scratch removed', None, 'gray', tsize=18, show=sh3, bold=False)
-    s.arrow([(270, 262), (300, 262), (300, 292), (328, 292)], show=sh3)
-    s.arrow([(270, 318), (328, 318)], show=sh3)
-    s.arrow([(590, 292), (640, 292), (640, 261), (658, 261)], P['ok'][1], show=sh3)
-    s.arrow([(590, 318), (640, 318), (640, 345), (658, 345)], P['fault'][1], show=sh3)
-    s.box(660, 236, 212, 50, 'Closed on evidence', None, 'ok', tsize=19, show=sh3)
-    s.box(660, 320, 212, 50, 'Retained, owned', None, 'fault', tsize=19, show=sh3, dash=True)
+    s.box(30, 262, 240, 48, 'Test ended', None, 'plain', tsize=20, show=sh3)
+    s.box(30, 318, 240, 48, 'Artifacts preserved', None, 'plain', tsize=20, show=sh3)
+    s.box(30, 374, 240, 36, 'Scratch removed', None, 'gray', tsize=18, show=sh3, bold=False)
+    s.arrow([(270, 286), (300, 286), (300, 316), (328, 316)], show=sh3)
+    s.arrow([(270, 342), (328, 342)], show=sh3)
+    s.arrow([(590, 316), (640, 316), (640, 285), (658, 285)], P['ok'][1], show=sh3)
+    s.arrow([(590, 342), (640, 342), (640, 369), (658, 369)], P['fault'][1], show=sh3)
+    s.box(660, 260, 212, 50, 'Closed on evidence', None, 'ok', tsize=19, show=sh3)
+    s.box(660, 344, 212, 50, 'Retained, owned', None, 'fault', tsize=19, show=sh3, dash=True)
     s.save(f'saga_step{k}.svg')
 for k in (1, 2, 3):
     saga(k)
@@ -213,7 +213,7 @@ def digest():
         s.box(x + 12, 140, 101, 52, f'digest {n.lower()}', None, 'fault' if hot else 'plain', tsize=19, bold=hot)
     s.raw('<path d="M 227 192 L 227 222 L 517 222 L 517 192" fill="none" stroke="#dc2626" stroke-width="2.5"/>')
     s.text(372, 252, 'same digest two turns back: period 2', 20, P['fault'][2], bold=True)
-    s.box(130, 284, 340, 62, 'Gate holds new work', None, 'store', tsize=22)
+    s.box(130, 284, 340, 62, 'Hold blocks new work', None, 'store', tsize=22)
     s.save('digest.svg')
 digest()
 
@@ -232,30 +232,35 @@ def watch_resp():
 watch_resp()
 
 def retry_tree():
-    s = Svg(600, 400)
     xs = [50, 190, 330, 480]
     layers = ['agent loop', 'gateway', 'client library']
-    s.rect(30, 185, 40, 40, P['fault'][1], rx=4)
     ys1 = [95, 205, 315]
-    for y in ys1:
-        s.raw(f'<line x1="70" y1="205" x2="{xs[1]}" y2="{y}" stroke="#a78bfa" stroke-width="2"/>')
-        s.raw(f'<circle cx="{xs[1]}" cy="{y}" r="13" fill="#7c3aed"/>')
-    ys2 = []
-    for y in ys1:
-        for d in (-30, 0, 30):
-            y2 = y + d
-            ys2.append(y2)
-            s.raw(f'<line x1="{xs[1]}" y1="{y}" x2="{xs[2]}" y2="{y2}" stroke="#c4b5fd" stroke-width="1.6"/>')
-            s.raw(f'<circle cx="{xs[2]}" cy="{y2}" r="9" fill="#7c3aed"/>')
-    for y in ys2:
-        for d in (-9, 0, 9):
-            s.raw(f'<line x1="{xs[2]}" y1="{y}" x2="{xs[3]}" y2="{y + d}" stroke="#ddd6fe" stroke-width="1.2"/>')
-            s.raw(f'<circle cx="{xs[3]}" cy="{y + d}" r="4.5" fill="#7c3aed"/>')
-    for x, n in zip(xs, [1, 3, 9, 27]):
-        s.text(x, 385, str(n), 26, '#0f172a', bold=True)
-    for x, lab in zip(xs[1:], layers):
-        s.text(x, 40, lab, 22, '#6d28d9', bold=True)
-    s.save('retry_tree.svg')
+    ys2 = [y + d for y in ys1 for d in (-30, 0, 30)]
+    for k in (1, 2, 3):
+        s = Svg(600, 400)
+        s.rect(30, 185, 40, 40, P['fault'][1], rx=4)
+        s.text(xs[0], 385, '1', 26, '#0f172a', bold=True)
+        for y in ys1:
+            s.raw(f'<line x1="70" y1="205" x2="{xs[1]}" y2="{y}" stroke="#a78bfa" stroke-width="2"/>')
+            s.raw(f'<circle cx="{xs[1]}" cy="{y}" r="13" fill="#7c3aed"/>')
+        s.text(xs[1], 40, layers[0], 22, '#6d28d9', bold=True)
+        s.text(xs[1], 385, '3', 26, '#0f172a', bold=True)
+        if k >= 2:
+            for y in ys1:
+                for d in (-30, 0, 30):
+                    y2 = y + d
+                    s.raw(f'<line x1="{xs[1]}" y1="{y}" x2="{xs[2]}" y2="{y2}" stroke="#c4b5fd" stroke-width="1.6"/>')
+                    s.raw(f'<circle cx="{xs[2]}" cy="{y2}" r="9" fill="#7c3aed"/>')
+            s.text(xs[2], 40, layers[1], 22, '#6d28d9', bold=True)
+            s.text(xs[2], 385, '9', 26, '#0f172a', bold=True)
+        if k >= 3:
+            for y in ys2:
+                for d in (-9, 0, 9):
+                    s.raw(f'<line x1="{xs[2]}" y1="{y}" x2="{xs[3]}" y2="{y + d}" stroke="#fca5a5" stroke-width="1.4"/>')
+                    s.raw(f'<circle cx="{xs[3]}" cy="{y + d}" r="4.5" fill="#dc2626"/>')
+            s.text(xs[3], 40, layers[2], 22, '#b91c1c', bold=True)
+            s.text(xs[3], 385, '27', 28, '#dc2626', bold=True)
+        s.save(f'retry_tree_step{k}.svg')
 retry_tree()
 
 def incident():
@@ -263,9 +268,9 @@ def incident():
     s.box(20, 8, 260, 74, 'Supervisor', 'outside the agent', 'store', tsize=22, ssize=20)
     s.box(330, 8, 250, 74, 'Suspect trajectory', 'model work held', 'fault', dash=True, tsize=21, ssize=20)
     s.arrow([(280, 45), (328, 45)], P['store'][1])
-    s.text(300, 106, 'hold enforced at every dispatch gate', 19, P['store'][2], anchor='start')
-    gates = ['tool gateway', 'dispatch adapter', 'memory retrieval']
-    for i, g in enumerate(gates):
+    s.text(300, 106, 'hold enforced at every dispatch point', 19, P['store'][2], anchor='start')
+    points = ['tool gateway', 'dispatch adapter', 'memory retrieval']
+    for i, g in enumerate(points):
         y = 120 + i * 58
         s.box(330, y, 250, 46, g, None, 'plain', tsize=20, bold=False)
         s.raw(f'<rect x="588" y="{y + 10}" width="26" height="26" fill="#dc2626" rx="3"/>')
@@ -297,9 +302,9 @@ ax.plot(ps, rt + (1 - ps), color=C['memory'], lw=2.6)
 ax.plot(ps, rd + (1 - ps), color=C['compute'], lw=2.6)
 ax.plot([p0], [1 - 0.4527713626], 'o', ms=9, color=C['memory'])
 ax.annotate('p = 0.5: 47.39 s,\n45.3% less', (p0, 1 - 0.4527713626), xytext=(0.56, 0.66), fontsize=12, color=C['memory'], fontweight='bold')
-ax.annotate('break-even p*:\n4.7% (s), 6.1% ($)', (0.06, 1.0), xytext=(0.1, 0.12), fontsize=12, color=C['text'], arrowprops=dict(arrowstyle='->', color=C['neutral']))
-ax.text(0.12, 0.66, 'seconds', color=C['memory'], fontsize=12, fontweight='bold')
-ax.text(0.3, 0.86, 'dollars', color=C['compute'], fontsize=12, fontweight='bold')
+ax.annotate('break-even p*:\n4.7% (s), 6.1% ($)', (0.055, 1.0), xytext=(0.14, 0.14), fontsize=12, color=C['text'], arrowprops=dict(arrowstyle='->', color=C['neutral'], connectionstyle='arc3,rad=-0.14'))
+ax.text(0.27, 0.44, 'seconds', color=C['memory'], fontsize=12, fontweight='bold')
+ax.text(0.36, 0.86, 'dollars', color=C['compute'], fontsize=12, fontweight='bold')
 ax.set_xlim(0, 1)
 ax.set_ylim(0, 1.25)
 ax.set_xlabel('Measured repair success rate p')
@@ -335,8 +340,8 @@ for k in (1, 2, 3):
     ax.barh(1, L['caught'], color=C['neutral'], height=0.6, alpha=a)
     ax.barh(1, L['missed'], left=L['caught'], color=C['danger'], height=0.6, alpha=a)
     ax.text(L['total'] + 6, 1, '\\$134.40: 3.6× less; missed 71.4%', va='center', fontsize=12, color=C['text'], fontweight='bold', alpha=a)
-    ax.text(L['caught'] / 2, 1.36, 'caught', ha='center', fontsize=10.5, color=C['neutral'], alpha=a)
-    ax.text(L['caught'] + L['missed'] / 2, 1.36, 'missed', ha='center', fontsize=10.5, color=C['danger'], alpha=a)
+    ax.text(8, 1.44, 'caught', ha='left', va='bottom', fontsize=10.5, color=C['neutral'], fontweight='bold', alpha=a)
+    ax.text(94, 1.44, 'missed', ha='left', va='bottom', fontsize=10.5, color=C['danger'], fontweight='bold', alpha=a)
     b = 1.0 if k >= 3 else 0.0
     ax.barh(0, L90['caught'], color=C['neutral'], height=0.6, alpha=b)
     ax.barh(0, L90['missed'], left=L90['caught'], color=C['danger'], height=0.6, alpha=b)
@@ -344,7 +349,7 @@ for k in (1, 2, 3):
     ax.set_yticks([2, 1, 0])
     ax.set_yticklabels([r[0] for r in rows], fontsize=12, fontweight='bold')
     ax.set_xlim(0, 560)
-    ax.set_ylim(-0.6, 2.5)
+    ax.set_ylim(-0.6, 2.65)
     ax.set_xlabel('Expected irreversible loss per task ($), illustrative')
     ax.grid(axis='x', color=C['grid'], lw=0.6)
     ax.set_axisbelow(True)
@@ -406,26 +411,27 @@ ax.set_axisbelow(True)
 sp.save(fig, out / 'metastable_bars.svg')
 o = {'timeout': 14, 'server_error': 6, 'validation': 12, 'denied': 3, 'success': 15}
 n_out, trip = (50.0, 0.5 * 50.0)
-fig, ax = plt.subplots(figsize=(5.0, 1.9))
+fig, ax = plt.subplots(figsize=(4.8, 1.9))
 segs = [(o['timeout'], 'timeouts', C['danger']), (o['server_error'], '5xx', C['danger']), (o['validation'], 'validation', C['neutral_l']), (o['denied'], 'denied', C['neutral_l']), (o['success'], 'success', C['data_l'])]
 for row, counted in ((1, {'timeouts', '5xx'}), (0, {'timeouts', '5xx', 'validation', 'denied'})):
     left = 0
     for n, lab, col in segs:
         c = C['danger'] if lab in counted else C['data_l'] if lab == 'success' else C['neutral_l']
-        ax.barh(row, n, left=left, color=c, height=0.62, edgecolor='white')
-        ax.text(left + n / 2, row, str(n), ha='center', va='center', fontsize=13, color='white' if lab in counted else C['text'], fontweight='bold')
+        ax.barh(row, n, left=left, color=c, height=0.60, edgecolor='white')
+        tx = left + n / 2 + (1.8 if lab == 'validation' else 0.0)
+        ax.text(tx, row, str(n), ha='center', va='center', fontsize=14, color='white' if lab in counted else C['text'], fontweight='bold', zorder=4)
         left += n
-ax.axvline(trip, color=C['text'], lw=1.6, ls='--')
-ax.text(trip, 1.5, 'trip at 0.50', ha='center', fontsize=13, color=C['text'])
-ax.text(n_out + 1, 1, '0.40: closed', va='center', fontsize=14, color=C['data'], fontweight='bold')
-ax.text(n_out + 1, 0, '0.70: opens', va='center', fontsize=14, color=C['danger'], fontweight='bold')
+ax.plot([trip, trip], [-0.42, 1.36], color=C['text'], lw=1.6, ls='--', zorder=3)
+ax.text(trip, 1.42, 'trip ≥ 25/50 (0.50)', ha='center', va='bottom', fontsize=15, color=C['text'], fontweight='bold')
+ax.text(n_out + 1.2, 1, '20/50 = 0.40: closed', va='center', fontsize=15.5, color=C['data'], fontweight='bold')
+ax.text(n_out + 1.2, 0, '35/50 = 0.70: opens', va='center', fontsize=15.5, color=C['danger'], fontweight='bold')
 ax.set_yticks([1, 0])
-ax.set_yticklabels(['Classified', 'Count all'], fontsize=14, fontweight='bold')
-ax.set_xlim(0, 68)
-ax.set_ylim(-0.5, 1.7)
+ax.set_yticklabels(['Classified', 'Count all'], fontsize=15.5, fontweight='bold')
+ax.set_xlim(0, 86)
+ax.set_ylim(-0.5, 1.90)
 ax.set_xticks([0, trip, n_out])
-ax.tick_params(labelsize=13)
-ax.set_xlabel('Last 50 outcomes; red counts as failure', fontsize=13)
+ax.tick_params(labelsize=15)
+ax.set_xlabel('50 outcomes: red = fail, gray = non-fail, green = ok', fontsize=15.5)
 for sname in ('left',):
     ax.spines[sname].set_visible(False)
 sp.save(fig, out / 'breaker_window.svg')
@@ -488,7 +494,7 @@ def timeout_seq():
     s.arrow([(450, 196), (114, 196)], P['fault'][1], dash=True)
     s.text(280, 172, 'reply lost', 21, P['fault'][2], bold=True)
     s.raw('<path d="M 268 184 L 292 208 M 292 184 L 268 208" stroke="#dc2626" stroke-width="4"/>')
-    s.box(20, 216, 180, 50, 'unknown', 'timeout', 'fault', tsize=21, ssize=18, dash=True)
+    s.box(20, 214, 180, 56, 'unknown', 'timeout', 'fault', tsize=21, ssize=18, dash=True)
     s.arrow([(110, 310), (446, 310)], P['store'][1])
     s.text(280, 300, 'retry, same token t1', 21, '#0f172a')
     s.arrow([(450, 360), (114, 360)], P['ok'][1])

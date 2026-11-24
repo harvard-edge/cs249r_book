@@ -251,3 +251,8 @@ class SafetyLightCurtain(Sensor):
     @classmethod
     def _validate_curtain_coded(cls, v):
         return v if v is None else require_dimensionality(v, ureg.second, "response_time_coded")
+
+    @field_validator("pfh_d", mode="after")
+    @classmethod
+    def _validate_pfh_d(cls, v):
+        return require_dimensionality(v, 1 / ureg.hour, "pfh_d")

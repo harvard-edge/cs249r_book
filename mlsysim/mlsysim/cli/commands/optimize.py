@@ -43,8 +43,8 @@ def optimize_parallelism(
         
         if schema.model_obj is None:
             raise ValueError("Parallelism optimization requires a resolved workload.")
-        if schema.fleet_obj is None:
-            raise ValueError("Parallelism optimization requires a fleet with nodes > 1.")
+        if schema.fleet_obj is None or schema.total_accelerators <= 1:
+            raise ValueError("Parallelism optimization requires a fleet with total accelerators > 1.")
             
         optimizer = ParallelismOptimizer()
         result = optimizer.solve(
@@ -82,7 +82,7 @@ def optimize_batching(
             seq_len=schema.workload.seq_len,
             sla_latency_ms=sla_ms,
             arrival_rate_qps=qps,
-            num_replicas=schema.hardware.total_accelerators,
+            num_replicas=schema.total_accelerators,
             precision=schema.hardware.precision,
             efficiency=schema.hardware.efficiency
         )
@@ -104,8 +104,8 @@ def optimize_placement(
     with error_shield(output_format=output_format):
         schema = _load_plan_schema(config_file)
         
-        if schema.fleet_obj is None:
-            raise ValueError("Placement optimization requires a fleet with nodes > 1.")
+        if schema.fleet_obj is None or schema.total_accelerators <= 1:
+            raise ValueError("Placement optimization requires a fleet with total accelerators > 1.")
             
         duration = schema.ops.duration_days if schema.ops else 30.0
             

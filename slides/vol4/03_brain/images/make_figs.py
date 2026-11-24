@@ -165,18 +165,25 @@ def roofline_fig(k):
 for k in (1, 2, 3):
     roofline_fig(k)
 
-def eval_fig(k, size=(14.2, 2.6), name='eval'):
+def eval_fig(k, size=(14.2, 2.7), name='eval'):
     fig, ax = plt.subplots(figsize=cm(*size))
-    fig.subplots_adjust(left=0.09, right=0.98, top=0.95, bottom=0.36)
-    rows = [('FP16', 588.2352941, 776.7814928, '588', '777'), ('INT4', 147.0588235, 335.6050222, '147', '336')]
-    for i, (lab, dec, tot, dec_txt, tot_txt) in enumerate(rows):
-        shown = i < k
-        a = 1.0 if shown else 0.0
-        ax.barh(i, 188.5461987, color=C['compute'], height=0.6, alpha=a)
-        ax.barh(i, dec, left=188.5461987, color=C['memory'], height=0.6, alpha=a)
-        ax.text(188.5461987 / 2, i, 'prefill 189', ha='center', va='center', color='white', fontsize=FS, fontweight='bold', alpha=a)
-        ax.text(188.5461987 + dec / 2, i, f'decode {dec_txt}', ha='center', va='center', color='white', fontsize=FS, fontweight='bold', alpha=a)
-        ax.text(tot + 12, i, f'{tot_txt} ms', va='center', fontsize=FS, fontweight='bold', color=C['text'], alpha=a)
+    fig.subplots_adjust(left=0.09, right=0.98, top=0.95, bottom=0.35)
+    pref = 188.5461987
+    if k == 1:
+        ax.barh(0, pref, color=C['compute'], height=0.6)
+        ax.text(pref / 2, 0, 'prefill 189', ha='center', va='center', color='white', fontsize=FS, fontweight='bold')
+        ax.add_patch(Rectangle((pref + 8, -0.3), 295, 0.6, fc='#F8FAFC', ec=C['memory'], ls='--', lw=1.4))
+        ax.text(pref + 8 + 147.5, 0, '6 decode sweeps = ? ms', ha='center', va='center', color=C['memory'], fontsize=SFS, fontweight='bold')
+    else:
+        rows = [('FP16', 588.2352941, 776.7814928, '588', '777 ms (1.3 Hz)', C['danger']), ('INT4', 147.0588235, 335.6050222, '147', '336 ms (fits)', C['data'])]
+        for i, (lab, dec, tot, dec_txt, tot_txt, tcol) in enumerate(rows):
+            shown = (k >= 2 and i == 0) or (k >= 3 and i == 1)
+            a = 1.0 if shown else 0.0
+            ax.barh(i, pref, color=C['compute'], height=0.6, alpha=a)
+            ax.barh(i, dec, left=pref, color=C['memory'], height=0.6, alpha=a)
+            ax.text(pref / 2, i, 'prefill 189', ha='center', va='center', color='white', fontsize=FS, fontweight='bold', alpha=a)
+            ax.text(pref + dec / 2, i, f'decode {dec_txt}', ha='center', va='center', color='white', fontsize=FS, fontweight='bold', alpha=a)
+            ax.text(tot + 12, i, tot_txt, va='center', fontsize=FS, fontweight='bold', color=tcol, alpha=a)
     ax.axvline(500.0, color=C['danger'], ls='--', lw=1.5)
     ax.text(500.0 + 8, 1.55, '500 ms period (2 Hz)', color=C['danger'], fontsize=SFS, fontweight='bold', va='center')
     ax.set_yticks([0, 1])
@@ -184,23 +191,28 @@ def eval_fig(k, size=(14.2, 2.6), name='eval'):
     ax.tick_params(axis='y', length=0)
     ax.invert_yaxis()
     ax.set_ylim(1.8, -0.5)
-    ax.set_xlim(0, 900)
+    ax.set_xlim(0, 990)
     ax.tick_params(axis='x', labelsize=TFS, pad=1)
     ax.set_xlabel('ms for one fresh evaluation (computed, Napkin Math 3.1)', fontsize=FS, labelpad=1)
     save_slot(fig, out / f'{name}_step{k}.svg')
-for k in (1, 2):
+for k in (1, 2, 3):
     eval_fig(k)
 
 def supply_fig(k):
     fig, ax = plt.subplots(figsize=cm(8.4, 3.7))
     fig.subplots_adjust(left=0.3, right=0.97, top=0.82, bottom=0.3)
     rows = [('one setpoint\nper pass', 560000000000.0 / 1000000000.0, C['danger'], '560'), ('chunk of 16', 35000000000.0 / 1000000000.0, C['data'], '35')]
+    ax.axvline(142800000000.0 / 1000000000.0, color=C['memory'], ls='--', lw=1.5, zorder=1)
+    ax.text(142800000000.0 / 1000000000.0, -0.62, 'sustained 142.8 GB/s', color=C['memory'], fontsize=SFS, fontweight='bold', ha='center', va='bottom')
     for i, (lab, v, col, txt) in enumerate(rows):
         a = 1.0 if i < k else 0.0
-        ax.barh(i, v, color=col, height=0.6, alpha=a)
-        ax.text(v + 8, i, f'{txt} GB/s', va='center', fontsize=FS, fontweight='bold', color=col, alpha=a)
-    ax.axvline(142800000000.0 / 1000000000.0, color=C['memory'], ls='--', lw=1.5)
-    ax.text(142800000000.0 / 1000000000.0, -0.62, 'sustained 142.8 GB/s', color=C['memory'], fontsize=SFS, fontweight='bold', ha='center', va='bottom')
+        ax.barh(i, v, color=col, height=0.6, alpha=a, zorder=3)
+        if i == 1:
+            ax.annotate(f'{txt} GB/s', xy=(v + 4, i), xytext=(158, i), va='center', ha='left',
+                        fontsize=FS, fontweight='bold', color=col, alpha=a, zorder=6,
+                        arrowprops=dict(arrowstyle='-', color=col, lw=1.0, alpha=a))
+        else:
+            ax.text(v + 8, i, f'{txt} GB/s', va='center', fontsize=FS, fontweight='bold', color=col, alpha=a, zorder=6)
     ax.set_yticks([0, 1])
     ax.set_yticklabels([r[0] for r in rows], fontsize=FS)
     ax.tick_params(axis='y', length=0)

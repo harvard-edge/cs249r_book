@@ -1,0 +1,175 @@
+% Study sheet: Volume II, Chapter 12, ML Operations at Scale.
+% Numbers: \val{...} from ops_scale_studysheet_numbers.tex, written by ops_scale_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{ops_scale_studysheet_numbers}
+\sheetvolume{2}
+\sheetchapter{12}{ML Operations at Scale}
+\sheetsources{Numbers from mlsysim and the chapter's scenarios; the budget values are the chapter's illustration; assumed inputs marked.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+One model is a project; a hundred models that share features, pipelines, alerts and capacity are one
+coupled system. Operations makes each change \hl{repeatable}, its exposure \hl{bounded}, and its
+consequences \hl{owned}. In C\textsuperscript{3} terms, fleet operations makes coordination a designed
+constraint beside compute and communication.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Load follows coupling, not count.}{$\ProductionModelCount$ models form
+  $\ProductionModelCount(\ProductionModelCount-1)/2$ possible pairs; recorded dependency edges decide which can conflict.}
+\idea{The registry's edges bound a release.}{Walk downstream for the impact set; block until every
+  consumer passes; ship and roll back compatible version sets.}
+\idea{A feature is a versioned interface.}{Training joins filter on availability time, not event time,
+  or they leak the future; drift is recent inputs unlike training ones.}
+\idea{Exposure is the rollout budget.}{Risk = chance of regression $\times$ harm per unit $\times$
+  exposed units; the slowest outcome you must observe sets the schedule.}
+\idea{Reliability is a vector.}{Availability, latency, freshness, quality: any exhausted budget stops
+  promotion, whatever the others show.}
+\idea{Utilization is the economic invariant.}{Owning beats renting only above a sustained useful
+  utilization.}
+\end{ideas}
+
+\vspace{10pt}
+\sheetsec{Can it be promoted?}
+\fcard{Reliability budget vector}%
+  {\ErrorBudgetConsumption_{\ReliabilityTargetIndex} = \frac{\ObservedViolationFraction_{\ReliabilityTargetIndex}}{\AllowedViolationFraction_{\ReliabilityTargetIndex}},
+   \qquad \max_{\ReliabilityTargetIndex} \ErrorBudgetConsumption_{\ReliabilityTargetIndex} \le 1}%
+  {Observed violating fraction over the allowed fraction, per dimension $\ReliabilityTargetIndex$, same
+   window. The maximum governs: an average hides one overspent budget. Owners: serving (availability,
+   latency), data (freshness), model (quality: roll back or route to a validated baseline).}%
+  {}%
+  {\begin{tikzpicture}[sheet]
+     \pgfmathsetmacro\sc{150/1.5}
+     \foreach \v/\t/\y/\s in {\val{bavail}/availability/39/nbox,\val{blatency}/latency/26/nbox,\val{bfresh}/freshness/13/hotbox,\val{bquality}/quality/0/nbox}{
+       \node[small, anchor=east] at (44,{\y+4.5}) {\t};
+       \node[lab, anchor=east] at (66,{\y+4.5}) {\v};
+       \draw[\s] (70,\y) rectangle ({70+\v*\sc},{\y+9});}
+     \draw[ink, line width=0.7pt] ({70+\sc},-4) -- ({70+\sc},53);
+     \node[note, anchor=south] at ({70+\sc},54) {budget limit};
+     \draw[muted, dashed, line width=0.5pt] ({70+\val{bmean}*\sc},-4) -- ({70+\val{bmean}*\sc},53);
+     \node[note, anchor=north] at ({70+\val{bmean}*\sc},-6) {average \val{bmean}};
+   \end{tikzpicture}}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Formulas you will use}
+\fcard{Experiment sample, then stage time}%
+  {\RequiredUsersPerVariant = \frac{(\ConfidenceCriticalQuantile + \PowerCriticalQuantile)^2\, 2\BaselineConversionRate(1-\BaselineConversionRate)}{\MinimumDetectableEffect^2},
+   \qquad \CanaryStageDuration = \frac{\RequiredUsersPerVariant}{\ArrivalRate\,\CanaryTrafficFraction}}%
+  {Observations per arm to detect absolute change $\MinimumDetectableEffect$ on baseline
+   $\BaselineConversionRate$ ($\ConfidenceCriticalQuantile = \val{zalpha}$: two-sided five percent level;
+   $\PowerCriticalQuantile = \val{zbeta}$: power of eight in ten); stage share $\CanaryTrafficFraction$ of
+   hourly requests $\ArrivalRate$.}%
+  {Halving $\MinimumDetectableEffect$ quadruples $\RequiredUsersPerVariant$; label delay stretches $\CanaryStageDuration$.}{}
+\fcard{False alerts across many checks}%
+  {\Pr(\text{at least one false alert}) = 1-(1-\AlertFalsePositiveRate)^{\AlertCheckCount}}%
+  {$\AlertCheckCount$ independent checks, each falsely crossing with chance $\AlertFalsePositiveRate$.
+   Raw crossings per day = monitors $\times$ checks per day $\times$ $\AlertFalsePositiveRate$.}%
+  {Three sigma: $\AlertFalsePositiveRate = \val{fprate}$ per check. Page owners, not crossings.}%
+  {\begin{tikzpicture}[sheet]
+     \draw[dim] (30,0) -- (230,0); \draw[dim] (30,0) -- (30,44);
+     \foreach \e/\t in {0/1,1/10,2/100,3/{1,000},4/{10,000}}{
+       \draw[dim] ({30+\e*50},0) -- ({30+\e*50},-2.5);
+       \node[small, anchor=north] at ({30+\e*50},-4) {\t};}
+     \draw[gridline] (30,40) -- (230,40);
+     \node[small, anchor=east] at (27,40) {1}; \node[small, anchor=east] at (27,0) {0};
+     \node[small, anchor=north west] at (33,38) {P(at least one false alert)};
+     \draw[accent, line width=1.1pt] plot[domain=0:4, samples=60, smooth] ({30+\x*50},{40*(1-exp(10^\x*ln(1-\val{fprate})))});
+     \filldraw[fill=accent, draw=accent] (180,{40*\val{anyroundfrac}}) circle (2pt);
+     \node[lab, anchor=north west] at (184,{40*\val{anyroundfrac}-4}) {\val{monitors} checks: \val{anyround}\%};
+     \node[note, anchor=north] at (130,-12) {independent checks (log scale)};
+   \end{tikzpicture}}
+\fcard{Platform benefit-cost ratio}%
+  {\text{BCR} = \frac{\ProductionModelCount\,\SavedEngineeringTime\,\EngineerHourlyCost}{\PlatformTotalCost}}%
+  {$\ProductionModelCount$ models each saved $\SavedEngineeringTime$ hours at $\EngineerHourlyCost$ per hour,
+   over platform cost $\PlatformTotalCost$. Net return is
+   BCR minus one. Example: \val{pmodels} models $\times$ \val{phours} h/month $\times$ \$\val{prate} over
+   \$\val{pcostk}K/month = \val{pbcr}.}%
+  {Linear in $\ProductionModelCount$ at fixed savings. Saved hours are capacity, not cash.}{}
+\fcard{Break-even utilization}%
+  {\BreakEvenUtilization = \frac{\text{fixed owned cost per hour}}{\text{node rent per busy hour} - \text{energy per busy hour}}}%
+  {Owning pays above $\BreakEvenUtilization$ sustained useful use; counting network, facility and staff raises it.}%
+  {}{}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{$\val{fnumer} \div \val{fliftsq}$ = \val{fsamples} per variant, \val{fratio}$\times$ the worked
+  example. At \val{stagemidpct}\%: \val{fsamples} $\div$ \val{stagemidrate} = \val{fmidh} h; even
+  splitting all traffic, both arms take \val{fallmin} minutes. The effect size sets the schedule (experiment card).}
+\ans{1}{(a) \val{qmonitors} $\times$ \val{qchecks} $\times$ \val{fprate} = \val{qdaily} raw crossings a day.
+  (b) One minus $(\val{noalert})^{\val{qmonitors}}$ = \val{qany}\% per round; a round is clean only
+  \val{qnone}\% of the time: group and route crossings (false-alert card).}
+\ans{2}{(a) \val{qpmodels} $\times$ \val{phours} $\times$ \$\val{prate} = \$\val{qpbenefitk}K a month;
+  $\div$ \$\val{pcostk}K = \val{qpbcr}, a \val{qploss}\% net loss. (b) Each model returns
+  \$\val{qpmonthlyk}K: \$\val{pcostk}K $\div$ \$\val{qpmonthlyk}K = \val{pbreakeven} models (BCR card). (c) \val{fixedhour} $\div$
+  (\val{nodegpus} $\times$ \val{rentrate} $-$ \val{energyhour}) = \val{nodebreakq}\% (break-even card).}
+\columnbreak
+\ans{3}{Budgets used: availability \val{qbavail}, latency \val{qblatency}, freshness \val{qbfresh},
+  quality \val{qbquality}. The average, \val{qbmean}, looks fine, but the maximum exceeds one: stop
+  promotion; the model owner rolls back or routes to a baseline (budget vector).}
+\ans{4}{Rebuild the training set with a point-in-time join on availability time: if offline quality falls
+  to the production level, the old join leaked future values. If it stays high, compare recent and training feature
+  distributions: a shift points to drift (feature idea).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{How long must a \val{stagemidpct}\% canary run to collect the sample for a \val{liftrel}\% lift?}
+Click-through baseline $\BaselineConversionRate = \val{baseline}$; detect $\MinimumDetectableEffect = \val{lift}$
+(\val{liftpoints} points, \val{liftrel}\% relative). The service takes \val{ratemillion} million requests per hour.
+\begin{steps}
+\item $(\val{zalpha} + \val{zbeta})^2 = \val{zsquared}$; \;$2 \times \val{baseline} \times (1-\val{baseline}) = \val{twovar}$.
+\item $\RequiredUsersPerVariant = \val{zsquared} \times \val{twovar} \div \val{liftsq} = $ \res{\val{samples}} per variant.
+\item $\CanaryStageDuration = \val{samples} \div (\val{ratemillion}\text{ million} \times \val{stagemidpct}\%)
+  = \val{samples} \div \val{stagemidrate}$ = \res{\val{stagemidh} h}, about \val{stagemidmin} minutes.
+\item A guardrail sample of \val{guardsamples}, sized to catch large regressions, fills in \val{guardmin}
+  minutes: the lift's sample takes \val{guardratio}$\times$ longer.
+\end{steps}
+\takeaway{The decision's sample sets each stage's floor.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{A rarer outcome, a smaller lift}
+Same service and stage, but baseline $\BaselineConversionRate = \val{fbaseline}$ and a \val{fliftrel}\%
+relative lift: $\MinimumDetectableEffect = \val{flift}$.\par
+\textbf{Given:} numerator $\val{zsquared} \times 2 \times \val{fbaseline} \times (1-\val{fbaseline}) = \val{fnumer}$.\par
+\textbf{You:} find $\RequiredUsersPerVariant$, the time at a \val{stagemidpct}\% stage, and the time with all
+traffic split evenly between two arms. What sets the schedule now?\par\vspace{34pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``Operations load grows with model count; add staff in proportion.''}%
+  {\val{linmodels} models at \val{linhours} h/month each, \val{linmonthly} h a month, is only the floor: the same
+   \val{linmodels} models form \val{linpairs} possible pairs, and coupling outruns a linear plan.}{}
+\mistake{``To catch regressions sooner, loosen every threshold.''}%
+  {At two sigma ($\AlertFalsePositiveRate = \val{twofprate}$), \val{twomodels} models $\times$ \val{twometrics}
+   metrics every \val{twointerval} minutes cross \val{twodaily} times a day (three sigma: \val{threedaily}).
+   With \val{dedup}\% deduplicated, \val{twoleft} pages a day remain.}{}
+\mistake{``At our size, owning accelerators is always cheaper than renting.''}%
+  {A \val{bigcluster}-GPU cluster, counting network, facility and staff, pays off
+   only above \val{bigbreak}\% sustained use. Useful utilization decides, not size.}{}
+
+\vspace{4pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} \val{qmodels} models $\times$ \val{qmetrics} metrics, checked every \val{qinterval} minutes
+  at three sigma. (a) Raw false crossings a day? (b) Chance one round of all checks has at least one?
+\item \assumed{} the chapter's \$\val{pcostk}K/month platform serves \val{qpmodels} models, each saving
+  \val{phours} h/month at \$\val{prate}/h. (a) BCR and net return? (b) Models to break even? (c) An owned \val{nodegpus}-GPU node costs \$\val{fixedhour} an hour
+  fixed plus \$\val{energyhour} of power per busy hour; renting is \$\val{rentrate} per
+  GPU-hour. Break-even utilization?
+\item \assumed{} allowed violating fractions (\%): availability \val{qaavail}, latency \val{qalatency},
+  freshness \val{qafresh}, quality \val{qaquality}; observed: \val{qvavail}, \val{qvlatency}, \val{qvfresh},
+  \val{qvquality}. Promote? Who acts?
+\item A ranker's offline score jumped after a feature-store retrain, then fell in production.
+  What evidence separates training-data leakage from drift?
+\end{qs}
+\end{rightcol}
+\end{document}

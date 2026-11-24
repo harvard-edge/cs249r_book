@@ -174,10 +174,18 @@ def plot_timing_strip(strip, ax=None):
     head = 0.42 * (n_time_levels + n_event_levels) + 0.15
 
     if show_dist:
+        if ax is not None:
+            raise ValueError(
+                "plot_timing_strip cannot draw onto a caller-supplied ax when "
+                "speed_mm_per_unit is set (distance row requires a 2-row subplot layout)."
+            )
         fig, (ax, axd) = plt.subplots(
             2, 1, figsize=strip.figsize, sharex=True,
             gridspec_kw=dict(height_ratios=[n * 0.62 + head, 1.05], hspace=0.08),
         )
+    elif ax is not None:
+        fig = ax.figure
+        axd = None
     else:
         fig, ax = plt.subplots(figsize=strip.figsize)
         axd = None
@@ -582,7 +590,7 @@ def perception_age_strip(scenario, speed):
         Event(t_disp, "$+\\,\\Delta_{\\mathrm{da}}$ enters here, not bounded", "proposal", 1, "dashed", ha="left"),
         Event(t_onset, "brake onset", "consequence", 0, ha="right"),
     ]
-    brackets = [Bracket(0, t_onset, f"$\\tau_{{\\mathrm{{delay}}}}$ = {t_onset:.1f} ms + $\\Delta_{{\\mathrm{{da}}}}$",
+    brackets = [Bracket(0, t_onset, f"$\\tau_{{\\mathrm{{delay}}}}$ = {t_onset:.1f} ms (before $\\Delta_{{\\mathrm{{da}}}}$)",
                         "neutral", "time", 0)]
     dnotes = [(0, t_disp, f"{v * t_disp:.1f} mm"), (t_disp, t_onset, f"{v * (t_onset - t_disp):.1f} mm")]
     return TimingStrip(

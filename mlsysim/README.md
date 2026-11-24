@@ -40,7 +40,7 @@ and a map from public imports to implementation. Specifications, equations,
 solvers, and presentation remain separate; all textbook volumes use this same
 package.
 
-## 🏗 The 5-Layer Analytical Stack
+## 🏗 The 6-Layer Analytical Stack
 
 `mlsysim` implements a "Progressive Lowering" architecture, separating high-level workloads from the physical infrastructure that executes them.
 
@@ -127,8 +127,8 @@ ops:
   duration_days: 14.0
 constraints:
   assert:
-    - metric: "performance.latency"
-      max: 50.0
+    - metric: "performance.step_latency"
+      max: 150000.0
 ```
 
 Then compile and evaluate the 3-lens scorecard (Feasibility, Performance, Macro):
@@ -248,7 +248,7 @@ print(evaluation.scorecard())
 
 ### Efficiency Parameter Guide
 
-The `efficiency` parameter (0.0–1.0) captures the gap between peak hardware performance and what your software stack actually achieves. Use these guidelines:
+The `efficiency` parameter (0.0–1.0) derates peak compute throughput (`Peak_FLOP/s * efficiency`). For generic compute-only sizing, use overall achieved MFU; for mechanistic memory-aware solvers such as `ServingModel` (which already bound decode on HBM bandwidth), pass **compute-kernel efficiency** (`0.35–0.55`) rather than overall batch-1 MFU so memory-bound decode is not double-penalized:
 
 <table width="100%" style="width:100%">
   <thead>
@@ -261,7 +261,7 @@ The `efficiency` parameter (0.0–1.0) captures the gap between peak hardware pe
   <tbody>
     <tr><td>Training (Megatron-LM, large Transformer)</td><td align="center">0.40–0.55</td><td>Well-optimized GEMM + FlashAttention</td></tr>
     <tr><td>Training (PyTorch eager, small model)</td><td align="center">0.08–0.15</td><td>Kernel launch overhead dominates</td></tr>
-    <tr><td>Inference decode, batch=1</td><td align="center">0.01–0.05</td><td>Memory-bound; compute nearly idle</td></tr>
+    <tr><td>Inference decode, batch=1 (overall MFU)</td><td align="center">0.01–0.05</td><td>Memory-bound; use 0.35–0.55 for <code>ServingModel</code> compute kernel</td></tr>
     <tr><td>Inference decode, batch=32+</td><td align="center">0.15–0.35</td><td>Batch amortizes weight loading</td></tr>
     <tr><td>Inference prefill, long context</td><td align="center">0.30–0.50</td><td>Compute-bound GEMM + attention</td></tr>
     <tr><td>TinyML (TFLite Micro on ESP32)</td><td align="center">0.05–0.15</td><td>Interpreter overhead, no tensor cores</td></tr>
@@ -283,16 +283,17 @@ Thanks to these wonderful people for helping improve MLSys·im!
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️ 🧠 maintenance</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=80" width="80px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=80" width="80px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🔎</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Shakhtar-Sankur"><img src="https://avatars.githubusercontent.com/u/312389772?v=4?v=4?s=80" width="80px;" alt="Sankur Kundu"/><br /><sub><b>Sankur Kundu</b></sub></a><br />🪲 🧑‍💻 ✍️ 🧠 🧪</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/prawalpokharel"><img src="https://avatars.githubusercontent.com/u/57414987?v=4?v=4?s=80" width="80px;" alt="Prawal Pokharel"/><br /><sub><b>Prawal Pokharel</b></sub></a><br />🧑‍💻 🎨 ✍️ 🧪 🛠️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=80" width="80px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Shakhtar-Sankur"><img src="https://avatars.githubusercontent.com/u/312389772?v=4?v=4?s=80" width="80px;" alt="Sankur Kundu"/><br /><sub><b>Sankur Kundu</b></sub></a><br />🧑‍💻 ✍️ 🧠 🧪</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Nishitha-Rajesh"><img src="https://avatars.githubusercontent.com/u/222974421?v=4?v=4?s=80" width="80px;" alt="Nishitha-Rajesh"/><br /><sub><b>Nishitha-Rajesh</b></sub></a><br />🪲 🧑‍💻 ✍️ 🛠️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/aadityansha06"><img src="https://avatars.githubusercontent.com/u/96714228?v=4?v=4?s=80" width="80px;" alt="Aadityansha "/><br /><sub><b>Aadityansha </b></sub></a><br />🪲 🧑‍💻 🧪</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/ShivtejG236"><img src="https://avatars.githubusercontent.com/u/91597404?v=4?v=4?s=80" width="80px;" alt="Shivtej Gaikwad"/><br /><sub><b>Shivtej Gaikwad</b></sub></a><br />🪲 🧑‍💻 🧪</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/kjlintong"><img src="https://avatars.githubusercontent.com/u/40327910?v=4?v=4?s=80" width="80px;" alt="Tong Lin"/><br /><sub><b>Tong Lin</b></sub></a><br />🧑‍💻 ✍️ 🧪</td>
     </tr>
     <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/ShivtejG236"><img src="https://avatars.githubusercontent.com/u/91597404?v=4?v=4?s=80" width="80px;" alt="Shivtej Gaikwad"/><br /><sub><b>Shivtej Gaikwad</b></sub></a><br />🪲 🧑‍💻 🧪</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/kjlintong"><img src="https://avatars.githubusercontent.com/u/40327910?v=4?v=4?s=80" width="80px;" alt="Tong Lin"/><br /><sub><b>Tong Lin</b></sub></a><br />🧑‍💻 ✍️ 🧪</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/lynnyulinlin-debug"><img src="https://avatars.githubusercontent.com/u/252566641?v=4?v=4?s=80" width="80px;" alt="lynnyulinlin-debug"/><br /><sub><b>lynnyulinlin-debug</b></sub></a><br />🪲 🧑‍💻 🧠</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Nishitha-Rajesh"><img src="https://avatars.githubusercontent.com/u/222974421?v=4?v=4?s=80" width="80px;" alt="Nishitha-Rajesh"/><br /><sub><b>Nishitha-Rajesh</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/asgalon"><img src="https://avatars.githubusercontent.com/u/45242704?v=4?v=4?s=80" width="80px;" alt="Peter Koellner"/><br /><sub><b>Peter Koellner</b></sub></a><br />🪲 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/hzeljko"><img src="https://avatars.githubusercontent.com/hzeljko?v=4?s=80" width="80px;" alt="Zeljko Hrcek"/><br /><sub><b>Zeljko Hrcek</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/nyxst4ck"><img src="https://avatars.githubusercontent.com/u/289980115?v=4?v=4?s=80" width="80px;" alt="nyxst4ck"/><br /><sub><b>nyxst4ck</b></sub></a><br />✍️</td>
@@ -316,9 +317,9 @@ Thanks to these wonderful people for helping improve MLSys·im!
 
 **Code:** [Apache License 2.0](LICENSE.md) — free for commercial and non-commercial use, with patent grant and attribution requirement.
 
-**Documentation and textbook prose:** [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA-4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/) — the tutorials and prose on [mlsysbook.ai/mlsysim](https://mlsysbook.ai/mlsysim) are part of the *Machine Learning Systems* textbook and carry its license.
+**Documentation:** [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA-4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/) — the tutorials and prose on [mlsysbook.ai/mlsysim](https://mlsysbook.ai/mlsysim) are teaching materials that accompany the *Machine Learning Systems* textbook. The textbook itself is published by MIT Press under CC BY-NC-ND 4.0.
 
-The two licenses are intentionally separate: the Python package is permissively licensed so engineers and researchers can use it anywhere (including commercially), while the textbook prose retains its non-commercial protection to prevent republication as a derivative textbook.
+The two licenses are intentionally separate: the Python package is permissively licensed so engineers and researchers can use it anywhere (including commercially), while the documentation keeps a non-commercial license to prevent its republication as a paid course or textbook.
 
 Copyright &copy; 2026 Vijay Janapa Reddi and MLSys·im contributors.
 

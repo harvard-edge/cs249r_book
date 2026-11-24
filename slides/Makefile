@@ -33,6 +33,8 @@ SCRIPTS   := scripts
 # All chapter directories (auto-detected)
 VOL1_CHAPTERS := $(sort $(notdir $(wildcard $(VOL1_SRC)/*_*)))
 VOL2_CHAPTERS := $(sort $(notdir $(wildcard $(VOL2_SRC)/*_*)))
+VOL3_CHAPTERS := $(sort $(notdir $(wildcard $(VOL3_SRC)/*_*)))
+VOL4_CHAPTERS := $(sort $(notdir $(wildcard $(VOL4_SRC)/*_*)))
 
 # LaTeX engine
 # pdflatex with helvet (Helvetica) + courier — same engine + font choice
@@ -53,18 +55,24 @@ PPTX_DPI := 300
 # TARGETS
 # =============================================================================
 
-.PHONY: all clean svgs help pptx pptx-vol1 pptx-vol2
+.PHONY: all clean svgs help pptx vol1 vol2 vol3 vol4 pptx-vol1 pptx-vol2 pptx-vol3 pptx-vol4
 
 help:
 	@echo "Usage:"
 	@echo "  make ch01        Build Vol1 Chapter 1 (PDF)"
 	@echo "  make v2ch01      Build Vol2 Chapter 1 (PDF)"
+	@echo "  make v3-05_kv_cache  Build one Vol3 deck (PDF)"
+	@echo "  make v4-02_body      Build one Vol4 deck (PDF)"
 	@echo "  make vol1        Build all Vol1 chapters (PDF)"
 	@echo "  make vol2        Build all Vol2 chapters (PDF)"
-	@echo "  make all         Build all chapters (PDF, both volumes)"
-	@echo "  make pptx        Build all PPTX from PDFs (both volumes)"
+	@echo "  make vol3        Build all Vol3 chapters (PDF)"
+	@echo "  make vol4        Build all Vol4 chapters (PDF)"
+	@echo "  make all         Build all chapters (PDF, Volumes I-IV)"
+	@echo "  make pptx        Build all PPTX from PDFs (Volumes I-IV)"
 	@echo "  make pptx-vol1   Build Vol1 PPTX only"
 	@echo "  make pptx-vol2   Build Vol2 PPTX only"
+	@echo "  make pptx-vol3   Build Vol3 PPTX only"
+	@echo "  make pptx-vol4   Build Vol4 PPTX only"
 	@echo "  make pptx-ch01   Build Chapter 1 PPTX only"
 	@echo "  make check       Build all + fail if overflows > 10pt"
 	@echo "  make svgs        Convert all SVGs to PDFs"
@@ -75,10 +83,18 @@ help:
 	@echo ""
 	@echo "Volume II chapters:"
 	@for ch in $(VOL2_CHAPTERS); do echo "  $$ch"; done
+	@echo ""
+	@echo "Volume III chapters:"
+	@for ch in $(VOL3_CHAPTERS); do echo "  $$ch"; done
+	@echo ""
+	@echo "Volume IV chapters:"
+	@for ch in $(VOL4_CHAPTERS); do echo "  $$ch"; done
 
 vol1: svgs $(addprefix build-,$(VOL1_CHAPTERS))
-vol2: v2ch01 v2ch02 v2ch03 v2ch04 v2ch05 v2ch06 v2ch07 v2ch08 v2ch09 v2ch10 v2ch11 v2ch12 v2ch13 v2ch14 v2ch15 v2ch16 v2ch17
-all: vol1 vol2
+vol2: svgs $(addprefix v2-,$(VOL2_CHAPTERS))
+vol3: svgs $(addprefix v3-,$(VOL3_CHAPTERS))
+vol4: svgs $(addprefix v4-,$(VOL4_CHAPTERS))
+all: vol1 vol2 vol3 vol4
 
 # =============================================================================
 # SVG → PDF conversion (run before any LaTeX build)
@@ -190,7 +206,8 @@ define build-chapter-impl
 	fi
 endef
 
-# Volume III and IV decks by directory name: make v3-05_kv_cache, make v4-01_boundary
+# Volume II, III, and IV decks by directory name: make v2-00_course_overview, make v3-05_kv_cache, make v4-01_boundary
+v2-%: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),$*)
 v3-%: svgs ; $(call build-chapter-impl,$(VOL3_SRC),$(VOL3_OUT),$*)
 v4-%: svgs ; $(call build-chapter-impl,$(VOL4_SRC),$(VOL4_OUT),$*)
 
@@ -218,7 +235,7 @@ v2ch17: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),17_conclusion)
 # PPTX conversion (PDF → PowerPoint, image-based)
 # =============================================================================
 
-pptx: pptx-vol1 pptx-vol2
+pptx: pptx-vol1 pptx-vol2 pptx-vol3 pptx-vol4
 
 pptx-vol1: vol1
 	@echo "Converting Vol1 PDFs to PPTX..."
@@ -227,6 +244,14 @@ pptx-vol1: vol1
 pptx-vol2: vol2
 	@echo "Converting Vol2 PDFs to PPTX..."
 	@$(PDF2PPTX) $(VOL2_OUT)/*.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
+
+pptx-vol3: vol3
+	@echo "Converting Vol3 PDFs to PPTX..."
+	@$(PDF2PPTX) $(VOL3_OUT)/*.pdf --output-dir $(VOL3_OUT) --dpi $(PPTX_DPI)
+
+pptx-vol4: vol4
+	@echo "Converting Vol4 PDFs to PPTX..."
+	@$(PDF2PPTX) $(VOL4_OUT)/*.pdf --output-dir $(VOL4_OUT) --dpi $(PPTX_DPI)
 
 # Per-chapter PPTX: pptx-ch01, pptx-ch02, ..., pptx-v2ch01, ...
 pptx-ch01: ch01 ; @$(PDF2PPTX) $(VOL1_OUT)/01_introduction.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
@@ -289,7 +314,7 @@ MAX_OVERFLOW := 10
 check: svgs
 	@echo "Building with overflow check (max $(MAX_OVERFLOW)pt)..."
 	@fail=0; \
-	for ch_dir in $(VOL1_SRC)/*_*/ $(VOL2_SRC)/*_*/; do \
+	for ch_dir in $(VOL1_SRC)/*_*/ $(VOL2_SRC)/*_*/ $(VOL3_SRC)/*_*/ $(VOL4_SRC)/*_*/; do \
 		[ -d "$$ch_dir" ] || continue; \
 		tex_file=$$(ls $$ch_dir/*.tex 2>/dev/null | head -1); \
 		[ -z "$$tex_file" ] && continue; \
@@ -352,12 +377,24 @@ handout:
 	{ echo "  ✗ handout build failed"; exit 1; }
 	@cd vol$(V)/$(D) && rm -f $(D)-handout.{aux,log,nav,out,snm,toc,vrb}
 
-# Instructor notes: each slide with its speaker notes on the right.
+# Student notes: the same layout without the instructor-only \notecue{Teach} cues.
+# Activity frames print their first step (before the answer): tools/student_source.py.
+student-notes:
+	@mkdir -p $(BUILD_DIR)/vol$(V)
+	@$(PY) tools/student_source.py vol$(V)/$(D)/$(D).tex vol$(V)/$(D)/$(D)-student-src.tex > /dev/null
+	@cd vol$(V)/$(D) && \
+	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-student-notes "\PassOptionsToClass{handout}{beamer}\def\mlsysshownotes{}\def\mlsysstudentnotes{}\input{$(D)-student-src.tex}" > /dev/null 2>&1 && \
+	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-student-notes "\PassOptionsToClass{handout}{beamer}\def\mlsysshownotes{}\def\mlsysstudentnotes{}\input{$(D)-student-src.tex}" > /dev/null 2>&1 && \
+	mv $(D)-student-notes.pdf ../../$(BUILD_DIR)/vol$(V)/ && echo "  ✓ $(BUILD_DIR)/vol$(V)/$(D)-student-notes.pdf" || \
+	{ echo "  ✗ student notes build failed"; rm -f vol$(V)/$(D)/$(D)-student-src.tex; exit 1; }
+	@cd vol$(V)/$(D) && rm -f $(D)-student-notes.{aux,log,nav,out,snm,toc,vrb} $(D)-student-src.tex
+
+# Study & presenter notes: Portrait US Letter (handout slide on top, notes below).
 notes:
 	@mkdir -p $(BUILD_DIR)/vol$(V)
 	@cd vol$(V)/$(D) && \
-	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-notes "\def\mlsysshownotes{}\input{$(D).tex}" > /dev/null 2>&1 && \
-	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-notes "\def\mlsysshownotes{}\input{$(D).tex}" > /dev/null 2>&1 && \
+	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-notes "\PassOptionsToClass{handout}{beamer}\def\mlsysshownotes{}\input{$(D).tex}" > /dev/null 2>&1 && \
+	$(LATEX) $(LATEX_FLAGS) -jobname=$(D)-notes "\PassOptionsToClass{handout}{beamer}\def\mlsysshownotes{}\input{$(D).tex}" > /dev/null 2>&1 && \
 	mv $(D)-notes.pdf ../../$(BUILD_DIR)/vol$(V)/ && echo "  ✓ $(BUILD_DIR)/vol$(V)/$(D)-notes.pdf" || \
 	{ echo "  ✗ notes build failed"; exit 1; }
 	@cd vol$(V)/$(D) && rm -f $(D)-notes.{aux,log,nav,out,snm,toc,vrb}

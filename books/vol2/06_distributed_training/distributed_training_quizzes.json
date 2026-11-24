@@ -39,7 +39,7 @@
           },
           {
             "question_type": "SHORT",
-            "question": "A team doubles a data-parallel cluster from 64 to 128 GPUs and observes that total step time drops by only 12 percent even though per-worker compute time halves. Using the distributed step-time equation $T_{\\text{step}}(N) = T_{\\text{compute}}/N + T_{\\text{comm}}(N) + T_{\\text{sync}}(N) - T_{\\text{overlap}}$, explain what the observation establishes and what measurement would distinguish possible causes.",
+            "question": "A team doubles a data-parallel cluster from 64 to 128 GPUs and observes that total step time drops by only 12 percent even though per-worker compute time halves. Using the distributed step-time equation $\\DistributedStepTime(\\DeviceCount) = \\IronLawComputeTime/\\DeviceCount + \\CommunicationTime(\\DeviceCount) + \\SynchronizationTime(\\DeviceCount) - \\OverlappedTime$, explain what the observation establishes and what measurement would distinguish possible causes.",
             "answer": "The observation establishes that halving per-worker compute did not halve the complete step. Exposed communication, synchronization, reduced overlap, or another critical-path delay can explain the residual; the step-time ratio alone does not identify which one binds. Compare aligned rank timelines for gradient readiness, collective transfer, barrier waiting, input delivery, and kernel execution. Collective waiting may reflect a late participant rather than limited fabric capacity, so link utilization during the critical interval is needed to support a network diagnosis.",
             "learning_objective": "Analyze how the communication-computation ratio limits scaling when per-worker compute shrinks faster than communication cost"
           },
@@ -51,7 +51,7 @@
           },
           {
             "question_type": "FILL",
-            "question": "The dimensionless ratio $\\rho = T_{\\text{comm}}(N) / (T_{\\text{compute}}/N)$, which screens communication demand relative to per-worker compute time, is defined as the ____.",
+            "question": "The dimensionless ratio $\\CommunicationComputeRatio = \\CommunicationTime(\\DeviceCount) / (\\IronLawComputeTime/\\DeviceCount)$, which screens communication demand relative to per-worker compute time, is defined as the ____.",
             "answer": "Communication-Computation Ratio. The ratio compares communication time with per-worker compute time. A large ratio warns that communication may limit scaling, but actual step time depends on overlap, readiness, and other exposed work. A small ratio alone does not guarantee near-linear scaling.",
             "learning_objective": "Define the metric governing the transition between compute-bound and communication-bound cluster operation"
           }
@@ -143,7 +143,7 @@
               "$1.75\\text{ GB}$, because weights, gradients, and optimizer states are each partitioned equally across all 64 workers",
               "$0.25\\text{ GB}$, because INT4 quantization eliminates floating-point representation entirely"
             ],
-            "answer": "The correct answer is C. ZeRO-3 / FSDP partitions all three components of static training state, namely FP16 model weights (2 bytes/param), FP16 gradients (2 bytes/param), and FP32 Adam states (12 bytes/param), across the $N=64$ ranks ($16\\text{ bytes/param} / 64 = 0.25\\text{ bytes/param}$ per device). For a 7B model ($7 \\times 10^9 \\times 0.25\\text{ bytes} = 1.75\\text{ GB}$ per GPU), this leaves substantial HBM headroom for dynamic activations. Asserting that state remains 112 GB ignores parameter and optimizer sharding. ZeRO-1 retains 28 GB of weights and gradients plus its optimizer shard, so its total is greater than 28 GB. Claiming INT4 compression confuses precision quantization with state sharding.",
+            "answer": "The correct answer is C. ZeRO-3 / FSDP partitions all three components of static training state, namely FP16 model weights (2 bytes/param), FP16 gradients (2 bytes/param), and FP32 Adam states (12 bytes/param), across the $\\DeviceCount=64$ ranks ($16\\text{ bytes/param} / 64 = 0.25\\text{ bytes/param}$ per device). For a 7B model ($7 \\times 10^9 \\times 0.25\\text{ bytes} = 1.75\\text{ GB}$ per GPU), this leaves substantial HBM headroom for dynamic activations. Asserting that state remains 112 GB ignores parameter and optimizer sharding. ZeRO-1 retains 28 GB of weights and gradients plus its optimizer shard, so its total is greater than 28 GB. Claiming INT4 compression confuses precision quantization with state sharding.",
             "learning_objective": "Calculate per-GPU static memory reduction under ZeRO-3 parameter, gradient, and optimizer state sharding"
           },
           {
@@ -155,14 +155,14 @@
           {
             "question_type": "ORDER",
             "question": "Order the memory sharding stages of data parallelism from least sharded (highest memory footprint) to deepest sharded (lowest memory footprint):\n(1) ZeRO-2 (shards optimizer states and gradients using ReduceScatter)\n(2) Standard DDP (full replication of parameters, gradients, and optimizer states)\n(3) ZeRO-3 / FSDP (shards optimizer states, gradients, and model parameters with layer-wise AllGather/ReduceScatter)\n(4) ZeRO-1 (shards optimizer states only, keeping parameters and gradients replicated)",
-            "answer": "(2) -> (4) -> (1) -> (3). First, (2) Standard DDP replicates all 16 bytes/param on every GPU. Next, (4) ZeRO-1 shards optimizer states (~4$\\times$ static reduction). Then, (1) ZeRO-2 additionally shards gradients (~8$\\times$ static reduction). Finally, (3) ZeRO-3 / FSDP shards the parameters themselves, achieving linear $1/N$ memory reduction.",
+            "answer": "(2) -> (4) -> (1) -> (3). First, (2) Standard DDP replicates all 16 bytes/param on every GPU. Next, (4) ZeRO-1 shards optimizer states (~4$\\times$ static reduction). Then, (1) ZeRO-2 additionally shards gradients (~8$\\times$ static reduction). Finally, (3) ZeRO-3 / FSDP shards the parameters themselves, achieving linear $1/\\DeviceCount$ memory reduction.",
             "learning_objective": "Classify the memory sharding stages of ZeRO and FSDP by depth of partitioned state"
           },
           {
             "question_type": "MCQ",
             "question": "If a model's parameters, gradients, optimizer state, activations, and working buffers already fit comfortably within single-GPU memory with high compute utilization under standard DDP, what is the expected throughput impact of enabling ZeRO-3 / FSDP Full Sharding?",
             "choices": [
-              "Throughput will increase linearly by $N\\times$ because sharding reduces per-GPU gradient memory",
+              "Throughput will increase linearly by $\\DeviceCount\\times$ because sharding reduces per-GPU gradient memory",
               "Throughput can decrease because FSDP introduces additional AllGather collectives before forward and backward passes and ReduceScatter on the critical path",
               "Throughput will remain exactly identical because NCCL automatically hides all collective communication overhead",
               "Throughput will double because parameter sharding eliminates the backward pass entirely"
@@ -177,9 +177,9 @@
               "Parameter servers cannot execute stochastic gradient descent updates with mathematical validity",
               "Parameter servers are restricted to CPU hosts and cannot interface with GPU accelerators",
               "AllReduce eliminates all network traffic by updating weights locally without exchanging data",
-              "Centralized parameter servers create an $\\mathcal{O}(N)$ network bottleneck at the server's network interface, whereas AllReduce distributes communication symmetrically across all workers"
+              "Centralized parameter servers create an $\\mathcal{O}(\\DeviceCount)$ network bottleneck at the server's network interface, whereas AllReduce distributes communication symmetrically across all workers"
             ],
-            "answer": "The correct answer is D. A centralized server must service the dense gradient and parameter streams of all workers, concentrating traffic at its interfaces. AllReduce distributes that exchange among participants. For an ideal ring, each worker transfers $2(N-1)/N \\times M_{\\text{grad}}$ bytes; tree schedules have their own transfer and startup accounting. Whether either design meets the step budget depends on sustained bandwidth, topology, readiness, and overlap. Parameter servers can implement valid SGD on CPU or GPU hosts, and AllReduce still requires communication.",
+            "answer": "The correct answer is D. A centralized server must service the dense gradient and parameter streams of all workers, concentrating traffic at its interfaces. AllReduce distributes that exchange among participants. For an ideal ring, each worker transfers $2(\\DeviceCount-1)/\\DeviceCount \\times \\GradientPayload$ bytes; tree schedules have their own transfer and startup accounting. Whether either design meets the step budget depends on sustained bandwidth, topology, readiness, and overlap. Parameter servers can implement valid SGD on CPU or GPU hosts, and AllReduce still requires communication.",
             "learning_objective": "Compare centralized and decentralized synchronization topologies in terms of bandwidth bottlenecks for dense gradient traffic"
           },
           {
@@ -245,7 +245,7 @@
           },
           {
             "question_type": "FILL",
-            "question": "The threshold batch size $B^* \\approx \\frac{\\text{tr}(\\Sigma)}{\\|\\nabla \\mathcal{L}(\\theta)\\|^2}$, representing the point where gradient variance equals true gradient magnitude and past which larger batches yield diminishing returns in sample efficiency, is known as the ____.",
+            "question": "The threshold batch size $\\CriticalBatchSize \\approx \\frac{\\text{tr}(\\GradientCovarianceMatrix)}{\\|\\nabla \\LossFunction(\\ModelParameters)\\|^2}$, representing the point where gradient variance equals true gradient magnitude and past which larger batches yield diminishing returns in sample efficiency, is known as the ____.",
             "answer": "critical batch size. The gradient-noise-scale proxy estimates the crossover where larger batches give diminishing reductions in optimization steps per added sample. Below that crossover, steps can fall approximately inversely with batch size; the relationship depends on optimizer, training phase, and target quality.",
             "learning_objective": "Define critical batch size in terms of gradient covariance trace and gradient norm"
           },
@@ -264,7 +264,7 @@
           {
             "question_type": "SHORT",
             "question": "Explain why per-tensor dynamic scaling is necessary in FP8 distributed training and describe how the scaling factor is computed during execution.",
-            "answer": "FP8 scaling maps each tensor into the limited representable range. A simple current-maximum rule uses $S=\\mathrm{FP8}_{\\max}/\\max(|X|)$ before casting, with an appropriate zero-tensor guard. For a product of independently scaled operands, the output must be divided by the product of their scales. Practical policies may use history or smaller scaling blocks; the objective is to balance rounding, underflow, and overflow.",
+            "answer": "FP8 scaling maps each tensor into the limited representable range. A simple current-maximum rule uses $\\QuantizationScale = \\text{FP8}_{\\max}/\\max(|\\LayerInputMatrix|)$ before casting, with an appropriate zero-tensor guard. For a product of independently scaled operands, the output must be divided by the product of their scales. Practical policies may use history or smaller scaling blocks; the objective is to balance rounding, underflow, and overflow.",
             "learning_objective": "Explain how scaling balances rounding, underflow, and overflow in FP8 tensors"
           }
         ]
@@ -298,13 +298,13 @@
               "The QKV projection is column-parallel and the Output projection is row-parallel, requiring only a single AllReduce at the end of the attention block",
               "The QKV projection is partitioned across pipeline stages while the Output projection is replicated across data-parallel ranks"
             ],
-            "answer": "The correct answer is C. In Megatron-LM, the first linear layer (QKV projection) is column-parallel ($W = [W_1 | W_2]$), producing partitioned intermediate activations without communication. The second linear layer (Output projection) is row-parallel ($W = [W_1 ; W_2]$), taking those partitioned activations directly as inputs and generating partial sums. Only a single AllReduce at the end of the row-parallel projection is required to sum the partial outputs. Using column-parallel for both layers would require an intermediate AllGather. Using row-parallel for both layers would require an AllReduce before the second layer. Splitting QKV and Output across pipeline stages confuses intra-layer tensor parallelism with inter-layer pipelining.",
+            "answer": "The correct answer is C. In Megatron-LM, the first linear layer (QKV projection) is column-parallel ($\\WeightMatrix = [\\WeightMatrix_{1} \\mid \\WeightMatrix_{2}]$), producing partitioned intermediate activations without communication. The second linear layer (Output projection) is row-parallel ($\\WeightMatrix = [\\WeightMatrix_{1} ; \\WeightMatrix_{2}]$), taking those partitioned activations directly as inputs and generating partial sums. Only a single AllReduce at the end of the row-parallel projection is required to sum the partial outputs. Using column-parallel for both layers would require an intermediate AllGather. Using row-parallel for both layers would require an AllReduce before the second layer. Splitting QKV and Output across pipeline stages confuses intra-layer tensor parallelism with inter-layer pipelining.",
             "learning_objective": "Analyze the column-then-row linear layer pairing in Megatron-LM tensor parallelism"
           },
           {
             "question_type": "SHORT",
-            "question": "In a synchronous 1F1B pipeline-parallel training schedule with $p=8$ stages and $m=32$ microbatches, calculate the theoretical pipeline bubble fraction and explain how increasing the microbatch count $m$ affects bubble overhead and activation memory.",
-            "answer": "The bubble fraction is $F_{\\text{bubble}} = \\frac{p-1}{m+p-1} = \\frac{8-1}{32+8-1} = \\frac{7}{39} \\approx 17.9\\%$. Increasing the microbatch count $m$ relative to stage count $p$ drives the bubble fraction down toward zero ($F_{\\text{bubble}} \\to 0$). Under 1F1B scheduling, with equal activation sizes per microbatch, peak activation memory per stage is bounded at $\\mathcal{O}(p)$ rather than GPipe's $\\mathcal{O}(m)$, making larger microbatch counts practical.",
+            "question": "In a synchronous 1F1B pipeline-parallel training schedule with $\\PipelineParallelDegree=8$ stages and $\\MicrobatchCount=32$ microbatches, calculate the theoretical pipeline bubble fraction and explain how increasing the microbatch count $\\MicrobatchCount$ affects bubble overhead and activation memory.",
+            "answer": "The bubble fraction is $\\PipelineBubbleFraction = \\frac{\\PipelineParallelDegree-1}{\\MicrobatchCount+\\PipelineParallelDegree-1} = \\frac{8-1}{32+8-1} = \\frac{7}{39} \\approx 17.9\\%$. Increasing the microbatch count $\\MicrobatchCount$ relative to stage count $\\PipelineParallelDegree$ drives the bubble fraction down toward zero ($\\PipelineBubbleFraction \\to 0$). Under 1F1B scheduling, with equal activation sizes per microbatch, peak activation memory per stage is bounded at $\\mathcal{O}(\\PipelineParallelDegree)$ rather than GPipe's $\\mathcal{O}(\\MicrobatchCount)$, making larger microbatch counts practical.",
             "learning_objective": "Calculate pipeline bubble overhead and explain the role of microbatch count in pipeline utilization"
           },
           {
@@ -315,14 +315,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "In a capacity-limited Mixture of Experts (MoE) system using top-1 routing and token dropping, what occurs when a hot expert receives more tokens than its allocated buffer capacity determined by the Capacity Factor $C$?",
+            "question": "In a capacity-limited Mixture of Experts (MoE) system using top-1 routing and token dropping, what occurs when a hot expert receives more tokens than its allocated buffer capacity determined by the Capacity Factor $\\ExpertCapacityFactor$?",
             "choices": [
               "Excess tokens are dropped and pass through the MoE layer unprocessed via the residual connection",
               "The expert GPU dynamically allocates host CPU memory over PCIe, halting computation on other ranks",
               "The AllToAll collective automatically pauses until all sibling experts process matching token counts",
               "The extra tokens are rerouted to a random cold expert regardless of gating network weights"
             ],
-            "answer": "The correct answer is A. To prevent memory overflow and load-imbalance stalls on devices hosting popular experts, the stated top-1 dropping implementation enforces a capacity limit $C \\cdot (B \\times S)/E$. When an expert's assigned token count exceeds this buffer, the excess tokens are dropped and bypass the feed-forward computation, flowing directly through the residual connection. Dynamically allocating host CPU memory would stall GPU execution. Collective communication does not pause dynamically for uneven token counts. Rerouting to random unselected experts would violate gating semantics.",
+            "answer": "The correct answer is A. To prevent memory overflow and load-imbalance stalls on devices hosting popular experts, the stated top-1 dropping implementation enforces a capacity limit $\\ExpertCapacityFactor \\cdot (\\BatchSize \\times \\SequenceLength)/\\ExpertCount$. When an expert's assigned token count exceeds this buffer, the excess tokens are dropped and bypass the feed-forward computation, flowing directly through the residual connection. Dynamically allocating host CPU memory would stall GPU execution. Collective communication does not pause dynamically for uneven token counts. Rerouting to random unselected experts would violate gating semantics.",
             "learning_objective": "Explain the function of the capacity factor and token dropping in distributed MoE routing"
           },
           {
@@ -333,8 +333,8 @@
           },
           {
             "question_type": "TF",
-            "question": "True or False: Ring Attention scales context length beyond single-GPU memory capacity by circulating key/value blocks in an accelerator ring across $N-1$ communication rounds while overlapping transfer with block-level attention computation.",
-            "answer": "True. Ring Attention partitions the query, key, and value sequences across $N$ GPUs so each device holds only $S/N$ tokens of key/value state. Each GPU evaluates its query block against all $N$ key/value blocks, including its local block, using $N-1$ transfers. Transfer can overlap block computation when the interconnect and compute budget permit; the distributed state capacity grows with worker count.",
+            "question": "True or False: Ring Attention scales context length beyond single-GPU memory capacity by circulating key/value blocks in an accelerator ring across $\\DeviceCount-1$ communication rounds while overlapping transfer with block-level attention computation.",
+            "answer": "True. Ring Attention partitions the query, key, and value sequences across $\\DeviceCount$ GPUs so each device holds only $\\SequenceLength/\\DeviceCount$ tokens of key/value state. Each GPU evaluates its query block against all $\\DeviceCount$ key/value blocks, including its local block, using $\\DeviceCount-1$ transfers. Transfer can overlap block computation when the interconnect and compute budget permit; the distributed state capacity grows with worker count.",
             "learning_objective": "Evaluate the memory and communication mechanism of Ring Attention for long-context sequence parallelism"
           }
         ]
@@ -372,7 +372,7 @@
           },
           {
             "question_type": "SHORT",
-            "question": "A 175B-parameter model uses mixed-precision Adam with 2-byte weights, 2-byte gradients, a 4-byte master copy, and two 4-byte moments per parameter. With tensor degree $t=8$ and pipeline degree $p=16$, calculate the ideally balanced static memory per GPU before data-parallel state sharding, and explain why tensor parallelism alone cannot fit this state on 80 GB GPUs.",
+            "question": "A 175B-parameter model uses mixed-precision Adam with 2-byte weights, 2-byte gradients, a 4-byte master copy, and two 4-byte moments per parameter. With tensor degree $\\TensorParallelDegree=8$ and pipeline degree $\\PipelineParallelDegree=16$, calculate the ideally balanced static memory per GPU before data-parallel state sharding, and explain why tensor parallelism alone cannot fit this state on 80 GB GPUs.",
             "answer": "The 16-byte-per-parameter state totals $175\\times10^9\\times16=2{,}800$ GB. Tensor parallelism alone leaves $2{,}800/8=350$ GB per GPU, exceeding 80 GB. Adding 16 balanced pipeline stages reduces the static state to $2{,}800/(8\\times16)=21.875$ GB per GPU. Activations, temporary parameter gathers, communication buffers, and uneven layer placement require additional headroom.",
             "learning_objective": "Calculate per-GPU static memory requirements in a 3D hybrid parallelism configuration"
           },
@@ -497,7 +497,7 @@
           },
           {
             "question_type": "SHORT",
-            "question": "An engineering team observes that an 8-GPU training job using pure pipeline parallelism achieves only 35 percent Model Flops Utilization (MFU), while interconnect links are largely idle. Using the bubble formula $F_{\\text{bubble}} = \\frac{p-1}{m+p-1}$, explain how to assess the pipeline-bubble hypothesis and propose two adjustments if the trace confirms it.",
+            "question": "An engineering team observes that an 8-GPU training job using pure pipeline parallelism achieves only 35 percent Model Flops Utilization (MFU), while interconnect links are largely idle. Using the bubble formula $\\PipelineBubbleFraction = \\frac{\\PipelineParallelDegree-1}{\\MicrobatchCount+\\PipelineParallelDegree-1}$, explain how to assess the pipeline-bubble hypothesis and propose two adjustments if the trace confirms it.",
             "answer": "Low MFU and idle interconnect links make pipeline bubbles a candidate, but they do not prove the cause. Measure stage timelines and the microbatch count, and compare observed fill/drain idle slots with the bubble formula. Stage imbalance, input stalls, or inefficient local kernels can also lower MFU. If bubbles bind, increasing microbatch count can reduce their fraction, subject to activation memory and useful global batch size. Reducing stage count can also help when the revised memory budget fits; replacing some intra-node stages with tensor parallelism additionally requires a suitable communication budget.",
             "learning_objective": "Analyze pipeline bubble underutilization and propose architectural remedies"
           },
@@ -541,13 +541,13 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Contrast the collective communication primitive invocation frequency of standard DDP against full-shard FSDP with resharding for a model with $N_L$ layers during a single training step.",
-            "answer": "DDP launches one AllReduce per ready gradient bucket, often overlapping those calls with backward computation. Full-shard FSDP with layer-level wrapping and resharding after forward typically adds an AllGather before forward, another before backward, and a ReduceScatter after backward: approximately $3N_L$ calls. Actual counts depend on wrapping, bucketing, prefetch, and resharding policy.",
+            "question": "Contrast the collective communication primitive invocation frequency of standard DDP against full-shard FSDP with resharding for a model with $\\LayerCount$ layers during a single training step.",
+            "answer": "DDP launches one AllReduce per ready gradient bucket, often overlapping those calls with backward computation. Full-shard FSDP with layer-level wrapping and resharding after forward typically adds an AllGather before forward, another before backward, and a ReduceScatter after backward: approximately $3\\LayerCount$ calls. Actual counts depend on wrapping, bucketing, prefetch, and resharding policy.",
             "learning_objective": "Compare collective communication primitive invocations between standard DDP and full-shard FSDP"
           },
           {
             "question_type": "SHORT",
-            "question": "Explain why framework optimizations such as CUDA graphs and asynchronous communication streams cannot eliminate the physical scaling penalty of distributed training as the cluster size $N$ becomes very large.",
+            "question": "Explain why framework optimizations such as CUDA graphs and asynchronous communication streams cannot eliminate the physical scaling penalty of distributed training as the cluster size $\\DeviceCount$ becomes very large.",
             "answer": "Framework optimizations can reduce launch overhead and change readiness, overlap, and effective communication service time. They cannot make a required payload cross a finite-bandwidth link instantaneously. At fixed global work, adding ranks reduces local compute while required transfers and coordination can remain exposed. A scaling prediction therefore needs the actual workload, collective schedule, and critical path; a fixed-residual Amdahl ceiling applies only under that model’s assumptions.",
             "learning_objective": "Evaluate the physical limits of framework-level communication optimizations"
           }
@@ -575,7 +575,7 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A team achieves 50 percent Model Flops Utilization (MFU) on a single node, scales to 1,024 GPUs, and measures a scaling efficiency $(\\eta_{\\text{scaling}})$ of 50 percent on their communication-heavy workload. What is the cluster's realized model-FLOP rate during distributed execution as a fraction of peak hardware compute?",
+            "question": "A team achieves 50 percent Model Flops Utilization (MFU) on a single node, scales to 1,024 GPUs, and measures a scaling efficiency $(\\ScalingEfficiency)$ of 50 percent on their communication-heavy workload. What is the cluster's realized model-FLOP rate during distributed execution as a fraction of peak hardware compute?",
             "choices": [
               "25 percent of peak compute (delivering 256 GPU-equivalents of model computation)",
               "50 percent of peak compute (delivering 512 GPU-equivalents of useful work)",
@@ -593,14 +593,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "Why is gradient accumulation NOT a cost-free substitute for true physical scale-out even though it reduces gradient AllReduce communication frequency by a factor of $k$?",
+            "question": "Why is gradient accumulation NOT a cost-free substitute for true physical scale-out even though it reduces gradient AllReduce communication frequency by a factor of $\\AccumulationStepCount$?",
             "choices": [
               "It is mathematically incompatible with the Adam optimizer",
-              "It keeps a live gradient buffer resident, spaces optimizer updates by $k$ microsteps, and requires appropriate accumulation precision and normalization",
+              "It keeps a live gradient buffer resident, spaces optimizer updates by $\\AccumulationStepCount$ microsteps, and requires appropriate accumulation precision and normalization",
               "It requires dedicated InfiniBand links between CPU and GPU for each microstep",
               "It forces batch normalization layers to synchronize across all nodes on every forward pass"
             ],
-            "answer": "The correct answer is B. One optimizer update follows $k$ forward/backward microsteps, but this does not imply $k$ times the wall-clock update latency: saved synchronization and the comparison schedule affect elapsed time. A live gradient buffer remains resident during the window. Unscaled FP16 accumulation can overflow; accumulation precision and loss normalization must preserve the intended update. Changes in effective batch size must be evaluated at matched target quality. Accumulation is compatible with Adam and requires neither special CPU-GPU links nor mandatory cross-node batch normalization.",
+            "answer": "The correct answer is B. One optimizer update follows $\\AccumulationStepCount$ forward/backward microsteps, but this does not imply $\\AccumulationStepCount$ times the wall-clock update latency: saved synchronization and the comparison schedule affect elapsed time. A live gradient buffer remains resident during the window. Unscaled FP16 accumulation can overflow; accumulation precision and loss normalization must preserve the intended update. Changes in effective batch size must be evaluated at matched target quality. Accumulation is compatible with Adam and requires neither special CPU-GPU links nor mandatory cross-node batch normalization.",
             "learning_objective": "Analyze the memory, latency, and numerical stability trade-offs of gradient accumulation"
           },
           {

@@ -398,6 +398,8 @@ class SupervisorQueueScenario(BaseScenario):
         Equation: ``_math.floor(utilization_cap / (request_rate *
         service_time).to('').magnitude)``.
         """
+        if self.utilization_cap is None:
+            raise ValueError("utilization_cap is required to compute max_machines.")
         return _math.floor(self.utilization_cap / (self.request_rate * self.service_time).to("").magnitude)
 
 

@@ -22,15 +22,18 @@ There is **no** `mlsysim.core.defaults` module. Organize by domain:
 
 | Namespace | Examples |
 |-----------|----------|
+| **`Hardware.*` / `Hardware.Tech.*`** | Chip/board datasheets plus technology-class tiers (`Memory`, `Storage`, `Op`, `EffectiveCompute`, `Movement`, `Interconnect`, `Lithography`, `Battery`) |
+| **`Models.*` / `Datasets.*` / `Platforms.*`** | Workload architectures, dataset sizes, abstract deployment envelopes |
+| **`Embodied.*` / `Sensors.*` / `Actuators.*` / `Agents.*`** | Physical AI platforms, sensor/actuator datasheets, safety scanners/curtains/relays, agentic harnesses |
 | **`Systems.Reliability`** | Component MTTF, recovery timeouts, checkpoint bandwidth |
-| **`Systems.Nodes` / `Racks` / `Fabrics` / `Clusters` / `Pods`** | Server/rack profiles, network tiers, fleet sizes |
+| **`Systems.Nodes` / `Racks` / `Fabrics` / `Clusters` / `Pods` / `Storage`** | Server/rack profiles, network tiers, fleet sizes, storage subsystems |
 | **`Systems.Orchestration`** | Target utilization, queue discipline |
 | **`Literature.*`** | MFU bands, Chinchilla, communication and batch-size literature anchors |
-| **`Infrastructure.Grids` / `FacilityCooling` / `Pricing` / `Capacity`** | Carbon, PUE, cloud \$ anchors, build-out lead times |
-| **`Ops.Monitoring` / `TrainingRunOverheads`** | PSI thresholds, KS coefficient, goodput-loss profiles |
+| **`Infrastructure.Grids` / `Datacenters` / `FacilityCooling` / `Pricing` / `Capacity`** | Carbon, PUE, cloud \$ anchors, build-out lead times |
+| **`Ops.Monitoring` / `RuntimeOverheads` / `MemoryProtection` / `TrainingRunOverheads` / `Preemption`** | PSI thresholds, runtime dispatch/protection overheads, goodput-loss profiles |
 | **`Scenarios.*`** | Executable workload + system + constraint bundles |
 | **`ReferenceStats.*`** | Non-executable sourced world statistics and case-study anchors |
-| **`core.calibration`** | Default kwargs and internal heuristics for solver/engine internals |
+| **`engine.calibration`** | Default kwargs and internal heuristics for solver/engine internals |
 
 Do **not** duplicate registry fields across namespaces (chip `unit_cost` lives on `Hardware.Cloud.*` only).
 

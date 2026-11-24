@@ -1,0 +1,164 @@
+% Study sheet: Volume III, Chapter 17, Reinforcement Learning from Verifiable Rewards.
+% Numbers: \val{...} from rlvr_studysheet_numbers.tex, written by rlvr_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{rlvr_studysheet_numbers}
+\sheetvolume{3}
+\sheetchapter{17}{Reinforcement Learning from\\Verifiable Rewards}
+\sheetsources{Numbers from the chapter's mlsysim scenarios (hypothetical workloads and timings); questions marked assumed use new inputs.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+A programmatic check scores each sampled attempt, and the score, compared within a group, weights the
+update. The check becomes the \hl{objective}: the policy improves only as far as its
+\hl{scope and protection} allow.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Learning needs contrast.}{Only rollouts the reward tells apart move the policy; a never-solved task
+  gives zero signal.}
+\idea{A reward is a measurement.}{A weakened assertion or patched test runner earns full reward,
+  often more easily than a real fix.}
+\idea{Isolate the verifier.}{Grade a source-only diff in a fresh workspace the candidate cannot reach.}
+\idea{A terminal reward credits every turn alike.}{A critic, a gameable step score, or $\ContinuationCount$
+  forked continuations: standard error $\le 1/(2\sqrt{\ContinuationCount})$, so \val{mchalve}$\times$ the rollouts halve it.}
+\idea{Record what was sampled.}{Per call: delivered prefix, sampled token IDs, behavior log
+  probabilities. A preempted rollout is unresolved, not zero.}
+\idea{Judge by outcomes.}{Rising reward or longer self-checking proves nothing. Lost action
+  diversity on unsolved tasks shows up as tied groups.}
+\end{ideas}
+
+\vspace{8pt}
+\fcard{Reward ordering}%
+  {\TrajectoryReward = \CorrectnessReward + \FormatRewardWeight\FormatComplianceScore - \LengthPenaltyWeight\,\text{len},
+   \qquad \FormatRewardWeight + \LengthPenaltyWeight < 1}%
+  {Pass $\CorrectnessReward=1$, fail $0$; format $\FormatComplianceScore$ and len in $[0,1]$. A pass earns
+   at least $1-\LengthPenaltyWeight$, a failure at most $\FormatRewardWeight$, so passes outrank failures.}%
+  {}{}
+\fcard{False-accept share of the reward}%
+  {\Pr(\ReferenceAssessedFailure \mid \VerifierVerdict^{+}) =
+   \frac{(1-\ValidCandidateRate)\,\VerifierFalseAcceptanceRate}{\ValidCandidateRate\,\VerifierTrueAcceptanceRate + (1-\ValidCandidateRate)\,\VerifierFalseAcceptanceRate}}%
+  {$\ReferenceAssessedFailure$: the reference finds a failure; $\VerifierVerdict^{+}$: the verifier accepts;
+   $\ValidCandidateRate$: the pass rate the reference measures. The verifier accepts a
+   share $\VerifierFalseAcceptanceRate$ of failures and $\VerifierTrueAcceptanceRate$ of passes.}%
+  {}{}
+\end{leftcol}%
+\begin{rightcol}
+\fcard{Group-relative coefficient (GRPO)}%
+  {\GroupRelativeAdvantage_i = \frac{\TrajectoryReward_i - \GroupMeanReward}{\GroupRewardStandardDeviation + \AdvantageStabilizer}}%
+  {$\GroupMeanReward$, $\GroupRewardStandardDeviation$: mean and standard deviation (divide by $\GroupSize$) of
+   $\GroupSize$ rollouts' rewards on one task, no critic; $\AdvantageStabilizer$ is tiny. Rewards
+   $[0,1,0]$ give $\val{grponeg}, \val{grpopos}, \val{grponeg}$; a lone pass gets $\sqrt{\GroupSize-1}$, sound or tampered.}%
+  {Each of rollout $i$'s $\RolloutPolicyTokenCount_i$ tokens carries
+   $\GroupRelativeAdvantage_i/\RolloutPolicyTokenCount_i$, so a long failure is pushed down less per token;
+   a group-shared divisor removes this length bias.}{}
+\fcard{Reward contrast}%
+  {\GroupContrastProbability = 1 - \AttemptPassProbability^{\GroupSize} - (1-\AttemptPassProbability)^{\GroupSize}}%
+  {Chance a group of independent attempts at pass rate $\AttemptPassProbability$ holds a pass and a failure. A tied
+   group has every $\GroupRelativeAdvantage_i=0$: full cost, no gradient. Rollouts per informative group:
+   $\GroupSize/\GroupContrastProbability$.}%
+  {}%
+  {\begin{tikzpicture}[sheet]
+     \foreach \yv/\yl in {0/0, 50/0.5, 100/1}{\draw[gridline] (30,{\yv*0.5}) -- (230,{\yv*0.5});
+       \node[small, anchor=east] at (27,{\yv*0.5}) {\yl};}
+     \foreach \xv in {0,25,50,75,100}{\node[small, anchor=north] at ({30+2*\xv},-3) {\xv\%};}
+     \draw[accent, line width=1.1pt] plot[domain=0:1, samples=90, smooth] ({30+200*\x},{50*(1-(\x)^\val{group}-(1-\x)^\val{group})});
+     \filldraw[fill=accentsoft, draw=accent] ({30+200*\val{phardfrac}},{50*\val{contrasthard}}) circle (2pt);
+     \filldraw[fill=accent, draw=accent] ({30+200*\val{ptargetfrac}},{50*\val{contrasttarget}}) circle (2pt);
+     \node[lab, anchor=west] at ({36+200*\val{phardfrac}},{50*\val{contrasthard}-2}) {\val{phard}\% pass: \val{contrasthardshort}};
+     \node[lab, anchor=north] at ({30+200*\val{ptargetfrac}},{50*\val{contrasttarget}-4}) {\val{ptarget}\%: \val{contrasttargetshort}};
+     \node[note, anchor=north] at (130,-12) {$\GroupContrastProbability$ by pass rate, groups of \val{group}};
+   \end{tikzpicture}}
+\fcard{Rollout slot cycle}%
+  {\EnvironmentCycleTime = \TurnHorizon(\ModelTime + \ToolTime) + \RolloutAssessmentTime + \EnvironmentResetTime}%
+  {A serial slot: $\TurnHorizon$ turns of model time $\ModelTime$ and tool time $\ToolTime$, then
+   assessment $\RolloutAssessmentTime$ and reset $\EnvironmentResetTime$; capacity $\propto 1/\EnvironmentCycleTime$.}%
+  {Admitted at age $\RolloutAdmissionAge$, a rollout lags $\PolicyVersionLag \approx \lfloor\RolloutAdmissionAge/\PolicyUpdateStepTime\rfloor$
+   trainer updates of $\PolicyUpdateStepTime$ each: long, hard tasks lag most; a strict bound drops them.}{}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{$\val{missmodfrac}^{\val{group}} = \val{allfailmod}$, so $\GroupContrastProbability = \val{contrastmod}$ and
+  $\val{group} \div \val{contrastmod}$ = \val{permod} rollouts. Groups of \val{groupbig}: $\val{missmodfrac}^{\val{groupbig}} = \val{allfailmodbig}$,
+  $\val{groupbig} \div \val{contrastmodbig}$ = \val{permodbig}. Doubling still costs more; contrast is already high, so
+  retargeting to \val{ptarget}\% saves only \val{modvstarget}$\times$ (contrast card).}
+\ans{Q1}{Mean \val{qmean}; spread $\sqrt{\val{qvar}} = \val{qstd}$. Pass $\val{qcenteredpass} \div \val{qstd} = \val{qpass}$
+  ($\sqrt{\val{qroot}}$), each failure $\val{qcenteredfail} \div \val{qstd} = \val{qfail}$; sum zero. Tampered: still \val{qpass}, the
+  largest push; the coefficient sees only reward. Isolate the verifier (GRPO card).}
+\ans{Q2}{A pass with no format credit at full length scores \val{lowpass}, below the best failure \val{wformat}: a tidy failure can outrank a pass.
+  The ordering rule needs $\LengthPenaltyWeight < \val{wlengthmax}$ (reward ordering card).}
+\columnbreak
+\ans{Q3}{Exploit or false accepts: audit rewarded artifacts for edits to tests, runner or conftest, and
+  regrade them in a fresh workspace.
+ Length bias: compare lengths by outcome; if failures grow,
+  retrain fixed tasks with a shared divisor and compare (key ideas, GRPO card).}
+\ans{Q4}{Work $\val{supturns}\times(\val{supmodel}+\val{suptool}) + \val{supassess} = \val{supwork}$ s. Cycles \val{supcoldcycle} s and \val{supsnapcycle} s:
+  (a) \val{supgain}$\times$ capacity: the short horizon left reset \val{supshare}\% of the cycle. (b)
+ Lags $\lfloor\val{lagshortage}/\val{lagstep}\rfloor$ = \val{lagshort} and
+  $\lfloor\val{laglongage}/\val{lagstep}\rfloor$ = \val{laglong}: only the first enters; the long one is excluded (cycle card).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Bigger groups or easier tasks?}
+Groups of \val{group} on tasks the policy passes \val{phard}\% of the time. Double the group, or target
+tasks it passes about \val{ptarget}\%?\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\sc{110/\val{perbig}}
+  \foreach \lab/\v/\y/\sty in {{groups of \val{group}, \val{phard}\%}/\val{perhard}/34/nbox, {groups of \val{groupbig}, \val{phard}\%}/\val{perbig}/17/nbox, {groups of \val{group}, \val{ptarget}\%}/\val{pertarget}/0/hotbox}{
+    \node[lab, anchor=east] at (92,\y+6) {\lab};
+    \draw[\sty] (96,\y) rectangle ({96+\v*\sc},\y+12);
+    \node[note, anchor=west] at ({100+\v*\sc},\y+6) {\v};}
+\end{tikzpicture}\par}\vspace{4pt}
+\begin{steps}
+\item All fail: $\val{missfrac}^{\val{group}} = \val{allfail}$ (all pass is negligible), so $\GroupContrastProbability = \val{contrasthard}$;
+  $\val{group} \div \val{contrasthard}$ = \res{\val{perhard}} rollouts.
+\item Double: $\val{missfrac}^{\val{groupbig}} = \val{allfailbig}$, $\GroupContrastProbability = \val{contrastbig}$;
+  $\val{groupbig} \div \val{contrastbig}$ = \res{\val{perbig}} rollouts.
+\item Target: ties $2\times\val{ptargetfrac}^{\val{group}} = \val{tietarget}$, $\GroupContrastProbability = \val{contrasttarget}$;
+  $\val{group} \div \val{contrasttarget}$ = \res{\val{pertarget}} rollouts.
+\item Targeting wins: \val{perhard} $\div$ \val{pertarget} = \res{\val{saving}$\times$} fewer rollouts.
+\end{steps}
+\takeaway{Difficulty moves contrast more than group size; log the changed task mix.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{The same choice at a moderate pass rate}
+The mix now passes \val{pmod}\%; \assumed{} the \val{pmod}\% rate holds for groups of \val{groupbig}.\par\vspace{4pt}
+\textbf{Given:} all fail with $\val{missmodfrac}^{\val{group}} = \val{allfailmod}$; all pass is negligible.\par
+\textbf{You:} rollouts per informative group at \val{group} and \val{groupbig}; is retargeting still worth much?\par\vspace{30pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``The verifier wrongly accepts only \val{faeps}\% of failures, so the rewards are sound.''}%
+  {It accepts every pass. At a \val{fapass}\% pass rate: $(1-\val{fapassfrac})\times\val{faepsfrac}$ = \val{fanum} false against \val{fapassfrac} true,
+   so \val{fashare}\% of rewards go to failures; at \val{falowpass}\% pass, \val{falowshare}\%.}{}
+\mistake{``A faster environment reset speeds training in proportion.''}%
+  {Reset from \val{slotcold} s to \val{slotsnap} ms is \val{resetratio}$\times$ faster, but
+   \val{slotturns} turns of \val{slotmodel} + \val{slottool} ms plus \val{slotassess} s of assessment stay:
+   \val{slotcoldcycle} s $\div$ \val{slotsnapcycle} s = \val{capacityratio}$\times$ capacity.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} a group of \val{qgroup} rollouts, one passing. (a) Each coefficient? (b) The pass came from a
+  \texttt{conftest.py} rewriting failures as passes. Its coefficient, and the fix?
+\item \assumed{} $\FormatRewardWeight = \val{wformat}$, $\LengthPenaltyWeight = \val{wlength}$. Does every pass outrank
+  every failure? Which rule decides, and what length weight is safe?
+\item \assumed{} training reward climbs from \val{rewardstart}\% to \val{rewardend}\%; held-out acceptance is flat and
+  failures grow longer. Name two causes and the evidence for each.
+\item \assumed{} a support agent's refund check: \val{supturns} turns of \val{supmodel} s model and \val{suptool} s tool,
+  \val{supassess} s assessment; reset \val{supcold} s cold or \val{supsnap} s from a snapshot. (a) Capacity gain,
+  and why? (b) Its trainer steps every \val{lagstep} s with lag bound \val{lagbound}. Rollouts reach the check
+  \val{lagshortage} s and \val{laglongage} s after their first token: which pass?
+\end{qs}
+\end{rightcol}
+\end{document}

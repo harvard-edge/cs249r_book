@@ -1,8 +1,9 @@
 from typing import Dict, Any, List, Optional, Callable
 from pydantic import BaseModel, Field
-import logging
 import itertools
+import logging
 import math
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -48,18 +49,20 @@ class DSE:
 
         if ":" in objective:
             direction, metric = [part.strip() for part in objective.split(":", 1)]
-        elif "minimize" in objective.lower():
-            direction, metric = "minimize", objective.replace("minimize", "").strip("() ")
-        elif "maximize" in objective.lower():
-            direction, metric = "maximize", objective.replace("maximize", "").strip("() ")
         else:
-            raise ValueError(f"Invalid objective format: '{objective}'.")
+            m = re.match(r"^\s*(minimize|maximize)\s*\((.+)\)\s*$", objective, flags=re.IGNORECASE)
+            if m:
+                direction, metric = m.group(1), m.group(2).strip()
+            else:
+                raise ValueError(f"Invalid objective format: '{objective}'.")
 
+        if not metric:
+            raise ValueError(f"Invalid objective format: '{objective}'.")
         self.objective = Objective(direction=direction.lower(), metric=metric)
         self.constraints = [Constraint(expression=c) for c in (constraints or [])]
 
-    def _get_metric_value(self, evaluation: Any, metric_path: str) -> float:
-        """Helper to extract a metric value via dotted path (e.g. 'performance.metrics.latency')."""
+    def _extract_raw_metric(self, evaluation: Any, metric_path: str) -> Optional[float]:
+        """Extract a numeric metric via dotted path, returning None when missing/non-numeric."""
         parts = metric_path.split(".")
         current = evaluation
         for part in parts:
@@ -72,17 +75,23 @@ class DSE:
             else:
                 raise ValueError(f"Unknown metric path: {metric_path!r}")
 
+        if current is None or isinstance(current, bool):
+            return None
         try:
-            if current is None:
-                return float("inf") if self.objective.direction == "minimize" else -float("inf")
-
-            # Handle pint Quantities if needed
             val = getattr(current, "magnitude", current)
-            if val is None:
-                return float("inf") if self.objective.direction == "minimize" else -float("inf")
-            return float(val)
+            if val is None or isinstance(val, bool):
+                return None
+            fval = float(val)
+            return fval if not math.isnan(fval) else None
         except (ValueError, TypeError):
+            return None
+
+    def _get_metric_value(self, evaluation: Any, metric_path: str) -> float:
+        """Helper to extract an objective metric value via dotted path."""
+        raw = self._extract_raw_metric(evaluation, metric_path)
+        if raw is None:
             return float("inf") if self.objective.direction == "minimize" else -float("inf")
+        return raw
 
     def search(self, evaluator_fn: Callable[[Dict[str, Any]], Any]) -> Dict[str, Any]:
         """Enumerate a finite design grid and rank accepted evaluations.
@@ -158,22 +167,27 @@ class DSE:
             try:
                 result = evaluator_fn(params)
 
-                # Check feasibility if present
-                if hasattr(result, "feasibility") and result.feasibility.status != "PASS":
+                # Check feasibility if present (SKIPPED is allowed for distributed scorecards)
+                if hasattr(result, "feasibility") and result.feasibility.status not in {"PASS", "SKIPPED"}:
                     continue
 
             except Exception as e:
                 logger.debug(f"Candidate {params} failed evaluation: {e}")
                 continue
 
-            obj_val = self._get_metric_value(result, self.objective.metric)
+            raw_obj = self._extract_raw_metric(result, self.objective.metric)
+            if raw_obj is None:
+                continue
+            obj_val = raw_obj
 
             # Evaluate constraints
             if self.constraints:
                 skip = False
                 for metric_path, op, threshold in parsed_constraints:
-                    val = self._get_metric_value(result, metric_path)
-                    if op == "<" and not (val < threshold):
+                    val = self._extract_raw_metric(result, metric_path)
+                    if val is None:
+                        skip = True
+                    elif op == "<" and not (val < threshold):
                         skip = True
                     elif op == ">" and not (val > threshold):
                         skip = True

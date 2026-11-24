@@ -24,7 +24,7 @@ def wilson_interval(successes: int, trials: int, confidence: float = .95) -> tup
     if isinstance(successes, bool) or not isinstance(successes, int) or not 0 <= successes <= trials:
         raise ValueError('Detected encounters must be an integer within the trial count')
     if not 0 < confidence < 1:
-        raise ValueError('Confidence must lie strictly between zero and one')
+        raise ValueError('Confidence must lie between zero and one')
     z = NormalDist().inv_cdf((1 + confidence) / 2)
     rate = successes / trials
     denominator = 1 + z*z/trials

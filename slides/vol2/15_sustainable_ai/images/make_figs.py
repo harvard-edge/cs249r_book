@@ -75,7 +75,7 @@ def power_energy(k, size=(5.6, 3.4), fs=16):
         ax.bar(0, v, bottom=bottom, color=col, width=0.6)
         ax.text(0.36, bottom + v / 2, lab, va='center', ha='left', fontsize=fs - 3, color=col, fontweight='bold')
         bottom += v
-    ax.text(0, P_FAC + 0.5, '17.7 MW', ha='center', va='bottom', fontsize=fs, fontweight='bold')
+    ax.text(0.08, P_FAC + 0.5, '17.66 MW', ha='center', va='bottom', fontsize=fs - 1, fontweight='bold')
     ax.set_xlim(-0.45, 1.25)
     ax.set_ylim(0, 22)
     ax.set_ylabel('MW', fontsize=fs - 2)
@@ -88,7 +88,7 @@ def power_energy(k, size=(5.6, 3.4), fs=16):
     bx.fill_between(t, 0, p, color=C['compute_l'], alpha=a, lw=0)
     bx.plot(t, p, color=C['compute'], lw=2.5, alpha=a)
     bx.text(HOURS / 48, P_FAC / 2, '33.2 GWh', ha='center', va='center', fontsize=fs + 2, fontweight='bold', color=C['compute'], alpha=a)
-    bx.text(HOURS / 48, P_FAC / 2 - 4.2, '17.7 MW × 1,882 h', ha='center', va='center', fontsize=fs - 3, color=C['text'], alpha=a)
+    bx.text(HOURS / 48, P_FAC / 2 - 4.2, '17.66 MW × 1,882 h', ha='center', va='center', fontsize=fs - 3, color=C['text'], alpha=a)
     bx.set_xlim(0, 90)
     bx.set_ylim(0, 22)
     bx.set_xlabel('Days', fontsize=fs - 2, alpha=max(a, 0.0))
@@ -257,7 +257,7 @@ def breakeven_fig(k, size=(4.4, 2.6), fs=16):
     ax.axhline(EMBODIED_KG, color='#8B5A2B', lw=2.2, ls='--')
     ax.text(1.15, EMBODIED_KG - 12, '164 kg to make', va='top', fontsize=fs - 2, color='#8B5A2B', fontweight='bold')
     ax.axvline(life_days, color=C['neutral'], lw=1.2, ls=':')
-    ax.text(life_days * 0.93, 8, '3-year\nlife', ha='right', va='bottom', fontsize=fs - 3, color=C['neutral'])
+    ax.text(life_days * 0.90, 288, '3-year\nlife', ha='right', va='top', fontsize=fs - 3, color=C['neutral'])
     if k >= 2:
         us = saved_kwh_day * GRID['US average'] / 1000 * days
         ax.plot(days, us, color=C['danger'], lw=3)
@@ -269,7 +269,7 @@ def breakeven_fig(k, size=(4.4, 2.6), fs=16):
         ax.plot(days, qc, color=C['data'], lw=3)
         d = EMBODIED_KG / (saved_kwh_day * GRID['Quebec'] / 1000)
         ax.plot(d, EMBODIED_KG, 'o', ms=10, color=C['data'])
-        ax.text(d * 0.6, 215, 'Quebec:\n2.7 years', ha='right', fontsize=fs - 1, fontweight='bold', color=C['data'])
+        ax.text(d * 0.58, 190, 'Quebec:\n2.7 years', ha='right', fontsize=fs - 1, fontweight='bold', color=C['data'])
     ax.set_xscale('log')
     ax.set_xlim(1, 1500)
     ax.set_ylim(0, 300)
@@ -286,25 +286,27 @@ BLOOM = [('176B (final run)', 'danger', 24.69), ('104B', 'memory', 15.19), ('1B'
 BLOOM = [(n, v, ck) for n, ck, v in BLOOM]
 sp.hbars(out / 'bloom_dev.svg', [(n, v, ck, f'{v:g} t') for n, v, ck in BLOOM], 't', log=False, size=(5.8, 2.7), xlabel='t CO$_2$eq, dynamic GPU energy, French grid 57 g/kWh')
 
-def crossover_fig(size=(5.4, 3.3), fs=14):
+def crossover_fig(k, size=(5.4, 3.3), fs=14):
     fig, ax = plt.subplots(figsize=size)
     days = np.linspace(0, 200, 300)
     daily = 240.0
     serve = daily * days
     ax.axhline(E_FAC / 1000, color=C['neutral'], lw=2.5)
     ax.text(3, E_FAC / 1000 + 1.2, 'training once: 33.2 GWh', fontsize=fs - 1, color=C['neutral'], fontweight='bold')
-    ax.plot(days, serve / 1000, color=C['compute'], lw=3)
+    a2 = 1.0 if k >= 2 else 0.0
+    ax.plot(days, serve / 1000, color=C['compute'], lw=3, alpha=a2)
     d = 138.523
-    ax.plot(d, E_FAC / 1000, 'o', ms=11, color=C['compute'])
-    ax.text(d + 6, E_FAC / 1000 - 6, 'day 139', fontsize=fs, fontweight='bold', color=C['compute'])
-    ax.text(110, 10, 'serving: 1 billion\nprompts a day\nat 0.24 Wh', fontsize=fs - 0.5, color=C['compute'], fontweight='bold')
+    ax.plot(d, E_FAC / 1000, 'o', ms=11, color=C['compute'], alpha=a2)
+    ax.text(d + 6, E_FAC / 1000 - 6, 'day 139', fontsize=fs, fontweight='bold', color=C['compute'], alpha=a2)
+    ax.text(110, 10, 'serving: 1 billion\nprompts a day\nat 0.24 Wh', fontsize=fs - 0.5, color=C['compute'], fontweight='bold', alpha=a2)
     ax.set_xlim(0, 200)
     ax.set_ylim(0, 50)
     ax.set_xlabel('Days of service', fontsize=fs - 1)
     ax.set_ylabel('Facility GWh', fontsize=fs - 1)
     ax.tick_params(labelsize=fs - 3)
-    sp.save(fig, out / 'crossover.svg')
-crossover_fig()
+    sp.save(fig, out / f'crossover_step{k}.svg')
+for k in (1, 2):
+    crossover_fig(k)
 
 def edge_fig(size=(5.6, 2.0), fs=14):
     fig, ax = plt.subplots(figsize=size)
@@ -363,18 +365,27 @@ def eu_week(k, size=(5.8, 2.5), fs=13.5):
         for i0, ck, lab in ((hi, 'danger', '36% fossil'), (lo, 'data', '23% fossil')):
             ax.axvspan(hrs[i0], hrs[i0 + span], color=C[ck + '_l'], zorder=0)
             ax.text(hrs[i0] + 11.5, 46.5, '24-h job\n' + lab, ha='center', va='top', fontsize=fs - 1, fontweight='bold', color=C[ck])
+    if k >= 3:
+        ax.add_patch(Rectangle((hrs[hi], 13.4), span, 3.6, fc=C['danger_l'], ec=C['danger'], lw=1.4, zorder=3))
+        ax.text(hrs[hi] + 11.5, 15.2, 'pause', ha='center', va='center', fontsize=fs - 2.5, fontweight='bold', color=C['danger'], zorder=4)
+        ax.add_patch(Rectangle((hrs[lo], 13.4), span, 3.6, fc=C['data'], ec=C['data'], lw=1.4, zorder=3))
+        ax.text(hrs[lo] + 11.5, 15.2, 'resume', ha='center', va='center', fontsize=fs - 2.5, fontweight='bold', color='white', zorder=4)
+        ax.annotate('', xy=(hrs[lo] - 1.5, 15.2), xytext=(hrs[hi] + span + 1.5, 15.2), arrowprops=dict(arrowstyle='-|>', color=C['text'], lw=1.8), zorder=4)
+        ax.text((hrs[hi] + span + hrs[lo]) / 2, 16.5, 'ckpt', ha='center', va='bottom', fontsize=fs - 2.5, fontweight='bold', color=C['text'], zorder=4)
+        ax.axvline(132, color=C['text'], ls='--', lw=1.4, zorder=2)
+        ax.text(134, 15.2, 'deadline', ha='left', va='center', fontsize=fs - 2.5, fontweight='bold', color=C['text'], zorder=4)
     days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
     ax.set_xticks([12 + 24 * i for i in range(7)])
     ax.set_xticklabels(days)
     ax.tick_params(labelsize=fs - 1)
     ax.set_xlim(0, 168)
-    ax.set_ylim(15, 47)
+    ax.set_ylim(12.2, 47.5)
     ax.set_yticks([20, 30, 40])
     ax.set_yticklabels(['20%', '30%', '40%'])
     ax.set_ylabel('Fossil share\nof generation', fontsize=fs - 1)
     sp.save(fig, out / f'euweek_step{k}.svg')
     return (roll[lo], roll[hi])
-for k in (1, 2):
+for k in (1, 2, 3):
     EU_LO, EU_HI = eu_week(k)
 
 def jevons_fig(k, size=(5.4, 3.2), fs=14):
@@ -394,27 +405,70 @@ def jevons_fig(k, size=(5.4, 3.2), fs=14):
 for k in (1, 2):
     jevons_fig(k)
 
-def lbnl_fig(size=(5.4, 3.3), fs=14):
+def lbnl_fig(k, size=(5.4, 3.3), fs=14):
     fig, ax = plt.subplots(figsize=size)
     y14, y24 = (58.0, 192.0)
     lo, ref, hi = (521.0, 649.0, 843.0)
     ax.bar(0, y14, color=C['neutral'], width=0.6)
     ax.bar(1, y24, color=C['memory'], width=0.6)
-    ax.bar(2, lo, color=C['danger_l'], edgecolor=C['danger'], hatch='//', width=0.6, lw=1)
-    ax.add_patch(Rectangle((1.7, lo), 0.6, hi - lo, fill=False, edgecolor=C['danger'], ls='--', lw=1.5))
-    ax.plot([1.7, 2.3], [ref, ref], color=C['danger'], lw=3)
+    a2 = 1.0 if k >= 2 else 0.0
+    ax.bar(2, lo, color=C['danger_l'], edgecolor=C['danger'], hatch='//', width=0.6, lw=1, alpha=a2)
+    ax.add_patch(Rectangle((1.7, lo), 0.6, hi - lo, fill=False, edgecolor=C['danger'], ls='--', lw=1.5, alpha=a2))
+    ax.plot([1.7, 2.3], [ref, ref], color=C['danger'], lw=3, alpha=a2)
     for x, key, ck in ((0, 'us_2014_twh', 'neutral'), (1, 'us_2024_twh', 'memory')):
         ax.text(x, {'us_2014_twh': 58.0, 'us_2024_twh': 192.0}[key] + 15, f"{ {'us_2014_twh': '58', 'us_2024_twh': '192'}[key]} TWh", ha='center', fontsize=fs, fontweight='bold', color=C[ck])
-    ax.text(2.36, ref, '649 TWh\nreference', va='center', fontsize=fs - 2, fontweight='bold', color=C['danger'])
-    ax.text(2.36, hi, '843', va='center', fontsize=fs - 3, color=C['danger'])
-    ax.text(2.36, lo, '521', va='center', fontsize=fs - 3, color=C['danger'])
+    ax.text(2.36, ref, '649 TWh\nreference', va='center', fontsize=fs - 2, fontweight='bold', color=C['danger'], alpha=a2)
+    ax.text(2.36, hi, '843', va='center', fontsize=fs - 3, color=C['danger'], alpha=a2)
+    ax.text(2.36, lo, '521', va='center', fontsize=fs - 3, color=C['danger'], alpha=a2)
     ax.set_xticks([0, 1, 2])
     ax.set_xticklabels(['2014', '2024', '2030\nprojected'])
     ax.tick_params(labelsize=fs - 2)
     ax.set_xlim(-0.5, 3.0)
     ax.set_ylim(0, 920)
     ax.set_ylabel('US data-center TWh', fontsize=fs - 2)
-    sp.save(fig, out / 'lbnl.svg')
-lbnl_fig()
+    sp.save(fig, out / f'lbnl_step{k}.svg')
+for k in (1, 2):
+    lbnl_fig(k)
+
+def recall_pgd8(size=(3.6, 1.25), fs=12.5):
+    fig, ax = plt.subplots(figsize=size)
+    ax.barh(1, 1, height=0.58, color=C['compute'], edgecolor='white', lw=1.2)
+    ax.text(-0.18, 1, 'Standard', ha='right', va='center', fontsize=fs, fontweight='bold', color=C['text'])
+    ax.text(1.22, 1, '1 pass', ha='left', va='center', fontsize=fs, fontweight='bold', color=C['compute'])
+    for i in range(7):
+        ax.barh(0, 1, left=i, height=0.58, color=C['danger'], edgecolor='white', lw=1.2)
+    ax.barh(0, 1, left=7, height=0.58, color=C['compute'], edgecolor='white', lw=1.2)
+    ax.text(-0.18, 0, 'PGD-7', ha='right', va='center', fontsize=fs, fontweight='bold', color=C['text'])
+    ax.text(3.5, 0, '7 attack', ha='center', va='center', fontsize=fs - 1, fontweight='bold', color='white')
+    ax.text(8.22, 0, '8×', ha='left', va='center', fontsize=fs, fontweight='bold', color=C['danger'])
+    ax.set_xlim(0, 9.6)
+    ax.set_ylim(-0.55, 1.55)
+    hide_axis(ax)
+    sp.save(fig, out / 'recall_pgd8.svg')
+
+def power_cap(k, size=(4.4, 2.5), fs=12.5):
+    fig, ax = plt.subplots(figsize=size)
+    ax.add_patch(Rectangle((0, 0), 3.0, 120, fc=C['danger_l'], ec=C['danger'], lw=2.0, hatch='//', zorder=2))
+    ax.text(1.5, 100, '120 MW × 3 d\n(exceeds cap)', ha='center', va='center', fontsize=fs - 0.5, fontweight='bold', color=C['danger'], zorder=4)
+    if k >= 2:
+        ax.add_patch(Rectangle((0, 0), 4.5, 80, fc=C['data_l'], ec=C['data'], lw=2.4, alpha=0.88, zorder=3))
+        ax.text(2.25, 40, '80 MW × 4.5 d\n= same 8.64 GWh\n(67% concurrency)', ha='center', va='center', fontsize=fs - 0.5, fontweight='bold', color=C['data'], zorder=5)
+    else:
+        ax.text(1.5, 40, '8.64 GWh total', ha='center', va='center', fontsize=fs - 0.5, fontweight='bold', color=C['text'], zorder=4)
+    ax.axhline(80, color=C['danger'], ls='--', lw=2.2, zorder=6)
+    ax.text(4.92, 84, '80 MW ceiling', ha='right', va='bottom', fontsize=fs - 0.5, fontweight='bold', color=C['danger'], zorder=6)
+    ax.set_xlim(0, 5.0)
+    ax.set_ylim(0, 138)
+    ax.set_xticks([0, 1, 2, 3, 4, 4.5])
+    ax.set_xticklabels(['0', '1', '2', '3', '4', '4.5'])
+    ax.set_yticks([0, 40, 80, 120])
+    ax.set_xlabel('Duration (days)', fontsize=fs)
+    ax.set_ylabel('Power (MW)', fontsize=fs)
+    ax.tick_params(labelsize=fs - 1)
+    sp.save(fig, out / f'power_cap_step{k}.svg')
+
+recall_pgd8()
+for k in (1, 2):
+    power_cap(k)
 if __name__ == '__main__':
     print(f'EU 24-h fossil share {EU_LO:.1f} to {EU_HI:.1f}%')

@@ -94,8 +94,9 @@ def calc_reflected_inertia(gear_ratio: float, rotor_inertia):
     True
     """
     validate_at_least(gear_ratio, 1.0, "gear_ratio")
+    validate_positive(rotor_inertia, "rotor_inertia")
     reflected = (gear_ratio**2) * rotor_inertia
-    return reflected
+    return reflected.to(ureg.kilogram * ureg.meter**2)
 
 
 def calc_seam_acceleration_torque_jump(gear_ratio: float, rotor_inertia, delta_accel):
@@ -229,6 +230,9 @@ def calc_inverted_pendulum_fall_time(
         validate_positive(gravity, "gravity")
 
     tau_0 = ((effective_length / gravity) ** 0.5).to(ureg.second)
+
+    if (theta_0 is None) != (theta_fall is None):
+        raise ValueError("theta_0 and theta_fall must both be provided or both be omitted.")
 
     if theta_0 is not None and theta_fall is not None:
         th0 = theta_0.to(ureg.radian).magnitude if hasattr(theta_0, "to") else float(theta_0)
@@ -475,12 +479,15 @@ def calc_alpha_power_gate_delay_stretch(
     """
     validate_positive(nominal_voltage, "nominal_voltage")
     validate_positive(drooped_voltage, "drooped_voltage")
+    validate_positive(alpha, "alpha")
 
     v_th = (0.42 * ureg.volt) if threshold_voltage is None else threshold_voltage
     v_nom = nominal_voltage.to(ureg.volt).magnitude
     v_drop = drooped_voltage.to(ureg.volt).magnitude
     v_t = v_th.to(ureg.volt).magnitude
 
+    if v_nom <= v_t:
+        raise ValueError(f"Nominal voltage {v_nom} V is below or at threshold voltage {v_t} V (circuit stalls).")
     if v_drop <= v_t:
         raise ValueError(f"Drooped voltage {v_drop} V is below or at threshold voltage {v_t} V (circuit stalls).")
 

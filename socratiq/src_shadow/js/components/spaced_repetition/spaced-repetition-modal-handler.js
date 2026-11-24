@@ -17,6 +17,7 @@ import { SpacedRepetitionInitializationHandler } from "./handlers/initialization
 import { DeckCreationHandler } from "./handlers/deck-creation-handler.js";
 // import { checkStorageSupport } from "./utils/sqlite-checker.js";
 import { getThemeManager } from "../../libs/utils/theme-manager.js";
+import { resolveChapterTaxonomy, TAXONOMY_SUBJECTS } from "../../../../src_shared/taxonomy-map.js";
 
 export class SpacedRepetitionModal {
   static instance = null;
@@ -68,59 +69,59 @@ export class SpacedRepetitionModal {
     this.fallbackStorage = false;
     this.themeManager = getThemeManager(shadowRoot);
     // Create modal first
-this.createModal().then(async () => {
-  this.eventHandler = new SpacedRepetitionEventHandler(this);
+    this.readyPromise = this.createModal().then(async () => {
+      this.eventHandler = new SpacedRepetitionEventHandler(this);
 
-  try {
-    console.log('[DEBUG] 1. Attempting to initialize storage...');
-    await this.initializeStorage();
-    
-    console.log('[DEBUG] 2. Storage handler assigned. Type:', this.storageHandler?.constructor.name);
-    await this.storageHandler.initializeDatabase();
-    
-    console.log('[DEBUG] 3. Database initialized. Setting up interaction handler...');
-    this.interactionHandler = new SpacedRepetitionInteractionHandler(
-      this,
-      this.storageHandler,
-      this.shadowRoot
-    );
+      try {
+        console.log('[DEBUG] 1. Attempting to initialize storage...');
+        await this.initializeStorage();
+        
+        console.log('[DEBUG] 2. Storage handler assigned. Type:', this.storageHandler?.constructor.name);
+        await this.storageHandler.initializeDatabase();
+        
+        console.log('[DEBUG] 3. Database initialized. Setting up interaction handler...');
+        this.interactionHandler = new SpacedRepetitionInteractionHandler(
+          this,
+          this.storageHandler,
+          this.shadowRoot
+        );
 
-    console.log('[DEBUG] 4. Core handlers initialized. Setting up UI handlers...');
-    this.uiHandler = new SpacedRepetitionUIHandler(this);
-    this.searchHandler = new SpacedRepetitionInnerSearchModal(this);
-    this.deckCreationHandler = new DeckCreationHandler(this);
+        console.log('[DEBUG] 4. Core handlers initialized. Setting up UI handlers...');
+        this.uiHandler = new SpacedRepetitionUIHandler(this);
+        this.searchHandler = new SpacedRepetitionInnerSearchModal(this);
+        this.deckCreationHandler = new DeckCreationHandler(this);
 
-    console.log('[DEBUG] 5. UI handlers set up. Initializing editors...');
-    this.initializeEditors();
+        console.log('[DEBUG] 5. UI handlers set up. Initializing editors...');
+        this.initializeEditors();
 
-    console.log('[DEBUG] 6. Loading data from storage...');
-    let loadedData = await this.storageHandler.loadFromLocalStorage(true);
+        console.log('[DEBUG] 6. Loading data from storage...');
+        let loadedData = await this.storageHandler.loadFromLocalStorage(true);
 
-    console.log('[DEBUG] 7. Initial data loaded. Setting up first-time user...');
-    await this.setupInitialization();
+        console.log('[DEBUG] 7. Initial data loaded. Setting up first-time user...');
+        await this.setupInitialization();
 
-    console.log('[DEBUG] 8. Re-loading data after setup...');
-    loadedData = await this.storageHandler.loadFromLocalStorage(true);
+        console.log('[DEBUG] 8. Re-loading data after setup...');
+        loadedData = await this.storageHandler.loadFromLocalStorage(true);
 
-    this.currentChapter = loadedData.currentChapter;
-    this.chapterSets = loadedData.chapterSets;
-    this.flashcards = loadedData.flashcards;
+        this.currentChapter = loadedData.currentChapter;
+        this.chapterSets = loadedData.chapterSets;
+        this.flashcards = loadedData.flashcards;
 
-    console.log('[DEBUG] 9. Data loaded into component state. Rendering UI...');
-    this.renderChapters(true);
-    this.showAllCards();
-    this.uiHandler.updateProgress();
-    this.renderTags();
-    this.floatingControlsHandler = new FloatingControlsHandler(this);
-    this.setupEventListeners();
-    console.log('[DEBUG] 10. Initialization complete.');
+        console.log('[DEBUG] 9. Data loaded into component state. Rendering UI...');
+        this.seedStarterChapterCardsIfNeeded();
+        this.renderChapters(true);
+        this.showAllCards();
+        this.uiHandler.updateProgress();
+        this.renderTags();
+        this.floatingControlsHandler = new FloatingControlsHandler(this);
+        this.setupEventListeners();
+        console.log('[DEBUG] 10. Initialization complete.');
 
-  } catch (error) {
-    console.error("❌ FATAL INITIALIZATION FAILURE:", error);
-    // Optionally display an error message in the UI here
-    return;
-  }
-});
+      } catch (error) {
+        console.error("❌ FATAL INITIALIZATION FAILURE:", error);
+        return;
+      }
+    });
 
     // Rest of constructor code...
     this.debouncedUpdate = this.debounce(() => {
@@ -231,7 +232,7 @@ this.createModal().then(async () => {
 
             <div 
                 id="sr-modal-content_inner"
-                class="relative top-10 mx-auto mb-6 p-5 w-[90%] max-w-4xl shadow-lg rounded-md ${themeClasses.modalBg}"
+                class="relative top-10 mx-auto mb-6 p-3 sm:p-6 w-[90%] max-w-4xl shadow-lg rounded-md ${themeClasses.modalBg}"
                style="max-height: calc(100vh - 80px); background-color: var(--socratiq-bg) !important; color: var(--socratiq-text) !important; display: flex; flex-direction: column;"
                 >
                     <!-- Close button -->
@@ -242,7 +243,7 @@ this.createModal().then(async () => {
 </button>
                     <div class="grid grid-cols-4 mt-8 gap-4" style="flex: 1; min-height: 0; overflow: hidden;">
                         <!-- Sidebar -->
-                        <div id="sr-sidebar" class="col-span-1 border-r overflow-y-auto ${themeClasses.border} pr-4" style="max-height: 100%; overflow-y: auto;">
+                        <div id="sr-sidebar" class="col-span-1 border-r max-h-[180px] overflow-y-auto sm:max-h-none ${themeClasses.border} pr-4" style="max-height: 100%; overflow-y: auto;">
                         <!-- Search input -->
                         <div class="relative mb-4">
                             <input type="text" 
@@ -251,7 +252,7 @@ this.createModal().then(async () => {
                                 style="background-color: ${isDark ? '#21262d' : '#ffffff'} !important; color: ${isDark ? '#e6edf3' : '#1f2328'} !important; border-color: ${isDark ? '#30363d' : '#d0d7de'} !important;" 
                                 placeholder="Search all...">
                             <svg class="absolute left-3 top-2.5 h-4 w-4 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" stroke="#4169E1"></path>
+                                <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" stroke="currentColor"></path>
                             </svg>
 
                         </div>
@@ -278,14 +279,14 @@ this.createModal().then(async () => {
                         <div>
                             <button class="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-zinc-800/50 rounded-md">
                                 <div class="flex items-center gap-2">
-                                    <svg class="w-4 h-4 transform transition-transform" data-dropdown="tags" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="transform: rotate(180deg);">
+                                    <svg class="w-4 h-4 transform transition-transform" data-dropdown="tags" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="transform: rotate(${typeof window !== 'undefined' && window.innerWidth <= 640 ? '0deg' : '180deg'});">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
                                     </svg>
                                     <span>Tags</span>
                                 </div>
                                 <span id="totalTagCount" class="text-xs">${this.getInitialTagCount()}</span>
                             </button>
-                            <div id="tagList" class="mt-1 space-y-1" style="max-height: 200px; overflow-y: auto;">
+                            <div id="tagList" class="mt-1 space-y-1 ${typeof window !== 'undefined' && window.innerWidth <= 640 ? 'hidden' : ''}" style="max-height: 200px; overflow-y: auto;">
                                 <!-- Tags will be rendered here -->
                             </div>
                         </div>
@@ -319,7 +320,7 @@ this.createModal().then(async () => {
                                 <button id="showViz" class="px-3 py-2 text-sm ${themeClasses.bgButton} ${themeClasses.bgButtonHover} rounded-md" style="color: var(--socratiq-text) !important;">
                                     Show Interactive UI
                                 </button>
-                                <button id="startReview" class="px-3 py-2 text-sm ${themeClasses.bgAccent} ${themeClasses.bgAccentHover} ${themeClasses.textAccent} rounded-md" style="color: ${isDark ? '#58a6ff' : '#0969da'} !important;">
+                                <button id="startReview" class="px-3 py-2 text-sm ${themeClasses.bgAccent} ${themeClasses.bgAccentHover} ${themeClasses.textAccent} rounded-md" style="color: var(--socratiq-accent) !important;">
                                     Review Cards
                                 </button>
                             </div>
@@ -394,7 +395,7 @@ this.createModal().then(async () => {
                                 <div class="relative">
                                     <div id="answerEditor" class="min-h-[200px] border rounded-md ${themeClasses.inputBorder}"></div>
                                     <button id="generateAnswer" class="absolute top-2 right-2 p-1.5 text-gray-500 hover:text-blue-800 rounded-md hover:bg-gray-100 dark:hover:bg-zinc-600">
-                                        <svg data-slot="icon" fill="none" stroke-width="1.5" stroke="#4169E1" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="w-5 h-5">
+                                        <svg data-slot="icon" fill="none" stroke-width="1.5" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="w-5 h-5">
                                             <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"></path>
                                         </svg>
                                     </button>
@@ -663,13 +664,13 @@ this.createModal().then(async () => {
             padding: 0 4px;
             margin: 0 2px;
             border-radius: 4px;
-            background-color: rgba(59, 130, 246, 0.1);
-            color: #3b82f6;
+            background-color: rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.1);
+            color: var(--socratiq-accent, #8e1537);
             font-weight: 500;
         }
         .dark .tag-highlight {
-            background-color: rgba(59, 130, 246, 0.2);
-            color: #60a5fa;
+            background-color: rgba(var(--socratiq-accent-rgb, 142, 21, 55), 0.2);
+            color: var(--socratiq-accent, #c77088);
         }
 
         /* Style both inline and multiline code blocks */
@@ -911,14 +912,14 @@ this.createModal().then(async () => {
     }
 
     newTags.forEach((tag) => {
-      if (!tagList.querySelector(`[data-tag="${tag}"]`)) {
+      if (!tagList.querySelector(`[data-tag="${CSS.escape(String(tag))}"]`)) {
         const tagButton = document.createElement("button");
         tagButton.className =
           "w-full text-left px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-zinc-700 flex items-center gap-2";
         tagButton.setAttribute("data-tag", tag);
         tagButton.innerHTML = `
                     <span class="text-gray-400">#</span>
-                    <span>${tag}</span>
+                    <span>${escapeSidebarText(tag)}</span>
                 `;
         tagList.appendChild(tagButton);
       }
@@ -937,8 +938,8 @@ this.createModal().then(async () => {
           .map(
             (tag) => `
                     <span class="tag inline-flex items-center px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                        #${tag.trim()}
-                        <button class="ml-1 text-blue-500 hover:text-blue-700" data-tag="${tag.trim()}">×</button>
+                        #${escapeSidebarText(tag.trim())}
+                        <button class="ml-1 text-blue-500 hover:text-blue-700" data-tag="${escapeSidebarText(tag.trim())}">×</button>
                     </span>
                 `
           )
@@ -1196,6 +1197,7 @@ this.createModal().then(async () => {
     const modal = this.shadowRoot.querySelector("#spacedRepetitionModal");
     if (modal) {
       modal.classList.remove("hidden");
+      modal.style.display = "";
 
       if(this.storageHandler) {
       // Add this line to track modal opens
@@ -1225,10 +1227,15 @@ this.createModal().then(async () => {
       } else {
       }
       
-      // Ensure chapters are rendered when modal is shown
-      if (this.storageHandler) {
-        this.renderChapters();
-      }
+      // Ensure chapters are rendered after storage load completes
+      Promise.resolve(this.readyPromise)
+        .then(() => {
+          if (this.storageHandler) {
+            this.seedStarterChapterCardsIfNeeded();
+            this.renderChapters();
+          }
+        })
+        .catch(() => {});
     }
 
     // Ensure modal is fully initialized before potentially starting onboarding
@@ -1238,6 +1245,133 @@ this.createModal().then(async () => {
         // this.onboardingHandler.startOnboarding();
       }
     });
+  }
+
+  seedStarterChapterCardsIfNeeded() {
+    if (!this.currentChapter || !this.storageHandler) return;
+    const currentUrl = typeof window !== "undefined" ? (window.location?.href || "") : "";
+    const tax = resolveChapterTaxonomy(currentUrl);
+    if (!tax) return;
+    const chapterKey = this.currentChapter.chapter;
+    const seedKey = `${tax.volume || "vol1"}:${String(chapterKey)}`;
+    let seededMap = {};
+    try {
+      const rawSeeded = typeof localStorage !== "undefined" ? localStorage.getItem("socratiq_starter_cards_seeded_v1") : null;
+      if (rawSeeded) seededMap = JSON.parse(rawSeeded) || {};
+    } catch {}
+
+    const existing = this.chapterSets.get(chapterKey) || [];
+    if (existing.length > 0) {
+      try {
+        seededMap[seedKey] = true;
+        localStorage.setItem("socratiq_starter_cards_seeded_v1", JSON.stringify(seededMap));
+      } catch {}
+      return;
+    }
+    if (seededMap[seedKey]) return;
+
+    const chapterTitle = this.currentChapter.title || tax.chapterTitle || "Chapter 1: Introduction";
+    const subjectsList = Array.isArray(tax.subjects) && tax.subjects.length ? tax.subjects.join(", ") : tax.primaryGroup;
+    const isVol1Intro = (tax.volume === "vol1" || !tax.volume) && (tax.slug === "01_introduction" || /\bIntroduction\b/i.test(chapterTitle));
+
+    const firstSentenceAfter = (el) => {
+      let node = el ? el.nextElementSibling : null;
+      while (node && !/^H[1-3]$/.test(node.tagName)) {
+        const p = node.tagName === "P" ? node : node.querySelector?.("p");
+        const text = (p?.textContent || "").replace(/\s+/g, " ").trim();
+        if (text.length >= 24) {
+          const match = text.match(/^[^.!?]+[.!?]/);
+          return match ? match[0].trim() : text.slice(0, 220);
+        }
+        node = node.nextElementSibling;
+      }
+      return "";
+    };
+
+    let starterPairs;
+    if (isVol1Intro) {
+      starterPairs = [
+        {
+          q: `What are the three dimensions of the D·A·M taxonomy in ${chapterTitle}, and how do they interact?`,
+          a: `Data (D: samples per task and bytes moved), Algorithm (A: operations per sample), and Machine (M: execution time and energy per operation). Every ML systems decision couples all three dimensions.`,
+          tags: ["taxonomy", "DAM"],
+        },
+        {
+          q: `State the Iron Law of ML Systems performance and explain its three terms.`,
+          a: `End-to-end execution time is the sum of data movement time (D_vol / BW_eff), effective compute time (O_alg / (R_peak × η)), and coordination/synchronization overhead (T_sync).`,
+          tags: ["iron-law", "performance"],
+        },
+        {
+          q: `Where does ${chapterTitle} sit in the ML Systems Taxonomy (F/S/P/Q/T)?`,
+          a: `Primary group: ${tax.primaryGroup} — ${tax.groupTitle} (subject areas: ${subjectsList}). It defines the foundational system invariants that constrain downstream stack (S), lifecycle (P), and quality (Q) design choices.`,
+          tags: ["taxonomy", tax.primaryGroup],
+        },
+      ];
+    } else {
+      const h2Nodes = typeof document !== "undefined" ? Array.from(document.querySelectorAll("main h2, article h2")) : [];
+      const calloutDef = typeof document !== "undefined" ? document.querySelector("main .callout-definition, article .callout-definition") : null;
+      const calloutTitle = (calloutDef?.querySelector(".callout-title-container, .callout-header, strong")?.textContent || "").replace(/\s+/g, " ").trim();
+      const calloutBody = (calloutDef?.querySelector(".callout-body-container p, p")?.textContent || "").replace(/\s+/g, " ").trim();
+      const sec1Node = h2Nodes[0] || null;
+      const sec2Node = h2Nodes[1] || h2Nodes[0] || null;
+      const sec1Title = (sec1Node?.textContent || "").replace(/\s+/g, " ").trim() || chapterTitle;
+      const sec2Title = (sec2Node?.textContent || "").replace(/\s+/g, " ").trim() || chapterTitle;
+      const sec1Summary = (calloutTitle && calloutBody)
+        ? `${calloutTitle}: ${calloutBody}`
+        : (firstSentenceAfter(sec1Node) || `${sec1Title} establishes the core concepts for ${chapterTitle} (${tax.primaryGroup} · ${tax.groupTitle}).`);
+      const sec2Summary = firstSentenceAfter(sec2Node) || `${sec2Title} analyzes the concrete systems mechanisms and constraints in ${chapterTitle}.`;
+      const subjectDetails = (Array.isArray(tax.subjects) ? tax.subjects : [])
+        .map((code) => {
+          const info = TAXONOMY_SUBJECTS?.[code];
+          return info ? `${code} (${info.title}: ${info.focus})` : code;
+        })
+        .join("; ");
+
+      starterPairs = [
+        {
+          q: calloutTitle
+            ? `How does ${chapterTitle} define "${calloutTitle}" in section "${sec1Title}"?`
+            : `What core concept does section "${sec1Title}" introduce in ${chapterTitle}?`,
+          a: sec1Summary,
+          tags: ["section", tax.primaryGroup],
+        },
+        {
+          q: `What key mechanism is examined in section "${sec2Title}" of ${chapterTitle}?`,
+          a: sec2Summary,
+          tags: ["section", tax.primaryGroup],
+        },
+        {
+          q: `Which ML Systems Taxonomy (F/S/P/Q/T) subject areas does ${chapterTitle} cover?`,
+          a: `Primary group: ${tax.primaryGroup} — ${tax.groupTitle}. Subject coverage: ${subjectDetails || subjectsList}.`,
+          tags: ["taxonomy", tax.primaryGroup],
+        },
+      ];
+    }
+
+    const seededCards = starterPairs.map(({ q, a, tags }) => {
+      const card = new FlashCard(q, a);
+      card.chapter = chapterKey;
+      card.tags = tags;
+      return card;
+    });
+
+    this.chapterSets.set(chapterKey, seededCards);
+    this.flashcards = seededCards;
+    if (this.storageHandler.inMemoryData) {
+      this.storageHandler.inMemoryData.currentChapter = this.currentChapter;
+      this.storageHandler.inMemoryData.currentDeck = [...seededCards];
+    }
+    void Promise.resolve(this.storageHandler.saveToLocalStorage?.())
+      .then(() => {
+        try {
+          seededMap[seedKey] = true;
+          localStorage.setItem("socratiq_starter_cards_seeded_v1", JSON.stringify(seededMap));
+        } catch {}
+      })
+      .catch(() => {});
+    this.uiHandler?.updateProgress?.();
+    this.immediateUpdate(true);
+    this.visualization?.update?.(this.chapterSets);
   }
 
 
@@ -1387,29 +1521,29 @@ this.createModal().then(async () => {
     cardList.innerHTML = this.flashcards
       .map(
         (card) => `
-            <div class="rounded-lg p-4 shadow-sm" style="box-shadow: 0 10px 20px rgba(0, 0, 255, 0.5); background-color: ${isDark ? '#0d1117' : '#ffffff'} !important; color: ${isDark ? '#e6edf3' : '#1f2328'} !important;">
+            <div class="rounded-lg p-4 shadow-sm" style="box-shadow: 0 10px 20px var(--socratiq-accent-soft, rgba(142, 21, 55, 0.15)); background-color: ${isDark ? '#0d1117' : '#ffffff'} !important; color: ${isDark ? '#e6edf3' : '#1f2328'} !important;">
                 <div class="flex justify-between items-start mb-2">
-                    <h3 class="text-gray-900 dark:text-white">${
+                    <h3 class="text-gray-900 dark:text-white">${escapeSidebarText(
                       card.question
-                    }</h3>
+                    )}</h3>
                     <div class="flex space-x-2">
-                        <button class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" data-card-id="${
+                        <button class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" data-card-id="${escapeSidebarText(
                           card.id
-                        }" data-action="edit">
+                        )}" data-action="edit">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
                             </svg>
                         </button>
-                        <button class="text-gray-400 hover:text-red-600" data-card-id="${
+                        <button class="text-gray-400 hover:text-red-600" data-card-id="${escapeSidebarText(
                           card.id
-                        }" data-action="delete">
+                        )}" data-action="delete">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                             </svg>
                         </button>
                     </div>
                 </div>
-                <p class="text-gray-600 dark:text-gray-300">${card.answer}</p>
+                <p class="text-gray-600 dark:text-gray-300">${escapeSidebarText(card.answer)}</p>
                 ${
                   card.tags
                     ? `
@@ -1418,7 +1552,7 @@ this.createModal().then(async () => {
                           .map(
                             (tag) => `
                             <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                                #${tag}
+                                #${escapeSidebarText(tag)}
                             </span>
                         `
                           )
@@ -1448,203 +1582,6 @@ this.createModal().then(async () => {
 
     // Add after cards are rendered
     // this.dragHandler.initialize();
-  }
-
-  editCard(cardId) {
-    const card = this.flashcards.find((c) => c.id === cardId);
-    if (!card) return;
-
-    // Show form with existing values
-    const addCardForm = this.shadowRoot.querySelector("#addCardForm");
-    const questionInput = this.shadowRoot.querySelector("#questionInput");
-    const answerInput = this.shadowRoot.querySelector("#answerInput");
-    const tagContainer = this.shadowRoot.querySelector("#tagInputContainer");
-
-    if (addCardForm && questionInput && answerInput) {
-      questionInput.value = card.question;
-      answerInput.value = card.answer;
-      addCardForm.classList.remove("hidden");
-
-      // Add tags
-      if (card.tags) {
-        tagContainer.innerHTML = card.tags
-          .map(
-            (tag) => `
-                    <span class="tag inline-flex items-center px-2 py-1 rounded bg-blue-100 text-blue-700 text-sm">
-                        #${tag}
-                        <button class="ml-1 text-blue-500 hover:text-blue-700">×</button>
-                    </span>
-                `
-          )
-          .join("");
-      }
-
-      // Update save button to handle edit
-      const saveBtn = this.shadowRoot.querySelector("#saveCard");
-      if (saveBtn) {
-        saveBtn.dataset.editId = cardId;
-      }
-    }
-  }
-
-  deleteCard(cardId) {
-    if (!cardId) {
-      console.error("deleteCard called with undefined/null cardId");
-      return;
-    }
-    
-    try {
-      console.log("🗑️ deleteCard called with cardId:", cardId);
-      
-      // Check if we're in review mode and this is the current card
-      // SAFE: Use optional chaining and check for existence
-      let isCurrentCard = false;
-      let currentReviewIndex = -1;
-      
-      if (this.currentReview && this.currentReview.cards && Array.isArray(this.currentReview.cards)) {
-        currentReviewIndex = this.currentReview.currentIndex || 0;
-        const currentCard = this.currentReview.cards[currentReviewIndex];
-        if (currentCard && currentCard.id) {
-          isCurrentCard = currentCard.id === cardId;
-        }
-      }
-    
-    // PROBLEMATIC CODE FIXED: Filter undefined/null BEFORE accessing .id property
-    // This prevents "Cannot read properties of undefined (reading 'id')" errors
-    const safeFlashcards = (this.flashcards || []).filter(c => c != null && c.id != null);
-    const safeCurrentDeck = (this.storageHandler?.inMemoryData?.currentDeck || []).filter(c => c != null && c.id != null);
-    
-    // Find the original index in currentDeck (before filtering) for proper index adjustment
-    let originalIndexInCurrentDeck = -1;
-    if (this.storageHandler?.inMemoryData?.currentDeck) {
-      // SAFE: Check c != null FIRST before accessing c.id
-      originalIndexInCurrentDeck = this.storageHandler.inMemoryData.currentDeck.findIndex(c => {
-        if (c == null) return false; // Skip null/undefined
-        if (c.id == null) return false; // Skip elements without id
-        return c.id === cardId; // Match the cardId
-      });
-    }
-    
-    // Search in flashcards first, then currentDeck
-    let foundIn = null;
-    let index = safeFlashcards.findIndex((c) => c.id === cardId);
-    if (index !== -1) {
-      foundIn = 'flashcards';
-    } else if (originalIndexInCurrentDeck !== -1) {
-      foundIn = 'currentDeck';
-      index = originalIndexInCurrentDeck;
-    }
-    
-    if (index === -1) {
-      console.warn(`Card with id ${cardId} not found in any array`);
-      // Try to delete from storage anyway
-      this.storageHandler?.purgeCardFromMemory(cardId);
-      this.storageHandler?.saveToLocalStorage();
-      return;
-    }
-
-    // Update the original arrays by filtering - safely check for null BEFORE accessing id
-    if (foundIn === 'flashcards' && this.flashcards) {
-      // FIXED: Check c != null FIRST, then safely access c.id
-      this.flashcards = this.flashcards.filter(c => {
-        if (c == null) return false; // Remove undefined/null elements
-        if (c.id == null) return false; // Remove elements without id
-        return c.id !== cardId; // Remove the card we're deleting
-      });
-    }
-    
-    // currentDeck and currentReview.cards are the same reference, so update both
-    if ((foundIn === 'currentDeck' || foundIn === 'currentReview') && this.storageHandler?.inMemoryData?.currentDeck) {
-      // FIXED: Check c != null FIRST, then safely access c.id
-      const filteredDeck = this.storageHandler.inMemoryData.currentDeck.filter(c => {
-        if (c == null) return false; // Remove undefined/null elements
-        if (c.id == null) return false; // Remove elements without id
-        return c.id !== cardId; // Remove the card we're deleting
-      });
-      
-      // CRITICAL: Reassign to update the reference
-      this.storageHandler.inMemoryData.currentDeck = filteredDeck;
-      
-      // CRITICAL: Update currentReview.cards to point to the new filtered array
-      // (The old reference is broken after reassignment, so we need to update it)
-      if (this.currentReview) {
-        this.currentReview.cards = filteredDeck;
-      }
-      
-      // Adjust the currentIndex if we deleted the current card or one before it
-      if (this.currentReview && this.currentReview.cards) {
-        // originalIndexInCurrentDeck is the index before deletion
-        if (isCurrentCard || originalIndexInCurrentDeck < currentReviewIndex) {
-          // If we deleted the current card, go to previous card or stay at 0
-          if (isCurrentCard) {
-            if (this.currentReview.currentIndex > 0) {
-              this.currentReview.currentIndex--;
-            } else if (this.currentReview.cards.length > 0) {
-              // Stay at index 0, the card array already shifted
-              this.currentReview.currentIndex = 0;
-            } else {
-              // No cards left, close modal
-              const modal = this.shadowRoot.querySelector("#cardReviewModal");
-              if (modal) modal.classList.add("hidden");
-              this.currentReview = null;
-            }
-          } else {
-            // Deleted a card before current, adjust index down by 1
-            this.currentReview.currentIndex--;
-          }
-        }
-      }
-    }
-    
-    this.storageHandler.purgeCardFromMemory(cardId);
-    this.storageHandler.saveToLocalStorage();
-    this.uiHandler.updateProgress();
-    this.renderCards();
-
-    // Update visualization if visible
-    const vizContainer = this.shadowRoot.querySelector("#flashcardViz");
-    if (vizContainer && !vizContainer.classList.contains("hidden")) {
-      const safeCards = (this.flashcards || []).filter(c => c != null && c.id != null);
-      this.visualization.update(safeCards);
-    }
-    
-    // If we're in review mode and deleted a card, update the review modal
-    if (this.currentReview && isCurrentCard) {
-      const modal = this.shadowRoot.querySelector("#cardReviewModal");
-      if (modal && this.currentReview.cards && this.currentReview.cards.length > 0) {
-        // Ensure currentIndex is valid
-        if (this.currentReview.currentIndex >= this.currentReview.cards.length) {
-          this.currentReview.currentIndex = Math.max(0, this.currentReview.cards.length - 1);
-        }
-        
-        // Update the displayed card - safely check for undefined
-        const card = this.currentReview.cards[this.currentReview.currentIndex];
-        if (card && card.id && this.reviewEditor) {
-          this.reviewEditor.update(card.question);
-          this.updateNavigationButtons?.();
-        } else if (this.currentReview.cards.length === 0) {
-          // No cards left, close modal
-          modal.classList.add("hidden");
-          this.currentReview = null;
-        }
-      } else if (modal && (!this.currentReview.cards || this.currentReview.cards.length === 0)) {
-        // No cards left, close modal
-        modal.classList.add("hidden");
-        this.currentReview = null;
-      }
-    }
-    } catch (error) {
-      console.error("❌ Error in deleteCard:", error);
-      console.error("Error details:", {
-        cardId,
-        hasCurrentReview: !!this.currentReview,
-        currentReviewCards: this.currentReview?.cards,
-        currentReviewIndex: this.currentReview?.currentIndex,
-        flashcardsLength: this.flashcards?.length,
-        currentDeckLength: this.storageHandler?.inMemoryData?.currentDeck?.length
-      });
-      throw error; // Re-throw to see the full stack trace
-    }
   }
 
   clearInputs() {
@@ -1782,8 +1719,8 @@ this.createModal().then(async () => {
         overflow-x: hidden;
     `;
 
-    // Add click handler for chapter selection
-    chapterList?.addEventListener("click", (e) => {
+    // Add click handler for chapter selection (use .onclick to avoid stacking on re-render)
+    chapterList.onclick = (e) => {
       const chapterBtn = e.target.closest("button[data-chapter]");
       if (chapterBtn) {
         const chapterNum = parseInt(chapterBtn.dataset.chapter);
@@ -1806,7 +1743,7 @@ this.createModal().then(async () => {
           this.chapterSets.set(chapterNum, cards);
         }
       }
-    });
+    };
 
     const chapterCountElement = this.shadowRoot.querySelector("#chapterCount");
 
@@ -1864,7 +1801,7 @@ this.createModal().then(async () => {
           
           chaptersContent += `
             <div class="chapter-container group">
-                <button class="w-full flex justify-between px-3 py-2 text-sm text-gray-600 dark:text-gray-300 ${hoverClasses} rounded-md ${activeClasses} min-h-[2.5rem]" data-chapter="${escapeSidebarText(chapter.chapter)}">
+                <button class="w-full flex justify-between gap-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 ${hoverClasses} rounded-md ${activeClasses} min-h-[2.5rem]" style="gap: 8px;" data-chapter="${escapeSidebarText(chapter.chapter)}">
                     <div class="flex gap-2">
                         <svg class="w-4 h-4 transform transition-transform duration-200" 
                              data-dropdown="chapter-${escapeSidebarText(chapter.chapter)}"
@@ -1893,7 +1830,7 @@ this.createModal().then(async () => {
                     </div>
                 </button>
                 <div class="chapter-cards ml-6 mt-1 space-y-0 ${
-                  isCurrentChapter ? "" : "hidden"
+                  isCurrentChapter && (typeof window === "undefined" || window.innerWidth > 640) ? "" : "hidden"
                 }">
                     ${cards
                       .map(
@@ -1996,20 +1933,7 @@ this.createModal().then(async () => {
           });
         });
 
-        // Add click handler for main Decks dropdown
-        const decksButton = this.shadowRoot.querySelector(
-          '[data-dropdown="chapters"]'
-        );
-        if (decksButton && chapterList) {
-          decksButton.closest("button").addEventListener("click", () => {
-            chapterList.classList.toggle("hidden");
-            decksButton.style.transform = chapterList.classList.contains(
-              "hidden"
-            )
-              ? "rotate(0deg)"
-              : "rotate(180deg)";
-          });
-        }
+        // Main Decks dropdown click listener is already registered in SpacedRepetitionUIHandler (ui-handler.js)
 
         if (this.currentChapter) {
           const currentChapterBtn = chapterList.querySelector(
@@ -2060,7 +1984,7 @@ this.createModal().then(async () => {
       styles.id = "ink-mde-styles";
       styles.textContent = `
 
-      #cardList, flashcardList# {
+      #cardList, #flashcardList {
     height: calc(100vh - 180px);
     overflow-x: hidden;
 }
@@ -2162,7 +2086,7 @@ this.createModal().then(async () => {
         top: 8px !important;
         right: 8px !important;
         z-index: 10 !important;
-        color: royalblue !important;
+        color: var(--socratiq-accent, #8e1537) !important;
         background: transparent !important;
     }
             .dark #generateAnswer:hover {
@@ -2189,7 +2113,7 @@ this.createModal().then(async () => {
       const isLastUsed = getLastReviewQuality(card) === quality;
 
       return isLastUsed
-        ? `${baseClasses} ring-1 ring-blue-500/20" style="background-color: ${isDark ? '#1f2937' : '#dbeafe'} !important; color: ${isDark ? '#58a6ff' : '#0969da'} !important;"`
+        ? `${baseClasses} ring-1 ring-blue-500/20" style="background-color: var(--socratiq-accent-bg) !important; color: var(--socratiq-accent) !important;"`
         : baseClasses;
     };
 
@@ -2278,7 +2202,7 @@ this.createModal().then(async () => {
                                   .map(
                                     (tag) => `
                                     <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                                        #${tag}
+                                        #${escapeSidebarText(tag)}
                                     </span>
                                 `
                                   )
@@ -2355,10 +2279,17 @@ this.createModal().then(async () => {
     this.dragHandler.initialize();
   }
 
-  editCard(index) {
-    const card = this.chapterSets.get(parseInt(this.currentChapter.chapter))[
-      index
-    ];
+  editCard(indexOrId) {
+    const cards =
+      this.chapterSets.get(parseInt(this.currentChapter?.chapter)) ||
+      this.flashcards ||
+      [];
+    const index =
+      typeof indexOrId === "number"
+        ? indexOrId
+        : cards.findIndex((c) => String(c.id) === String(indexOrId));
+    const card = cards[index];
+    if (!card) return;
     const modal = this.shadowRoot.querySelector("#editCardModal");
 
     // Ensure editors are initialized
@@ -2527,11 +2458,17 @@ this.createModal().then(async () => {
 
 
 
-  deleteCard(index) {
+  deleteCard(indexOrId) {
     try {
       // Get current chapter's cards
-      const cards = this.chapterSets.get(parseInt(this.currentChapter.chapter));
+      const cards = this.chapterSets.get(parseInt(this.currentChapter?.chapter));
       if (!cards) return;
+
+      const index =
+        typeof indexOrId === "number"
+          ? indexOrId
+          : cards.findIndex((c) => String(c.id) === String(indexOrId));
+      if (index === -1 || !cards[index]) return;
 
       const cardId = cards[index].id;
 
@@ -2719,10 +2656,10 @@ this.createModal().then(async () => {
         // Reset to default state
         const isSelected = currentCard.lastReviewQuality === quality;
         const bgColor = isSelected 
-          ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#dbeafe')
+          ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#f7e6ea')
           : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb');
         const textColor = isDark ? '#f9fafb' : '#111827';
-        const borderStyle = isSelected ? '1px solid rgba(59, 130, 246, 0.2)' : 'none';
+        const borderStyle = isSelected ? '1px solid rgba(142, 21, 55, 0.2)' : 'none';
         
         btn.style.backgroundColor = bgColor + ' !important';
         btn.style.color = textColor + ' !important';
@@ -2734,40 +2671,6 @@ this.createModal().then(async () => {
     requestAnimationFrame(() => {
       updateButtonStates();
     });
-
-    // Add to existing navigation handlers
-    this.shadowRoot
-      .querySelector("#prevCardBtn")
-      ?.addEventListener("click", () => {
-        if (this.currentReview && this.currentReview.currentIndex > 0) {
-          this.currentReview.currentIndex--;
-          this.currentReview.showingQuestion = true;
-          const card =
-            this.currentReview.cards[this.currentReview.currentIndex];
-          this.reviewEditor?.update(card.question);
-          this.updateNavigationButtons();
-          updateButtonStates(); // Update button states for new card
-        }
-      });
-
-    this.shadowRoot
-      .querySelector("#nextCardBtn")
-      ?.addEventListener("click", () => {
-        if (
-          this.currentReview &&
-          this.currentReview.currentIndex < this.currentReview.cards.length - 1
-        ) {
-          this.currentReview.currentIndex++;
-          this.currentReview.showingQuestion = true;
-          const card =
-            this.currentReview.cards[this.currentReview.currentIndex];
-          this.reviewEditor?.update(card.question);
-          this.updateNavigationButtons();
-          updateButtonStates(); // Update button states for new card
-        }
-      });
-
-    // Rest of your existing code...
 
     // Create the modal if it doesn't exist
     if (!modal) {
@@ -2804,7 +2707,7 @@ this.createModal().then(async () => {
                     <!-- Review Buttons -->
                     <div class="flex gap-2 mt-4">
                         <button class="px-3 py-2 text-xs rounded flex flex-col items-start flex-1 min-w-0 hover:bg-gray-100 dark:hover:bg-zinc-600/50"
-                                style="background-color: ${cards[cardIndex]?.lastReviewQuality === 0 ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#dbeafe') : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb')} !important; color: ${isDark ? '#f9fafb' : '#111827'} !important; ${cards[cardIndex]?.lastReviewQuality === 0 ? 'border: 1px solid rgba(59, 130, 246, 0.2) !important;' : ''}"
+                                style="background-color: ${cards[cardIndex]?.lastReviewQuality === 0 ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#f7e6ea') : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb')} !important; color: ${isDark ? '#f9fafb' : '#111827'} !important; ${cards[cardIndex]?.lastReviewQuality === 0 ? 'border: 1px solid rgba(142, 21, 55, 0.2) !important;' : ''}"
                                 onclick="event.stopPropagation(); this.closest('#cardReviewModal').dispatchEvent(new CustomEvent('reviewCard', {detail: {index: ${cardIndex}, quality: 0}}))">
                             <div class="flex items-center gap-2">
                                 <svg class="w-4 h-4 flex-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2815,7 +2718,7 @@ this.createModal().then(async () => {
                         </button>
 
                         <button class="px-3 py-2 text-xs rounded flex flex-col items-start flex-1 min-w-0 hover:bg-gray-100 dark:hover:bg-zinc-600/50"
-                                style="background-color: ${cards[cardIndex]?.lastReviewQuality === 2 ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#dbeafe') : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb')} !important; color: ${isDark ? '#f9fafb' : '#111827'} !important; ${cards[cardIndex]?.lastReviewQuality === 2 ? 'border: 1px solid rgba(59, 130, 246, 0.2) !important;' : ''}"
+                                style="background-color: ${cards[cardIndex]?.lastReviewQuality === 2 ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#f7e6ea') : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb')} !important; color: ${isDark ? '#f9fafb' : '#111827'} !important; ${cards[cardIndex]?.lastReviewQuality === 2 ? 'border: 1px solid rgba(142, 21, 55, 0.2) !important;' : ''}"
                                 onclick="event.stopPropagation(); this.closest('#cardReviewModal').dispatchEvent(new CustomEvent('reviewCard', {detail: {index: ${cardIndex}, quality: 2}}))">
                             <div class="flex items-center gap-2">
                                 <svg class="w-4 h-4 flex-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2826,7 +2729,7 @@ this.createModal().then(async () => {
                         </button>
 
                         <button class="px-3 py-2 text-xs rounded flex flex-col items-start flex-1 min-w-0 hover:bg-gray-100 dark:hover:bg-zinc-600/50"
-                                style="background-color: ${cards[cardIndex]?.lastReviewQuality === 3 ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#dbeafe') : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb')} !important; color: ${isDark ? '#f9fafb' : '#111827'} !important; ${cards[cardIndex]?.lastReviewQuality === 3 ? 'border: 1px solid rgba(59, 130, 246, 0.2) !important;' : ''}"
+                                style="background-color: ${cards[cardIndex]?.lastReviewQuality === 3 ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#f7e6ea') : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb')} !important; color: ${isDark ? '#f9fafb' : '#111827'} !important; ${cards[cardIndex]?.lastReviewQuality === 3 ? 'border: 1px solid rgba(142, 21, 55, 0.2) !important;' : ''}"
                                 onclick="event.stopPropagation(); this.closest('#cardReviewModal').dispatchEvent(new CustomEvent('reviewCard', {detail: {index: ${cardIndex}, quality: 3}}))">
                             <div class="flex items-center gap-2">
                                 <svg class="w-4 h-4 flex-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2837,7 +2740,7 @@ this.createModal().then(async () => {
                         </button>
 
                         <button class="px-3 py-2 text-xs rounded flex flex-col items-start flex-1 min-w-0 hover:bg-gray-100 dark:hover:bg-zinc-600/50"
-                                style="background-color: ${cards[cardIndex]?.lastReviewQuality === 5 ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#dbeafe') : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb')} !important; color: ${isDark ? '#f9fafb' : '#111827'} !important; ${cards[cardIndex]?.lastReviewQuality === 5 ? 'border: 1px solid rgba(59, 130, 246, 0.2) !important;' : ''}"
+                                style="background-color: ${cards[cardIndex]?.lastReviewQuality === 5 ? (isDark ? 'rgba(30, 58, 138, 0.2)' : '#f7e6ea') : (isDark ? 'rgba(55, 65, 81, 0.5)' : '#f9fafb')} !important; color: ${isDark ? '#f9fafb' : '#111827'} !important; ${cards[cardIndex]?.lastReviewQuality === 5 ? 'border: 1px solid rgba(142, 21, 55, 0.2) !important;' : ''}"
                                 onclick="event.stopPropagation(); this.closest('#cardReviewModal').dispatchEvent(new CustomEvent('reviewCard', {detail: {index: ${cardIndex}, quality: 5}}))">
                             <div class="flex items-center gap-2">
                                 <svg class="w-4 h-4 flex-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2855,7 +2758,7 @@ this.createModal().then(async () => {
                             ← Previous
                         </button>
                         <button id="flipCardBtn" class="px-4 py-2 text-sm rounded-md hover:bg-blue-200 dark:hover:bg-blue-800/40 flex items-center gap-2"
-                                style="background-color: ${isDark ? 'rgba(30, 58, 138, 0.3)' : '#dbeafe'} !important; color: ${isDark ? '#93c5fd' : '#1d4ed8'} !important;">
+                                style="background-color: ${isDark ? 'rgba(30, 58, 138, 0.3)' : '#f7e6ea'} !important; color: ${isDark ? '#dfaab8' : '#681029'} !important;">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
                             </svg>
@@ -2897,9 +2800,9 @@ this.createModal().then(async () => {
         );
         if (clickedButton) {
           // Set selected state
-          const bgColor = isDark ? 'rgba(30, 58, 138, 0.2)' : '#dbeafe';
+          const bgColor = isDark ? 'rgba(30, 58, 138, 0.2)' : '#f7e6ea';
           const textColor = isDark ? '#f9fafb' : '#111827';
-          const borderStyle = '1px solid rgba(59, 130, 246, 0.2)';
+          const borderStyle = '1px solid rgba(142, 21, 55, 0.2)';
           clickedButton.style.backgroundColor = bgColor + ' !important';
           clickedButton.style.color = textColor + ' !important';
           clickedButton.style.border = borderStyle + ' !important';
@@ -3065,10 +2968,10 @@ this.createModal().then(async () => {
 
     }
 
-    // Update navigation handlers
-    this.shadowRoot
-      .querySelector("#prevCardBtn")
-      ?.addEventListener("click", () => {
+    // Update navigation handlers (assign onclick to prevent listener stacking across card views)
+    const prevBtn = this.shadowRoot.querySelector("#prevCardBtn");
+    if (prevBtn) {
+      prevBtn.onclick = () => {
         if (this.currentReview && this.currentReview.currentIndex > 0) {
           this.currentReview.currentIndex--;
           this.currentReview.showingQuestion = true;
@@ -3076,12 +2979,14 @@ this.createModal().then(async () => {
             this.currentReview.cards[this.currentReview.currentIndex];
           this.reviewEditor?.update(card.question);
           this.updateNavigationButtons();
+          updateButtonStates();
         }
-      });
+      };
+    }
 
-    this.shadowRoot
-      .querySelector("#nextCardBtn")
-      ?.addEventListener("click", () => {
+    const nextBtn = this.shadowRoot.querySelector("#nextCardBtn");
+    if (nextBtn) {
+      nextBtn.onclick = () => {
         if (
           this.currentReview &&
           this.currentReview.currentIndex < this.currentReview.cards.length - 1
@@ -3092,8 +2997,10 @@ this.createModal().then(async () => {
             this.currentReview.cards[this.currentReview.currentIndex];
           this.reviewEditor?.update(card.question);
           this.updateNavigationButtons();
+          updateButtonStates();
         }
-      });
+      };
+    }
 
     // Add updateNavigationButtons method
     this.updateNavigationButtons = () => {
@@ -3410,13 +3317,9 @@ this.createModal().then(async () => {
         throw new Error('Storage handler not available');
       }
 
-      // Delete from SQLite
-      const { sql } = this.storageHandler.db;
-      
-      // Delete cards and tags first (foreign key constraints)
-      await sql`DELETE FROM card_tags WHERE card_id IN (SELECT id FROM cards WHERE chapter = ${chapterNum})`;
-      await sql`DELETE FROM cards WHERE chapter = ${chapterNum}`;
-      await sql`DELETE FROM chapters WHERE chapter = ${chapterNum}`;
+      if (typeof this.storageHandler.deleteChapter === 'function') {
+        await this.storageHandler.deleteChapter(chapterNum);
+      }
 
       // Update in-memory data
       this.chapterSets.delete(chapterNum);
@@ -3517,7 +3420,7 @@ this.createModal().then(async () => {
     if (
       mainModal &&
       !cardReviewModal &&
-      !addCardForm?.classList.contains("hidden")
+      (!addCardForm || addCardForm.classList.contains("hidden"))
     ) {
       mainModal.classList.add("hidden");
       if (this._escapeHandler) {

@@ -260,11 +260,11 @@ def cycle(stem, steps=1, kinds_from=None, lit=None, trace=None):
             g.text(x + 42, ly, str(pnum), 22, C['neutral'], 'bold', 'end', opacity=op)
             g.text(x + 52, ly, name, 22, C['text'], 'normal', 'start', opacity=op)
             if kinds_from:
-                g.text(x + 410, ly, kind, 20, C['neutral'], 'normal', 'end', first=kinds_from, italic=True, opacity=op)
+                g.text(x + 410, ly, kind, 22, C['neutral'], 'normal', 'end', first=kinds_from, italic=True, opacity=op)
     for x1, y1, x2, y2 in ((428, 40, 470, 40), (684, 144, 684, 186), (472, 380, 430, 380), (216, 186, 216, 144)):
         g.line(x1, y1, x2, y2, ARROW, sw=8)
-    ellipse(g, 450, 165, 88, 40, 'white', C['neutral'], dash='4 3')
-    g.text(450, 165, 'Conservation\nof complexity', 19, C['text'], 'bold')
+    ellipse(g, 450, 165, 92, 42, 'white', C['neutral'], dash='4 3')
+    g.text(450, 165, 'Conservation\nof complexity', 21, C['text'], 'bold')
     g.write(stem, steps)
 cycle('cycle', steps=2, kinds_from=2)
 for p in range(4):
@@ -347,7 +347,7 @@ for i, (head_, one, many) in enumerate(rows):
 g.write('fleet', 2)
 g = Svg(900, 248)
 stages = [('Wake word', 'KWS, microcontroller', ['200 KB INT8 in 1 MB', '20 MFLOP', 'milliwatts'], 'Power', C['danger']), ('Front end', 'MobileNetV2-size, phone', ['600 MFLOP', '3.5 MB INT8', '5 W'], 'Compute', C['compute']), ('Ranking', 'DLRM, cloud', ['100 GB of tables', 'one H100: 80 GB'], 'Capacity', C['network']), ('Reply', 'GPT-2, cloud H100', ['3 GB per token', '0.9 ms floor', '295× compute floor'], 'Bandwidth', C['memory'])]
-for i, (name, sub, nums, bind, col) in enumerate(stages):
+for i, (name, sub, nums, limit_term, col) in enumerate(stages):
     x = 2 + i * 228
     g.rect(x, 2, 215, 180, 'white', C['neutral'], sw=2)
     g.text(x + 107, 26, name, 22, CRIMSON, 'bold')
@@ -357,9 +357,9 @@ for i, (name, sub, nums, bind, col) in enumerate(stages):
     if i < 3:
         g.line(x + 216, 92, x + 227, 92, C['neutral'], sw=2.5)
     g.rect(x + 12, 194, 191, 50, 'white', C['neutral'], sw=1.5, dash='5 4', last=i + 1)
-    g.text(x + 107, 219, 'binding term?', 20, C['danger'], 'bold', last=i + 1)
+    g.text(x + 107, 219, 'limiting term?', 20, C['danger'], 'bold', last=i + 1)
     g.rect(x + 12, 194, 191, 50, col, col, first=i + 2)
-    g.text(x + 107, 219, bind, 24, 'white', 'bold', first=i + 2)
+    g.text(x + 107, 219, limit_term, 24, 'white', 'bold', first=i + 2)
 g.write('voice', 5)
 import subprocess
 THUMBS = ['chain_step2.svg', 'chain_step3.svg', 'roofline_step3.svg', 'cycle_step2.svg', 'mtbf.svg'] + [f'cycle_part{p}.svg' for p in range(1, 5)]

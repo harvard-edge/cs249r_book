@@ -1,0 +1,186 @@
+% Study sheet: Volume I, Chapter 12, Benchmarking.
+% Numbers: \val{...} from benchmarking_studysheet_numbers.tex, written by benchmarking_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{benchmarking_studysheet_numbers}
+\sheetvolume{1}
+\sheetchapter{12}{Benchmarking}
+\sheetsources{Numbers from the mlsysim registry and the chapter's scenarios (several are illustrative); assumed inputs are marked.}
+
+\begin{document}
+% ===================================================================== FRONT
+\frontside
+\begin{bigidea}
+A benchmark number is true only for the \hl{conditions it fixed}: warm or cold, which
+inputs, a burst or a sustained run. Benchmarking turns an optimization claim into a
+\hl{test that could fail}, then asks whether it survives deployment.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Predict, then measure.}{The roofline predicts a ceiling; measure the rate and
+  profile the gap.}
+\idea{Scope sets the question.}{Micro finds slow kernels, macro compares models, end to end decides
+  what the user waits.}
+\idea{Report the tail, under load.}{A mean hides the slowest 1\%: report p99 at a stated load.
+  A client that waits for each reply goes quiet during a stall, hiding the queue.}
+\idea{A difference must beat the noise.}{Repeat runs in random order; pair models on the same
+  examples. ``Not significant'' is not ``equivalent.''}
+\idea{Accuracy is not quality.}{Compression can keep top-1 while confidence stops matching correctness
+  (calibration) and rare slices fail.}
+\end{ideas}
+
+\vspace{10pt}
+\sheetsec{A testable claim fixes}
+\begin{sheettable}{@{}l L@{}}
+\thead{Item} & \thead{For ``INT8 ResNet-50 is faster''}\\ \midrule
+Inputs & which data; JPEG on storage, or tensor in memory?\\
+Quality floor & still at least \val{target}\% top-1\\
+Metric & throughput \emph{and} p99, at a stated load\\
+Harness & sync the device (a host call returns at enqueue); warm-up; independent arrivals\\
+Run rules & same libraries; seeds, clocks, power limit; repeats\\
+\end{sheettable}
+
+\vspace{10pt}
+\sheetsec{Inference scenarios (MLPerf)}
+\begin{sheettable}{@{}l L l@{}}
+\thead{Scenario} & \thead{Arrivals; metric} & \thead{Models}\\ \midrule
+SingleStream & after each reply; tail latency & phone camera app\\
+MultiStream & grouped; tail group latency & multi-camera fusion\\
+Server & Poisson; QPS within a tail bound (often p99) & cloud API\\
+Offline & all at once; samples/s & batch jobs\\
+\end{sheettable}
+
+\vspace{10pt}
+\fcard{Training: time to quality}%
+  {\text{Eff}_{\text{scaling}} = \frac{\Time(1)}{\AcceleratorCount\,\Time(\AcceleratorCount)}}%
+  {Score the time until validation quality first reaches the target: samples needed $\div$ samples/s.
+   \val{sct1} h on one, \val{sctn} h on \val{scn}: \val{sceff}\%.}%
+  {}{}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Formulas you will use}
+\fcard{Amdahl ceiling}%
+  {\text{speedup} \le \frac{1}{1-\ParallelFraction}}%
+  {$\ParallelFraction$: share of time the change touches. Here \val{aminf} of \val{amtotal} ms;
+   \val{amspeed}$\times$ faster inference gives only \val{amgain}$\times$; infinitely fast, \val{amtotal}\,$\div$\,\val{ampre} $=$ \val{amceiling}$\times$.}%
+  {Any new cost the change adds (a copy) joins the untouched time.}%
+  {\begin{tikzpicture}[sheet]
+     \pgfmathsetmacro\sc{180/\val{amtotal}}
+     \pgfmathsetmacro\pA{40+\val{ampre}*\sc} \pgfmathsetmacro\pB{\pA+\val{aminf}*\sc} \pgfmathsetmacro\qB{\pA+\val{amoptinf}*\sc}
+     \node[note, anchor=west] at (0,25) {before};
+     \draw[nbox] (40,18) rectangle (\pA,32); \node[lab] at ({(40+\pA)/2},25) {preprocess \val{ampre} ms};
+     \draw[accbox] (\pA,18) rectangle (\pB,32); \node[lab] at ({(\pA+\pB)/2},25) {inference \val{aminf} ms};
+     \node[lab, anchor=west] at ({\pB+4},25) {\val{amtotal} ms};
+     \node[note, anchor=west] at (0,7) {after};
+     \draw[nbox] (40,0) rectangle (\pA,14); \node[lab] at ({(40+\pA)/2},7) {preprocess};
+     \draw[hotbox] (\pA,0) rectangle (\qB,14); \node[small, anchor=north] at ({(\pA+\qB)/2},-1) {\val{amoptinf} ms};
+     \node[lab, anchor=west] at ({\qB+4},7) {\val{amopttotal} ms};
+   \end{tikzpicture}}
+\fcard{Paired test on the same examples (McNemar, uncorrected)}%
+  {\McnemarTestStatistic = \frac{(\BaselineOnlyCorrectCount-\CompressedOnlyCorrectCount)^2}{\BaselineOnlyCorrectCount+\CompressedOnlyCorrectCount}}%
+  {$\BaselineOnlyCorrectCount$, $\CompressedOnlyCorrectCount$: examples only the baseline, or only the
+   new model, gets right. With $\BaselineOnlyCorrectCount > \CompressedOnlyCorrectCount$, a drop is shown at 95\% when $\McnemarTestStatistic > \val{mccrit}$.}%
+  {Agreements carry no information.}%
+  {\begin{tikzpicture}[sheet]
+     \pgfmathsetmacro\sc{4.4}
+     \pgfmathsetmacro\xg{20+\val{mcgap}*\sc} \pgfmathsetmacro\xm{20+\val{mcmax}*\sc}
+     \fill[accentsoft] (\xg,-3) rectangle (\xm,3);
+     \draw[dim] (20,0) -- (240,0);
+     \foreach \t in {10,20,30,40,50}{\draw[dim] ({20+\t*\sc},0) -- ({20+\t*\sc},-2.5);
+       \node[small, anchor=north] at ({20+\t*\sc},-4) {\t};}
+     \draw[accent, dashed, line width=0.6pt] (\xm,-3) -- (\xm,15);
+     \node[note, anchor=south] at (\xm,16) {threshold \val{mcmax}};
+     \node[lab, anchor=south] at ({(\xg+\xm)/2},4) {drop shown};
+     \node[lab, anchor=south west] at ({\xm+6},4) {unresolved};
+     \node[small, anchor=north west] at (20,-14) {disagreements, for a gap of \val{mcgap} errors};
+   \end{tikzpicture}}
+\fcard{Average power over a duty cycle}%
+  {\AveragePower = \InferenceDutyCycle\,\ActiveInferencePower + (1-\InferenceDutyCycle)\,\StandbyPower}%
+  {$\InferenceDutyCycle$: share of time inferring. Keyword spotting at \val{kwsactive} W
+   active, \val{kwsidle} mW idle, one \val{kwsms} ms inference per second ($\InferenceDutyCycle = \val{kwsduty}\%$):
+   \val{kwsavg} mW, \val{kwsidleshare}\% of it idle.}%
+  {Energy: integrate power over one window inside a stated boundary.}%
+  {\begin{tikzpicture}[sheet]
+     \pgfmathsetmacro\sc{200/\val{kwsavg}}
+     \pgfmathsetmacro\xa{\val{kwsactmw}*\sc} \pgfmathsetmacro\xb{\xa+\val{kwsidlemw}*\sc}
+     \draw[hotbox] (0,0) rectangle (\xa,14);
+     \draw[nbox] (\xa,0) rectangle (\xb,14); \node[lab] at ({(\xa+\xb)/2},7) {idle \val{kwsidlemw} mW};
+     \node[lab, anchor=west] at ({\xb+4},7) {\val{kwsavg} mW};
+     \node[note, anchor=north west] at (0,-3) {inference \val{kwsactmw} mW};
+   \end{tikzpicture}}
+\end{rightcol}
+
+% ===================================================================== BACK
+\backside
+\begin{answers}
+\ans{Finish}{The gap \val{ytbase} $-$ \val{ytcomp}, squared, is \val{ytsq}; \val{ytsq} $\div$ \val{ytdis} $=$ \val{ytstat}, below \val{mccrit}:
+  unresolved: with many disagreements the gap can be noise. Not equivalent; test more
+  examples against a stated tolerance. (Paired-test card)}
+\ans{1}{Host \val{qpre} + \val{qhost} $=$ \val{qhoste2e} ms; accelerator \val{qpre} + \val{qacc} + \val{qlink} $=$
+  \val{qacce2e} ms: \val{qe2e}$\times$ end to end, not \val{qiso}$\times$. Ceiling: preprocessing and copy remain,
+  \val{qhoste2e} $\div$ \val{qrest} $=$ \val{qcap}$\times$. Both meet \val{qbudget} ms, so the deadline does not decide. SingleStream (one frame at a time). (Amdahl card)}
+\ans{2}{Now \val{wavg} mW (\val{widleshare}\% idle). Faster inference ($\InferenceDutyCycle = \val{wfastduty}\%$):
+  \val{wfast} mW. Idle at \val{wlowidlemw} mW: \val{wlowidle} mW. Cut idle power; at a small duty cycle it dominates. (Duty-cycle card)}
+\columnbreak
+\ans{3}{The host call returns at enqueue: synchronize or use device events. A waiting client sends nothing
+  during a stall, hiding the queue and p99: use independent (open-loop) arrivals. One run cannot beat
+  noise: repeat in random order, give an interval. Also state inputs, quality floor, load. (Table)}
+\ans{4}{\val{ft1} $\div$ (\val{fdev} $\times$ \val{ftn}) $=$ \val{feff}\% (ideal \val{fideal} h). The rival is no faster: twice the
+  samples $\div$ twice the samples/s gives the same time to quality. (Training card)}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Is a one-point accuracy drop a real regression?}
+A baseline scores \val{mcbase}\% and an INT8 version \val{mccand}\% on the same \val{mcimages} images
+(\val{mcbaseerr} vs.\ \val{mccanderr} errors). The INT8 model gets wrong every image the baseline does, plus
+\val{mcgap} more.
+\begin{steps}
+\item Count disagreements: $\BaselineOnlyCorrectCount = \val{wkbase}$, $\CompressedOnlyCorrectCount = \val{wkcomp}$.
+  Images both get right or wrong drop out.
+\item Statistic: $(\val{wkbase}-\val{wkcomp})^2 \div (\val{wkbase}+\val{wkcomp})$ $=$ \res{\val{wkstat}}.
+\item Compare: \val{wkstat} $>$ \val{mccrit}, so \res{the drop is shown} at 95\%. Any split with at most
+  \val{mcmax} disagreements would show it.
+\end{steps}
+\takeaway{The disagreement count decides, not the two accuracies.}
+\end{practicebox}
+
+\vspace{12pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Same gap, more disagreement}
+\assumed{} the same \val{mcgap}-error gap, but the models disagree on \val{ytdis} images.\par\vspace{4pt}
+\textbf{Given:} $\BaselineOnlyCorrectCount - \CompressedOnlyCorrectCount = \val{mcgap}$ and
+$\BaselineOnlyCorrectCount + \CompressedOnlyCorrectCount = \val{ytdis}$, so $\BaselineOnlyCorrectCount = \val{ytbase}$,
+$\CompressedOnlyCorrectCount = \val{ytcomp}$.\par
+\textbf{You:} compute the statistic, decide, and say whether the team may call the models equivalent.
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``Mean latency is \val{tailmean} ms, so users get fast answers.''}%
+  {A model-only mean under evenly spaced inputs hides queueing and the tail: the production p99 was
+   \val{taillow}--\val{tailhigh} ms, \val{tailxlow}--\val{tailxhigh}$\times$ the mean.}{}
+\mistake{``INT8 kept top-1 within a point, so it is safe to ship.''}%
+  {Top-1 fell \val{qdrop} points (\val{qtopf}\% to \val{qtopi}\%), inside the \val{qgate}-point gate, but
+   calibration error rose \val{qecef} to \val{qecei} and edge-case accuracy fell \val{qedgedrop} points: it fails.}{}
+\mistake{``The datasheet says \val{dstops} TOPS at \val{dswatt} W, so \val{dseff} TOPS/W.''}%
+  {The peaks came from different operating points. Sustained, it ran \val{sutops} TOPS at \val{suwatt} W:
+   \val{sueff} TOPS/W, \val{effgap}$\times$ worse. Measure both at one warm, sustained point;
+   heat throttles clocks in long runs.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} a camera-trap frame spends \val{qpre} ms preprocessing on the host and \val{qhost} ms in the
+  model. An attached accelerator runs the model in \val{qacc} ms (\val{qiso}$\times$) but adds a \val{qlink} ms
+  copy. End-to-end speedup? Ceiling? Do both meet the \val{qbudget} ms budget at \val{qfps} frames/s? Which MLPerf scenario fits?
+\item \assumed{} a wake-word board draws \val{wact} W for one \val{wms} ms inference each second and
+  \val{widle} mW idle. Which helps battery life more: halving inference time or idle power?
+\item A teammate claims ``INT8 is 2$\times$ faster'' from one run, timing the host call, with one client that
+  waits for each reply. What three harness flaws would you fix, and why?
+\item \assumed{} training takes \val{ft1} h on one accelerator and \val{ftn} h on \val{fdev}. Scaling
+  efficiency? A rival doubles samples/s with a bigger batch but needs twice the epochs. Is it faster?
+\end{qs}
+\end{rightcol}
+\end{document}

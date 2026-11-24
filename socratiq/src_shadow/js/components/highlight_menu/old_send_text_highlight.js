@@ -112,7 +112,7 @@ export function addToCopyContainer(text, shadowRoot) {
   deleteBtn.style.cssText = `
     margin-left: 4px;
     padding: 0 4px;
-    color: #1e40af;
+    color: #560d22;
     font-size: 16px;
     cursor: pointer;
     border: none;
@@ -139,9 +139,9 @@ export function addToCopyContainer(text, shadowRoot) {
     display: flex;
     align-items: center;
     transition: max-width 0.2s ease;
-    background-color: #dbeafe !important;
-    color: #1e40af !important;
-    border: 1px solid #bfdbfe !important;
+    background-color: #f7e6ea !important;
+    color: #560d22 !important;
+    border: 1px solid #eed0d7 !important;
     border-radius: 0.25rem !important;
     padding: 2px 6px !important;
     font-size: 14px !important;

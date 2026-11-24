@@ -1,18 +1,236 @@
-(()=>{'use strict';window.MLSysFigureLessons=window.MLSysFigureLessons||{};window.MLSysFigureLessons["original-v1-python-tax"]=async(root,{outer,verifiedArtwork})=>{if(!verifiedArtwork||!window.MLSysOriginalPlayer)throw Error('Verified original Python timeline required');root.classList.add("original-v1-python-tax");const svg=verifiedArtwork.cloneNode(true);svg.removeAttribute('width');svg.removeAttribute('height');if(svg.viewBox.baseVal.width!==3613||svg.viewBox.baseVal.height!==2033)throw Error('Python timeline pixel geometry changed');const data={"n_ops": 5, "dispatch_us": 10, "kernel_us": 1, "launch_us": 5, "fused_compute_us": 4.0},steps=[{"label": "Eager sequence waits for host", "description": "No operation is submitted yet. The accelerator cannot run unavailable work."}, {"label": "Dispatch operation 1", "description": "Python prepares and submits operation 1. Until submission completes, that kernel is unavailable to the accelerator."}, {"label": "Execute operation 1", "description": "Kernel 1 consumes its input and produces the next intermediate; the host dispatch for the following operation has not occurred in this serialized illustration."}, {"label": "Dispatch operation 2", "description": "Python prepares and submits operation 2. Until submission completes, that kernel is unavailable to the accelerator."}, {"label": "Execute operation 2", "description": "Kernel 2 consumes its input and produces the next intermediate; the host dispatch for the following operation has not occurred in this serialized illustration."}, {"label": "Dispatch operation 3", "description": "Python prepares and submits operation 3. Until submission completes, that kernel is unavailable to the accelerator."}, {"label": "Execute operation 3", "description": "Kernel 3 consumes its input and produces the next intermediate; the host dispatch for the following operation has not occurred in this serialized illustration."}, {"label": "Dispatch operation 4", "description": "Python prepares and submits operation 4. Until submission completes, that kernel is unavailable to the accelerator."}, {"label": "Execute operation 4", "description": "Kernel 4 consumes its input and produces the next intermediate; the host dispatch for the following operation has not occurred in this serialized illustration."}, {"label": "Dispatch operation 5", "description": "Python prepares and submits operation 5. Until submission completes, that kernel is unavailable to the accelerator."}, {"label": "Execute operation 5", "description": "Kernel 5 consumes its input and produces the next intermediate; the host dispatch for the following operation has not occurred in this serialized illustration."}, {"label": "Start compiled/fused alternative", "description": "Reset to the same input. This is a separate execution, not additional work after the eager result."}, {"label": "Submit the fused region", "description": "One direct device submission makes the whole compatible region available."}, {"label": "Execute fused region and write output", "description": "One fused kernel applies the same five operations. Internal x\u2081 through x\u2084 stay on-chip and are consumed there; the completed x\u2085 is written once to global output storage. This is one kernel action, not five separately submitted kernels."}],ns='http://www.w3.org/2000/svg',add=(tag,attrs)=>{const n=document.createElementNS(ns,tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,v);return n;},layer=add('g',{});svg.append(layer);const masks=[add('rect',{y:135,height:432,fill:'white'}),add('rect',{y:1215,height:432,fill:'white'})];masks.forEach(n=>layer.append(n));const cursor=add('line',{stroke:'#492f00','stroke-width':7});layer.append(cursor);const flow=add('svg',{viewBox:'0 0 600 280',class:'vb-flow','aria-label':'Host submission, device execution, and intermediate storage'});const viewport=document.createElement('div');viewport.className='vb-diagram';viewport.append(svg);const readout=document.createElement('p');readout.className='vb-readout';const x=t=>674+(3416-674)*t/(data.n_ops*(data.dispatch_us+data.kernel_us));
-function time(i){if(i<=10)return Math.floor(i/2)*(data.dispatch_us+data.kernel_us)+(i%2?data.dispatch_us:0);return i===11?0:i===12?data.launch_us:data.launch_us+data.fused_compute_us;}
-function draw(i,t){const row=i<=10?0:1;for(let r=0;r<2;r++){const end=r===0?3418:1120,start=r===row?x(t):row===1&&r===0?end:674;masks[r].setAttribute('x',start);masks[r].setAttribute('width',Math.max(0,end-start));}cursor.setAttribute('x1',x(t));cursor.setAttribute('x2',x(t));cursor.setAttribute('y1',row===0?125:1205);cursor.setAttribute('y2',row===0?577:1657);}
-function text(x,y,value,size=15){const n=add('text',{x,y,'text-anchor':'middle','font-size':size,fill:'#142832'});n.textContent=value;flow.append(n);return n;}
-function drawFlow(i,n,eager){flow.replaceChildren();if(matchMedia('(max-width:600px)').matches){flow.setAttribute('viewBox',eager?'0 0 300 440':'0 0 300 545');const titles=['Host','Submitted','Device',eager?'Global intermediate storage':'On-chip intermediates'],values=[eager?n<5?`prepare op ${Math.min(5,Math.ceil((i+1)/2))}`:'chain done':i<12?'region ready':'entry finished',eager?i%2?`op ${Math.ceil(i/2)} ready`:'empty':i===12?'one region ready':'empty',eager?n?`last complete: op ${n}`:'waiting':i>=13?'five ops complete':'waiting',eager?n===data.n_ops?'x₅: final output':`x${n}: retained for next consumer`:i>=13?'x₁…x₄ consumed; x₅ written once':'x₀ input ready'];for(let j=0;j<4;j++){const y=10+j*105;flow.append(add('rect',{x:10,y,width:280,height:85,rx:5,fill:j===2?'#fbe5ce':'#d6f3fc',stroke:'#476b78','stroke-width':2}));text(150,y+28,titles[j],14);text(150,y+61,values[j],14);if(j<3)flow.append(add('path',{d:`M150 ${y+85} V${y+105}`,stroke:'#476b78','stroke-width':2,fill:'none'}));}if(!eager){flow.append(add('rect',{x:10,y:430,width:280,height:85,rx:5,fill:'#e0f1da',stroke:'#476b78','stroke-width':2}));text(150,458,'Global output',14);text(150,491,i>=13?'x₅ complete · one write':'not written',14);}return;}flow.setAttribute('viewBox','0 0 600 280');const nodes=[[10,10,170,95,'Host'],[220,10,150,95,'Submitted'],[410,10,180,95,'Device'],[220,145,370,80,eager?'Global intermediate storage':'On-chip intermediates']];for(const[x,y,w,h,title]of nodes){flow.append(add('rect',{x,y,width:w,height:h,rx:5,fill:title==='Device'?'#fbe5ce':'#d6f3fc',stroke:'#476b78','stroke-width':2}));text(x+w/2,y+27,title);}for(const d of ['M180 57 H220','M370 57 H410','M500 105 V145'])flow.append(add('path',{d,stroke:'#476b78','stroke-width':2,fill:'none'}));text(95,75,eager?n<5?`prepare op ${Math.min(5,Math.ceil((i+1)/2))}`:'chain done':i<12?'region ready':'entry finished');text(295,75,eager?i%2?`op ${Math.ceil(i/2)} ready`:'empty':i===12?'one region ready':'empty');text(500,75,eager?n?`last complete: op ${n}`:'waiting':i>=13?'five ops complete':'waiting');if(!eager){flow.append(add('rect',{x:10,y:145,width:170,height:80,rx:5,fill:'#e0f1da',stroke:'#476b78','stroke-width':2}));text(95,174,'Global output',14);text(95,204,i>=13?'x₅ complete':'not written',14);}text(405,200,eager?n===data.n_ops?'x₅: final output':`x${n}: retained for its next consumer`:i>=13?'x₁…x₄ consumed; x₅ → global output':'x₀ input ready',14);}
-const baseDescriptions=steps.map(s=>s.description);function pending(to){steps[to].description='On completion: '+baseDescriptions[to];const p=root.querySelector('.mlsys-original-narration p');if(p)p.textContent=steps[to].description;}
-function render(i,{stage}){steps.forEach((s,j)=>s.description=baseDescriptions[j]);if(!viewport.isConnected)stage.append(viewport,flow,readout);draw(i,time(i));const eager=i<=10,n=eager?Math.floor(i/2):i>=13?5:0;drawFlow(i,n,eager);root.dataset.endpoint=String(i);root.dataset.operations=String(n);root.dataset.elapsedUs=String(time(i));root.dataset.alternative=eager?'eager':'fused';readout.textContent=eager?`Eager endpoint: ${time(i)} μs · ${n} kernels completed · ${i===0?'waiting for the first host dispatch':i%2?'host dispatch just completed; next kernel can now run':n===data.n_ops?'chain complete; no next kernel':'device computation complete; next host dispatch still required'}. ${n&&n<5?'Intermediate x'+n+' remains in global storage for the next kernel.':n===5?'Final x₅ is complete.':'Input x₀ is ready.'}`:`Compiled/fused endpoint: ${time(i)} μs · ${i<12?'nothing submitted':i===12?'one region submitted; computation pending':'same five operations complete; internal intermediates stayed on-chip'}. ${i>=13?'Output x₅ complete.':''}`;}
-return window.MLSysOriginalPlayer.create({root,outer,title:'What keeps the next kernel from starting?',scope:"The original five-operation timeline and its canonical Ops dispatch/launch values. One-microsecond kernels and the fused efficiency are the chapter\u2019s declared scenario, not measurements or general compilation gains. Eager and compiled/fused rows are alternatives; the source chart omits per-kernel driver-launch cost on the eager row.",steps,render,transition:({from,to,onFrame})=>{pending(to);if(to===11)return;const t=add('g',{'data-operation-packet':''});t.append(add('rect',{x:-18,y:-15,width:36,height:30,rx:4,fill:'#fff1be',stroke:'#875000','stroke-width':1.2}));const action=add('text',{'text-anchor':'middle','font-size':9,fill:'#142832',y:-3}),label=add('text',{'text-anchor':'middle','font-size':12,fill:'#142832',y:10});t.append(action,label);flow.append(t);
- const position=(points,u)=>{const lengths=points.slice(1).map((b,k)=>Math.hypot(b[0]-points[k][0],b[1]-points[k][1])),total=lengths.reduce((a,b)=>a+b,0);let d=u*total,k=0;while(k<lengths.length-1&&d>lengths[k])d-=lengths[k++];const v=lengths[k]?d/lengths[k]:0,a=points[k],b=points[k+1];return[a[0]+(b[0]-a[0])*v,a[1]+(b[1]-a[1])*v];};
- onFrame(p=>{draw(to,time(from)+(time(to)-time(from))*p);const phone=matchMedia('(max-width:600px)').matches;let points,u=p;
-  if(to<=10&&to%2){points=phone?[[24,71],[24,176]]:[[95,125],[295,125]];action.textContent='submit';label.textContent=`op ${Math.ceil(to/2)}`;}
-  else if(to<=10){const n=to/2;if(p<.3){points=phone?[[24,386],[24,281]]:[[405,245],[195,245],[195,125],[500,125]];u=p/.3;action.textContent='read';label.textContent=`x${n-1}`;}else if(p<.7){points=phone?[[24,276],[24,286]]:[[490,125],[510,125]];u=(p-.3)/.4;action.textContent='compute';label.textContent=`op ${n}`;}else{points=phone?[[24,281],[24,386]]:[[500,125],[195,125],[195,245],[405,245]];u=(p-.7)/.3;action.textContent='write';label.textContent=`x${n}`;}}
-  else if(to===12){points=phone?[[24,71],[24,176]]:[[95,125],[295,125]];action.textContent='submit';label.textContent='region';label.setAttribute('font-size','10');}
-  else if(p<.8){points=phone?[[24,376],[24,396]]:[[390,245],[430,245]];u=p/.8;action.textContent='on-chip';label.textContent=`x${Math.min(4,Math.floor(p*5))}`;}
-  else{points=phone?[[24,386],[24,491]]:[[405,245],[95,245]];u=(p-.8)/.2;action.textContent='write';label.textContent='x5';}
-  const q=position(points,u);t.setAttribute('transform',`translate(${q[0]} ${q[1]})`);t.dataset.progress=String(p);
- });}});
-};})();
+(() => {
+  'use strict';
+  window.MLSysFigureLessons = window.MLSysFigureLessons || {};
+  window.MLSysFigureLessons['original-v1-python-tax'] = async (root, { outer, verifiedArtwork }) => {
+    if (!verifiedArtwork || !window.MLSysOriginalPlayer) {
+      throw new Error('Verified original Python timeline required');
+    }
+    root.classList.add('original-v1-python-tax');
+    const svg = verifiedArtwork.cloneNode(true);
+    svg.removeAttribute('width');
+    svg.removeAttribute('height');
+    if (svg.viewBox.baseVal.width !== 3613 || svg.viewBox.baseVal.height !== 2033) {
+      throw new Error('Python timeline pixel geometry changed');
+    }
+
+    const data = { n_ops: 5, dispatch_us: 10, kernel_us: 1, launch_us: 5, fused_compute_us: 4.0 };
+    const steps = [
+      {
+        label: 'Eager sequence waits for host',
+        description: 'At 0 μs on the Eager Execution row, input x₀ is ready, but Python has not dispatched operation 1 yet and the GPU sits idle.'
+      },
+      {
+        label: 'Dispatch operation 1',
+        description: 'From 0 to 10 μs, Python resolves types and dispatches operation 1 (10 μs red Python dispatch bar). The GPU waits until host submission finishes at 10 μs.'
+      },
+      {
+        label: 'Execute operation 1',
+        description: 'From 10 to 11 μs (1 μs blue GPU kernel bar), kernel 1 reads x₀, computes operation 1, and writes intermediate x₁ to global HBM (1 of 5 ops complete at 11 μs).'
+      },
+      {
+        label: 'Dispatch operation 2',
+        description: 'From 11 to 21 μs, a second 10 μs red Python dispatch bar elapses on the host while intermediate x₁ waits in global memory.'
+      },
+      {
+        label: 'Execute operation 2',
+        description: 'From 21 to 22 μs (1 μs blue GPU kernel bar), kernel 2 reads x₁ from global memory and writes intermediate x₂ back to global memory (2 of 5 ops complete at 22 μs).'
+      },
+      {
+        label: 'Dispatch operation 3',
+        description: 'From 22 to 32 μs, the third 10 μs red Python dispatch gap leaves the GPU idle waiting on host overhead.'
+      },
+      {
+        label: 'Execute operation 3',
+        description: 'From 32 to 33 μs (1 μs blue GPU kernel bar), kernel 3 reads x₂ and writes intermediate x₃ to global memory (3 of 5 ops complete at 33 μs).'
+      },
+      {
+        label: 'Dispatch operation 4',
+        description: 'From 33 to 43 μs, the fourth 10 μs red Python dispatch bar adds another 10 μs of host serialization before kernel 4 can start.'
+      },
+      {
+        label: 'Execute operation 4',
+        description: 'From 43 to 44 μs (1 μs blue GPU kernel bar), kernel 4 reads x₃ and writes intermediate x₄ to global memory (4 of 5 ops complete at 44 μs).'
+      },
+      {
+        label: 'Dispatch operation 5',
+        description: 'From 44 to 54 μs, the fifth 10 μs red Python dispatch bar brings cumulative host dispatch overhead to 50 μs across the 5 eager operations.'
+      },
+      {
+        label: 'Execute operation 5',
+        description: 'From 54 to 55 μs (1 μs blue GPU kernel bar), kernel 5 reads x₄ and writes final output x₅. Eager execution finishes at 55 μs (50 μs host dispatch + 5 μs GPU work).'
+      },
+      {
+        label: 'Start compiled/fused alternative',
+        description: 'Reset to 0 μs on the Compiled/Fused row with the same input x₀ to run the same 5 operations as a single compiled graph region.'
+      },
+      {
+        label: 'Submit the fused region',
+        description: 'From 0 to 5 μs, one compiled runtime call (5 μs orange kernel-launch bar) submits the entire 5-operation fused region at once, eliminating per-op Python dispatch.'
+      },
+      {
+        label: 'Execute fused region and write output',
+        description: 'From 5 to 9 μs (4 μs blue GPU kernel bar), 1 fused kernel runs all 5 operations in registers/SRAM (keeping x₁–x₄ on-chip) and writes x₅ once, finishing in 9 μs vs. 55 μs.'
+      }
+    ];
+
+    const ns = 'http://www.w3.org/2000/svg';
+    const add = (tag, attrs, txt) => {
+      const n = document.createElementNS(ns, tag);
+      for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+      if (txt != null) n.textContent = txt;
+      return n;
+    };
+
+    const layer = add('g', { class: 'vb-overlay' });
+    const masks = [
+      add('rect', { y: 132, height: 438, fill: '#ffffff', 'fill-opacity': '0.86' }),
+      add('rect', { y: 1212, height: 438, fill: '#ffffff', 'fill-opacity': '0.86' })
+    ];
+    const rowFrame = add('rect', {
+      fill: 'none',
+      stroke: '#006395',
+      'stroke-width': 9,
+      'stroke-dasharray': '22 12',
+      rx: 14,
+      'data-mlsys-focus': ''
+    });
+    const cursor = add('line', { stroke: '#E67817', 'stroke-width': 13, 'stroke-linecap': 'round' });
+    const timePillBg = add('rect', {
+      width: 470,
+      height: 88,
+      rx: 14,
+      fill: '#ffffff',
+      'fill-opacity': '0.96',
+      stroke: '#E67817',
+      'stroke-width': 4
+    });
+    const timePillTxt = add('text', {
+      'text-anchor': 'middle',
+      'dominant-baseline': 'middle',
+      'font-family': 'system-ui, -apple-system, sans-serif',
+      'font-size': 42,
+      'font-weight': '700',
+      fill: '#142832'
+    });
+    layer.append(masks[0], masks[1], rowFrame, cursor, timePillBg, timePillTxt);
+    svg.append(layer);
+
+    const viewport = document.createElement('div');
+    viewport.className = 'vb-diagram';
+    viewport.append(svg);
+
+    const readout = document.createElement('p');
+    readout.className = 'vb-readout';
+    const ledger = document.createElement('div');
+    ledger.className = 'vb-ledger';
+    const makeCard = (role, title) => {
+      const card = document.createElement('div');
+      card.className = 'vb-card';
+      card.dataset.role = role;
+      const t = document.createElement('span');
+      t.className = 'vb-card-title';
+      t.textContent = title;
+      const v = document.createElement('span');
+      v.className = 'vb-card-val';
+      card.append(t, v);
+      ledger.append(card);
+      return { t, v };
+    };
+    const cards = {
+      host: makeCard('host', 'Host Python / Runtime'),
+      queue: makeCard('queue', 'Submitted Queue'),
+      device: makeCard('device', 'GPU Execution'),
+      storage: makeCard('storage', 'Intermediates')
+    };
+
+    // Exact pixel mapping measured on HEAD 3613x2033 PNG: x(0 us) = 670, x(55 us) = 3416
+    const x = t => 670 + ((3416 - 670) * t) / (data.n_ops * (data.dispatch_us + data.kernel_us));
+
+    function time(i) {
+      if (i <= 10) return Math.floor(i / 2) * (data.dispatch_us + data.kernel_us) + (i % 2 ? data.dispatch_us : 0);
+      return i === 11 ? 0 : i === 12 ? data.launch_us : data.launch_us + data.fused_compute_us;
+    }
+
+    function draw(i, t) {
+      const row = i <= 10 ? 0 : 1;
+      for (let r = 0; r < 2; r += 1) {
+        const end = r === 0 ? 3420 : 1122;
+        const start = r === row ? x(t) : row === 1 && r === 0 ? end : 670;
+        masks[r].setAttribute('x', start.toFixed(1));
+        masks[r].setAttribute('width', Math.max(0, end - start).toFixed(1));
+      }
+      const frameStroke = row === 0 ? (i % 2 === 1 ? '#CB202D' : '#006395') : (i === 12 ? '#E67817' : '#008F45');
+      rowFrame.setAttribute('x', '662');
+      rowFrame.setAttribute('y', String(row === 0 ? 118 : 1198));
+      rowFrame.setAttribute('width', String(row === 0 ? 2768 : 1100));
+      rowFrame.setAttribute('height', '466');
+      rowFrame.setAttribute('stroke', frameStroke);
+
+      const cx = x(t);
+      cursor.setAttribute('x1', cx.toFixed(1));
+      cursor.setAttribute('x2', cx.toFixed(1));
+      cursor.setAttribute('y1', String(row === 0 ? 118 : 1198));
+      cursor.setAttribute('y2', String(row === 0 ? 584 : 1664));
+      cursor.setAttribute('stroke', frameStroke);
+
+      const px = Math.max(680, Math.min(3030, cx - 235));
+      const py = row === 0 ? 610 : 1084;
+      timePillBg.setAttribute('x', px.toFixed(1));
+      timePillBg.setAttribute('y', String(py));
+      timePillBg.setAttribute('stroke', frameStroke);
+      timePillTxt.setAttribute('x', (px + 235).toFixed(1));
+      timePillTxt.setAttribute('y', String(py + 46));
+      timePillTxt.textContent = `t = ${t.toFixed(t % 1 ? 1 : 0)} μs`;
+    }
+
+    function updateLedger(i, n, eager) {
+      cards.storage.t.textContent = eager ? 'Global HBM Intermediates' : 'On-Chip SRAM + Output';
+      cards.host.v.textContent = eager
+        ? (n < 5 ? `dispatch op ${Math.min(5, Math.ceil((i + 1) / 2))} (10 μs)` : '5 dispatches done (50 μs)')
+        : (i < 12 ? 'compiled graph ready' : '1 launch done (5 μs)');
+      cards.queue.v.textContent = eager
+        ? (i % 2 ? `op ${Math.ceil(i / 2)} queued` : 'empty (waiting on Python)')
+        : (i === 12 ? '1 fused kernel queued' : 'empty');
+      cards.device.v.textContent = eager
+        ? (n ? `${n} / 5 kernels run (${n} μs)` : 'idle')
+        : (i >= 13 ? '5 fused ops run (4 μs)' : 'idle');
+      cards.storage.v.textContent = eager
+        ? (n === 0 ? 'x₀ ready in HBM' : n === 5 ? 'x₅ written (5 HBM round-trips)' : `x${n} spilled to HBM`)
+        : (i >= 13 ? 'x₁–x₄ in SRAM; x₅ written once' : 'x₀ ready in HBM');
+    }
+
+    function render(i, { stage, details }) {
+      if (!viewport.isConnected) stage.replaceChildren(viewport);
+      if (details && !ledger.isConnected) details.replaceChildren(readout, ledger);
+      const t = time(i);
+      draw(i, t);
+      const eager = i <= 10;
+      const n = eager ? Math.floor(i / 2) : i >= 13 ? 5 : 0;
+      updateLedger(i, n, eager);
+      root.dataset.endpoint = String(i);
+      root.dataset.operations = String(n);
+      root.dataset.elapsedUs = String(t);
+      root.dataset.alternative = eager ? 'eager' : 'fused';
+      readout.textContent = eager
+        ? `Eager state at ${t} μs: ${n} of 5 GPU kernels completed (${i === 0 ? 'awaiting first Python dispatch' : i % 2 ? 'host dispatch complete, kernel ready' : n === 5 ? 'all 55 μs elapsed: 50 μs Python dispatch + 5 μs GPU compute' : 'GPU idle again until next 10 μs Python dispatch'}).`
+        : `Compiled/Fused state at ${t} μs: ${i === 11 ? 'ready to launch fused 5-op kernel' : i === 12 ? 'single 5 μs runtime launch complete' : 'all 5 operations finished at 9 μs (6.1× faster than 55 μs eager)'}.`;
+    }
+
+    return window.MLSysOriginalPlayer.create({
+      root,
+      outer,
+      layout: 'compact',
+      intro: 'Compare 5 eager operations taking 55 μs (10 μs Python dispatch plus 1 μs kernel each) against 1 compiled fused kernel finishing in 9 μs.',
+      title: 'What keeps the next kernel from starting?',
+      scope: 'Canonical Ops dispatch (10 μs) and kernel-launch (5 μs) values paired with the chapter scenario of five 1 μs kernels (4 μs when fused in SRAM). Eager and compiled/fused rows are alternatives for the same five operations.',
+      steps,
+      render,
+      transition: ({ from, to, onFrame }) => {
+        if (to === 11) return;
+        const t0 = time(from);
+        const t1 = time(to);
+        onFrame(p => draw(to, t0 + (t1 - t0) * p));
+      }
+    });
+  };
+})();

@@ -72,8 +72,8 @@ def horovod(k, col=False):
         ax.bar(i - w / 2, tf[i], w, color=C['bad'], alpha=1.0 if k >= 2 else 0.0)
         ax.bar(i + w / 2, hv[i], w, color=C['c2'], alpha=1.0 if k >= 3 else 0.0)
         label(ax, i - w / 2, tf[i] + 500, f"{ {0: '53', 1: '41'}[i]}%", C['bad'], k >= 2, ha='center', fontsize=13)
-        label(ax, i + w / 2, hv[i] + 500, f"{ {0: '88', 1: '88'}[i]}%", C['c2_t'], k >= 3, ha='center', fontsize=13)
-        label(ax, i, ideal[i] + 1500, f"ideal { {0: '17,000', 1: '15,000'}[i]}", C['text'], True, ha='center', fontsize=11, fontweight='normal')
+        label(ax, i + w / 2, hv[i] - 750, f"{ {0: '88', 1: '88'}[i]}%", 'white', k >= 3, ha='center', va='top', fontsize=12.5)
+        label(ax, i, ideal[i] + 1000, f"ideal { {0: '17,000', 1: '15,000'}[i]}", C['text'], True, ha='center', va='bottom', fontsize=11, fontweight='normal')
     if col:
         label(ax, -0.55, 23500, 'TensorFlow', C['bad'], k >= 2, fontsize=12)
         label(ax, 0.55, 23500, 'Horovod', C['c2_t'], k >= 3, fontsize=12)
@@ -96,7 +96,7 @@ def traffic(k):
     fig, ax = blank((5.8, 2.1))
     ax.set_xlim(0, 12.4)
     ax.set_ylim(-0.5, 5.6)
-    heads = [(0.0, 'Split'), (4.4, 'Primitive'), (8.7, 'Binds on')]
+    heads = [(0.0, 'Split'), (4.4, 'Primitive'), (8.7, 'Limited by')]
     for j, (x, h) in enumerate(heads):
         label(ax, x, 5.15, h, C['neutral'], j == 0 or k > j, fontsize=12)
     for i, (sname, prim, bind) in enumerate(rows):
@@ -219,8 +219,8 @@ def crossover():
     ax.text(mx * 1.25, 130, 'crossover\n≈ 1.1 MB', color=C['neutral'], fontsize=12.5, fontweight='bold', va='bottom')
     ax.text(2000.0, 2000.0, 'ring', color=C['c2_t'], fontsize=13, fontweight='bold')
     ax.text(15000.0, 300, 'tree', color=C['c1'], fontsize=13, fontweight='bold')
-    ax.text(40000000.0, 20000.0, 'tree', color=C['c1'], fontsize=13, fontweight='bold')
-    ax.text(40000000.0, 2200.0, 'ring', color=C['c2_t'], fontsize=13, fontweight='bold')
+    ax.text(16000000.0, 48000.0, 'tree', color=C['c1'], fontsize=13, fontweight='bold', ha='right', va='bottom')
+    ax.text(45000000.0, 2400.0, 'ring', color=C['c2_t'], fontsize=13, fontweight='bold', ha='center', va='top')
     m_b = 1000000.0
     ax.plot([m_b], [1456.9], 'o', color=C['c2'], ms=8)
     ax.plot([m_b], [1320.0], 'o', color=C['c1'], ms=8)
@@ -279,23 +279,43 @@ def hier(k):
     sp.save(fig, out / f'hier_step{k}.svg')
 
 def a2a_matrix():
-    fig, ax = plt.subplots(figsize=(2.7, 2.5))
+    fig, ax = plt.subplots(figsize=(2.95, 3.05))
     n = int(8.0)
     for s in range(n):
         for d in range(n):
             local = s == d
-            ax.add_patch(Rectangle((d, n - 1 - s), 1, 1, facecolor=C['neutral_l'] if local else C['c2_l'], edgecolor='white', lw=1.5))
-            ax.text(d + 0.5, n - 0.5 - s, '64', ha='center', va='center', fontsize=9, color=C['neutral'] if local else C['c2_t'], fontweight='bold')
-    ax.set_xlim(0, n)
-    ax.set_ylim(0, n)
+            if s == 0:
+                if local:
+                    fc, ec, tc, lw = '#cbd5e1', '#475569', '#1e293b', 1.6
+                else:
+                    fc, ec, tc, lw = C['c2'], 'white', 'white', 1.5
+                ax.add_patch(Rectangle((d, n - 1 - s), 1, 1, facecolor=fc, edgecolor=ec, lw=lw, zorder=3))
+                ax.text(d + 0.5, n - 0.5 - s, '64', ha='center', va='center', fontsize=9.5, color=tc, fontweight='bold', zorder=4)
+            else:
+                fc = C['neutral_l'] if local else C['c2_l']
+                tc = C['neutral'] if local else C['c2_t']
+                ax.add_patch(Rectangle((d, n - 1 - s), 1, 1, facecolor=fc, edgecolor='white', lw=1.5, alpha=0.42))
+                ax.text(d + 0.5, n - 0.5 - s, '64', ha='center', va='center', fontsize=8.5, color=tc, alpha=0.55)
+    # Outline GPU 0's 7 remote cells so the factor 7 stands out immediately
+    ax.add_patch(Rectangle((1, n - 1), 7, 1, facecolor='none', edgecolor=C['c2_t'], lw=2.2, zorder=5))
+    # Compact legend directly below the matrix
+    ax.add_patch(Rectangle((0.0, -0.78), 0.52, 0.45, facecolor='#cbd5e1', edgecolor='#475569', lw=1.2, clip_on=False))
+    ax.text(0.68, -0.56, '1 local (kept)', ha='left', va='center', fontsize=9.0, fontweight='bold', color='#334155')
+    ax.add_patch(Rectangle((4.10, -0.78), 0.52, 0.45, facecolor=C['c2'], edgecolor=C['c2_t'], lw=1.2, clip_on=False))
+    ax.text(4.78, -0.56, '7 remote sends', ha='left', va='center', fontsize=9.0, fontweight='bold', color=C['c2_t'])
+    ax.set_xlim(-0.05, n + 0.05)
+    ax.set_ylim(-1.05, n + 0.05)
     ax.set_xticks(np.arange(n) + 0.5)
-    ax.set_xticklabels([str(i) for i in range(n)], fontsize=11)
+    ax.set_xticklabels([str(i) for i in range(n)], fontsize=10.5)
     ax.set_yticks(np.arange(n) + 0.5)
-    ax.set_yticklabels([str(i) for i in range(n)][::-1], fontsize=11)
+    ax.set_yticklabels([str(i) for i in range(n)][::-1], fontsize=10.5)
+    # Emphasize row 0 tick label
+    ax.get_yticklabels()[-1].set_fontweight('bold')
+    ax.get_yticklabels()[-1].set_color(C['c2_t'])
     ax.xaxis.tick_top()
     ax.xaxis.set_label_position('top')
-    ax.set_xlabel('Receiving GPU', fontsize=12)
-    ax.set_ylabel('Sending GPU', fontsize=12)
+    ax.set_xlabel('Receiving GPU', fontsize=11.5)
+    ax.set_ylabel('Sending GPU (row 0 highlighted)', fontsize=10.8)
     ax.tick_params(length=0)
     for s in ['left', 'bottom', 'top', 'right']:
         ax.spines[s].set_visible(False)
@@ -382,7 +402,8 @@ def overlap(k):
         ax.text(-20, y, nm, ha='right', va='center', fontsize=11, fontweight='bold', color=C['text'], alpha=a)
         ax.text(end + 20, y - 0.2, f"{ {0: '1,344', 1: '879', 2: '487.6'}[j]} ms", va='center', fontsize=12, fontweight='bold', color=[C['bad'], C['c2_t'], C['ok']][j], alpha=a)
     ax.text(240, 2.6, 'backward, 15 ms per layer', ha='center', fontsize=11, color=C['c1'], fontweight='bold')
-    ax.text(1150, 0.15, 'reduction, 27 ms\nper layer', ha='center', va='center', fontsize=11, color=C['c2_t'], fontweight='bold')
+    ax.text(1150, 0.42, 'reduction, 27 ms\nper layer', ha='center', va='center', fontsize=11, color=C['c2_t'], fontweight='bold')
+    label(ax, 1150, -0.18, '9 buckets × 0.85 ms\n= 7.6 ms/layer', C['ok'], k >= 3, ha='center', va='center', fontsize=10.2)
     ax.set_xlim(0, 1550)
     ax.set_ylim(-0.6, 2.9)
     ax.set_yticks([])
@@ -390,49 +411,243 @@ def overlap(k):
     ax.set_xlabel('ms, one backward pass plus its reductions (7B model, 64 GPUs)')
     sp.save(fig, out / f'overlap_step{k}.svg')
 
-def ring():
-    fig, ax = blank((2.6, 2.6))
-    ax.set_xlim(-1.6, 1.6)
-    ax.set_ylim(-1.6, 1.6)
-    ax.set_aspect('equal')
-    pos = [(0, 1), (1, 0), (0, -1), (-1, 0)]
-    for i, (x, y) in enumerate(pos):
-        ax.add_patch(FancyBboxPatch((x - 0.45, y - 0.22), 0.9, 0.44, boxstyle='round,pad=0.02,rounding_size=0.06', facecolor=C['c1_l'], edgecolor=C['c1'], lw=1.5))
-        ax.text(x, y, f'GPU {i}', ha='center', va='center', fontsize=11, fontweight='bold', color=C['c1'])
-    for i in range(4):
-        (x0, y0), (x1, y1) = (pos[i], pos[(i + 1) % 4])
-        ax.add_patch(FancyArrowPatch((x0 * 0.7 + x1 * 0.3 + 0.12 * (x1 - x0), y0 * 0.7 + y1 * 0.3), (x0 * 0.3 + x1 * 0.7, y0 * 0.3 + y1 * 0.7 - 0.12 * (y1 - y0)), arrowstyle='-|>', mutation_scale=16, color=C['c2'], lw=2.2, connectionstyle='arc3,rad=-0.25'))
-    sp.save(fig, out / 'ring.svg')
+def ring_allreduce_steps():
+    """4-step Ring AllReduce matching Example 5.1 and Explore fig-ring-allreduce."""
+    # Example 5.1 initial vectors on GPU 0..3 for chunks a, b, c, d:
+    # GPU 0: [1,5,3,7], GPU 1: [2,6,4,8], GPU 2: [3,7,5,9], GPU 3: [4,8,6,10]
+    # True sums: a=10, b=26, c=18, d=34
+    states = {
+        1: {
+            'phase': 'Init (0)',
+            'sent': '0 sent',
+            'cap': 'Each GPU splits its vector into 4 chunks (a to d); sum = [10, 26, 18, 34].',
+            'cells': [
+                [('1', 'base'), ('5', 'base'), ('3', 'base'), ('7', 'base')],
+                [('2', 'base'), ('6', 'base'), ('4', 'base'), ('8', 'base')],
+                [('3', 'base'), ('7', 'base'), ('5', 'base'), ('9', 'base')],
+                [('4', 'base'), ('8', 'base'), ('6', 'base'), ('10', 'base')],
+            ],
+            'arrows': False,
+        },
+        2: {
+            'phase': 'RS 1-2',
+            'sent': '0.50 M',
+            'cap': 'RS 1-2: partial sums rotate clockwise and add local values (chunk a: 1 -> 3 -> 6).',
+            'cells': [
+                [('1', 'dim'), ('5', 'dim'), ('14', 'part'), ('17', 'part')],
+                [('3', 'part'), ('6', 'dim'), ('4', 'dim'), ('25', 'part')],
+                [('6', 'part'), ('13', 'part'), ('5', 'dim'), ('9', 'dim')],
+                [('4', 'dim'), ('21', 'part'), ('11', 'part'), ('10', 'dim')],
+            ],
+            'arrows': 'amber',
+        },
+        3: {
+            'phase': 'RS 3',
+            'sent': '0.75 M',
+            'cap': 'After RS 3 (N-1 rounds): each GPU owns one finished green sum.',
+            'cells': [
+                [('1', 'dim'), ('26', 'done'), ('14', 'dim'), ('17', 'dim')],
+                [('3', 'dim'), ('6', 'dim'), ('18', 'done'), ('25', 'dim')],
+                [('6', 'dim'), ('13', 'dim'), ('5', 'dim'), ('34', 'done')],
+                [('10', 'done'), ('21', 'dim'), ('11', 'dim'), ('10', 'dim')],
+            ],
+            'arrows': 'amber',
+        },
+        4: {
+            'phase': 'AG 1-3',
+            'sent': '1.50 M',
+            'cap': 'After AG 3 (6 rounds): every GPU holds [10, 26, 18, 34]; each sends 2(N-1)/N M.',
+            'cells': [
+                [('10', 'done'), ('26', 'done'), ('18', 'done'), ('34', 'done')],
+                [('10', 'done'), ('26', 'done'), ('18', 'done'), ('34', 'done')],
+                [('10', 'done'), ('26', 'done'), ('18', 'done'), ('34', 'done')],
+                [('10', 'done'), ('26', 'done'), ('18', 'done'), ('34', 'done')],
+            ],
+            'arrows': 'green',
+        },
+    }
+    fills = {
+        'base': ('#EAF1F8', '#1F407A', '#14294E'),
+        'dim': ('#f8fafc', '#cbd5e1', '#94a3b8'),
+        'part': ('#fef3c7', '#d97706', '#b45309'),
+        'done': ('#dcfce7', '#16a34a', '#15803d'),
+    }
+    for k, st in states.items():
+        w, h = 940, 355
+        items = []
+        # Left ring diagram (center 168, 162, wide enough for center label)
+        cx, cy = 168, 162
+        nodes = [(cx, cy - 104, 'GPU 0'), (cx + 114, cy, 'GPU 1'), (cx, cy + 104, 'GPU 2'), (cx - 114, cy, 'GPU 3')]
+        acol = '#d97706' if st['arrows'] == 'amber' else '#16a34a' if st['arrows'] == 'green' else '#94a3b8'
+        arcs = [
+            (f'M {cx + 48},{cy - 96} Q {cx + 112},{cy - 86} {cx + 114},{cy - 28}'),
+            (f'M {cx + 114},{cy + 28} Q {cx + 112},{cy + 86} {cx + 48},{cy + 96}'),
+            (f'M {cx - 48},{cy + 96} Q {cx - 112},{cy + 86} {cx - 114},{cy + 28}'),
+            (f'M {cx - 114},{cy - 28} Q {cx - 112},{cy - 86} {cx - 48},{cy - 96}'),
+        ]
+        for d in arcs:
+            items.append(f'<path d="{d}" fill="none" stroke="{acol}" stroke-width="3.5" marker-end="url(#arr)"/>')
+        for nx, ny, lab in nodes:
+            items.append(f'<rect x="{nx - 42}" y="{ny - 21}" width="84" height="42" rx="7" fill="#EAF1F8" stroke="#1F407A" stroke-width="2.2"/>')
+            items.append(f'<text x="{nx}" y="{ny + 7}" font-size="20" font-weight="bold" fill="#14294E" text-anchor="middle">{lab}</text>')
+        items.append(f'<text x="{cx}" y="{cy - 4}" font-size="20" font-weight="bold" fill="{acol if st["arrows"] else "#475569"}" text-anchor="middle">{st["phase"]}</text>')
+        items.append(f'<text x="{cx}" y="{cy + 22}" font-size="19" font-weight="bold" fill="#475569" text-anchor="middle">{st["sent"]}/GPU</text>')
+        # Right 4x4 chunk matrix
+        gx0, gy0 = 430, 56
+        cw, ch, gap = 112, 48, 8
+        for ci, chlab in enumerate(['chunk a', 'chunk b', 'chunk c', 'chunk d']):
+            items.append(f'<text x="{gx0 + ci * (cw + gap) + cw / 2}" y="38" font-size="21" font-weight="bold" fill="#475569" text-anchor="middle">{chlab}</text>')
+        for ri in range(4):
+            y = gy0 + ri * (ch + gap)
+            items.append(f'<text x="{gx0 - 16}" y="{y + 31}" font-size="21" font-weight="bold" fill="#1F407A" text-anchor="end">GPU {ri}</text>')
+            for ci in range(4):
+                val, kind = st['cells'][ri][ci]
+                fc, ec, tc = fills[kind]
+                x = gx0 + ci * (cw + gap)
+                sw = '3' if kind in ('part', 'done') else '1.6'
+                items.append(f'<rect x="{x}" y="{y}" width="{cw}" height="{ch}" rx="6" fill="{fc}" stroke="{ec}" stroke-width="{sw}"/>')
+                items.append(f'<text x="{x + cw / 2}" y="{y + 32}" font-size="22" font-weight="bold" fill="{tc}" text-anchor="middle">{val}</text>')
+        # Legend strip + bottom summary
+        items.append(f'<text x="470" y="335" font-size="21" font-weight="bold" fill="#0f172a" text-anchor="middle">{st["cap"].replace(">", "&gt;")}</text>')
+        svg = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" font-family="Helvetica, Arial, sans-serif">\n'
+            f'<defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">'
+            f'<path d="M0,0 L10,5 L0,10 z" fill="{acol}"/></marker></defs>\n'
+            f'<rect width="{w}" height="{h}" fill="white"/>\n'
+            + '\n'.join(items) + '\n</svg>\n'
+        )
+        (out / f'ring_allreduce_step{k}.svg').write_text(svg)
 
-def horovod_trace():
+def errfb_steps():
+    """3-step residual sawtooth for Example 5.2 (error feedback)."""
+    steps = np.array([1, 2, 3, 4, 5])
+    res = np.array([0.4, -0.3, -0.1, 0.3, -0.4])
+    sent = np.array([0.0, 1.0, 0.0, 0.0, 1.0])
+    # Offsets chosen clear of both the polyline and the threshold/box
+    pos = [
+        (0.86, 0.38, 'right', 'center'),   # step 1: +0.4 left of dot
+        (2.00, -0.46, 'center', 'top'),    # step 2: -0.3 below trough
+        (3.14, -0.24, 'left', 'top'),      # step 3: -0.1 below-right
+        (3.84, 0.33, 'right', 'center'),   # step 4: +0.3 left of peak, below 0.5
+        (5.16, -0.38, 'left', 'center'),   # step 5: -0.4 right of dot, clear of box
+    ]
+    for k in (1, 2, 3):
+        fig, ax = plt.subplots(figsize=(3.9, 2.65))
+        ax.axhline(0.0, color=C['neutral'], lw=1.0)
+        ax.axhline(0.5, color=C['ok'], lw=1.4, ls='--')
+        ax.text(3.45, 0.57, 'threshold 0.5', ha='center', va='bottom', fontsize=10.5, fontweight='bold', color=C['ok'])
+        n_show = 1 if k == 1 else 5
+        ax.plot(steps[:n_show], res[:n_show], '-o', color=C['c1'], lw=2.5, ms=8, zorder=4)
+        for i in range(n_show):
+            if sent[i] > 0:
+                ax.bar(steps[i], sent[i], width=0.34, color=C['ok_l'], edgecolor=C['ok'], lw=1.8, zorder=2)
+                ax.text(steps[i], 1.04, 'sent 1', ha='center', va='bottom', fontsize=10.5, fontweight='bold', color=C['ok'])
+            px, py, ha_, va_ = pos[i]
+            ax.text(px, py, f'{res[i]:+.1f}', ha=ha_, va=va_, fontsize=10.5, fontweight='bold', color=C['c1'])
+        if k >= 3:
+            ax.text(3.0, -1.04, 'True 1.6 = Sent 2.0 + Res (-0.4)\nNaive (no residual): 0.0', ha='center', va='center', fontsize=10.0, fontweight='bold', color=C['text'], bbox=dict(facecolor='#f8fafc', edgecolor=C['c1'], boxstyle='round,pad=0.30'))
+        ax.set_xlim(0.32, 5.78)
+        ax.set_ylim(-1.38, 1.28)
+        ax.set_xticks([1, 2, 3, 4, 5])
+        ax.set_yticks([-0.5, 0.0, 0.5, 1.0])
+        ax.set_xlabel('Step', fontsize=11.5)
+        ax.set_ylabel('Residual e / Sent v', fontsize=11.5)
+        ax.tick_params(labelsize=10.5)
+        ax.grid(axis='y', color=C['grid'], lw=0.6)
+        sp.save(fig, out / f'errfb_step{k}.svg')
+
+def recall_ab_strip():
+    """Compact visual anchor for F6 Recall: alpha-beta message model & DGX H100 tiers."""
+    fig, ax = blank((5.8, 1.15))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 2.2)
+    # Left box: alpha + n/beta breakdown
+    ax.add_patch(FancyBboxPatch((0.1, 0.2), 4.6, 1.75, boxstyle='round,pad=0.02,rounding_size=0.12', fc=C['c1_l'], ec=C['c1'], lw=1.6))
+    ax.text(2.4, 1.62, 'One message of n bytes', ha='center', va='center', fontsize=13.5, fontweight='bold', color=C['c1'])
+    ax.add_patch(Rectangle((0.35, 0.42), 1.1, 0.78, fc=C['c2'], ec='white', lw=1.2))
+    ax.text(0.90, 0.81, 'α\n1.5 μs', ha='center', va='center', fontsize=12.5, fontweight='bold', color='white', linespacing=0.92)
+    ax.add_patch(Rectangle((1.48, 0.42), 2.95, 0.78, fc=C['c1'], ec='white', lw=1.2))
+    ax.text(2.96, 0.81, 'n / β  (transfer)', ha='center', va='center', fontsize=12.5, fontweight='bold', color='white')
+    # Right box: NVLink vs NDR bandwidth bars
+    ax.add_patch(FancyBboxPatch((5.0, 0.2), 4.9, 1.75, boxstyle='round,pad=0.02,rounding_size=0.12', fc=C['frame_l'], ec=C['frame'], lw=1.4))
+    ax.text(7.45, 1.62, 'DGX H100 per-GPU β (1 dir.)', ha='center', va='center', fontsize=13, fontweight='bold', color=C['text'])
+    ax.add_patch(Rectangle((5.25, 0.96), 3.1, 0.38, fc=C['c2'], ec='none'))
+    ax.text(5.35, 1.15, 'NVLink (node)', ha='left', va='center', fontsize=12, fontweight='bold', color='white')
+    ax.text(8.42, 1.15, '450 GB/s', ha='left', va='center', fontsize=12.5, fontweight='bold', color=C['c2_t'])
+    ax.add_patch(Rectangle((5.25, 0.42), 0.35, 0.38, fc=C['c1'], ec='none'))
+    ax.text(5.72, 0.61, 'IB NDR (fabric): 50 GB/s', ha='left', va='center', fontsize=12, fontweight='bold', color=C['c1'])
+    sp.save(fig, out / 'recall_ab_strip.svg')
+
+def rs_ag_strip():
+    """Compact schematic for F10: AllReduce = ReduceScatter + AllGather."""
+    fig, ax = blank((4.7, 0.98))
+    ax.set_xlim(0, 11.4)
+    ax.set_ylim(0, 1.85)
+    boxes = [
+        (0.1, 2.7, 'Full tensors\non N ranks', C['c1_l'], C['c1']),
+        (4.15, 3.0, 'ReduceScatter\nkeep 1/N sum', C['c2_l'], C['c2_t']),
+        (8.45, 2.85, 'AllGather\nall hold sum', C['ok_l'], C['ok']),
+    ]
+    for x, w, txt, fc, ec in boxes:
+        ax.add_patch(FancyBboxPatch((x, 0.18), w, 1.48, boxstyle='round,pad=0.02,rounding_size=0.12', fc=fc, ec=ec, lw=1.8))
+        ax.text(x + w / 2, 0.92, txt, ha='center', va='center', fontsize=13, fontweight='bold', color=ec, linespacing=1.12)
+    ax.annotate('', xy=(4.05, 0.92), xytext=(2.9, 0.92), arrowprops=dict(arrowstyle='-|>', color=C['c2'], lw=2.4))
+    ax.text(3.48, 1.32, '≈ M', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['c2_t'])
+    ax.annotate('', xy=(8.35, 0.92), xytext=(7.25, 0.92), arrowprops=dict(arrowstyle='-|>', color=C['ok'], lw=2.4))
+    ax.text(7.80, 1.32, '≈ M', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['ok'])
+    sp.save(fig, out / 'rs_ag_strip.svg')
+
+def horovod_trace_steps():
     trace = load_series('slides/vol2/05_collective_communication/images/data/horovod_timeline_trace.csv').entries
     fast = [(r['phase'], r['start_ms'], r['end_ms']) for r in trace if r['tensors'] == '0-1']
     slow = [(r['phase'], r['start_ms'], r['end_ms']) for r in trace if r['tensors'] == '2-4']
     color = {'negotiate': C['c3'], 'wait': C['neutral_l'], 'schedule': C['c3_l'], 'NCCL': C['c2'], 'copy': C['c2']}
-    fig, ax = plt.subplots(figsize=(4.6, 3.3))
+    for k in (1, 2):
+        fig, ax = plt.subplots(figsize=(4.0, 2.75))
+        for row in range(5):
+            y = 4 - row
+            for name, a, b in fast if row < 2 else slow:
+                show = k >= 2 or name not in ('NCCL', 'copy')
+                ax.barh(y, b - a, left=a, height=0.62, color=color[name], edgecolor='white', lw=0.6, alpha=1.0 if show else 0.0)
+            ax.text(-6, y, f'T{row}', ha='right', va='center', fontsize=13.5, fontweight='bold')
+        span = (163.5, 347.6)
+        ax.plot(span, [-1.35, -1.35], color=C['text'], lw=1.4)
+        for x in span:
+            ax.plot([x, x], [-1.45, -1.25], color=C['text'], lw=1.4)
+        ax.text(255.5, -1.55, 'AllReduce 184 ms', ha='center', va='top', fontsize=13)
+        ax.text(84, -0.45, 'negotiate 131 ms', ha='center', va='top', fontsize=13, fontweight='bold', color=C['c3'])
+        ax.text(225, 2.75, 'wait (~175 ms)', ha='center', va='bottom', fontsize=12.5, fontweight='bold', color=C['neutral'])
+        label(ax, 358, -0.45, 'NCCL 19 ms (6%)', C['c2_t'], k >= 2, ha='right', va='top', fontsize=13)
+        label(ax, 144, 4, 'NCCL', C['c2_t'], k >= 2, ha='left', va='center', fontsize=13)
+        ax.set_xlim(0, 362)
+        ax.set_ylim(-2.35, 4.55)
+        ax.set_yticks([])
+        ax.spines['left'].set_visible(False)
+        ax.set_xticks([0, 100, 200, 300])
+        ax.tick_params(axis='x', labelsize=12.5)
+        ax.set_xlabel('Trace time (ms after 18,500 ms)', fontsize=13)
+        sp.save(fig, out / f'horovod_trace_step{k}.svg')
+    # Wide vector banner replacing low-res horovod-timeline.png on synthesis slide
+    fig, ax = plt.subplots(figsize=(6.2, 1.32))
     for row in range(5):
         y = 4 - row
         for name, a, b in fast if row < 2 else slow:
-            ax.barh(y, b - a, left=a, height=0.62, color=color[name], edgecolor='white', lw=0.6)
-        ax.text(-6, y, f'tensor {row}', ha='right', va='center', fontsize=12)
-    span = (163.5, 347.6)
-    ax.plot(span, [-1.25, -1.25], color=C['text'], lw=1.4)
-    for x in span:
-        ax.plot([x, x], [-1.35, -1.15], color=C['text'], lw=1.4)
-    ax.text(255.5, -1.45, 'AllReduce 184 ms', ha='center', va='top', fontsize=11.5)
-    ax.text(88, -0.45, 'negotiate 131 ms', ha='center', va='top', fontsize=12, fontweight='bold', color=C['c3'])
-    ax.text(219, -0.45, 'wait', ha='center', va='top', fontsize=12, color=C['neutral'])
-    ax.text(352, -0.45, 'NCCL 19 ms', ha='right', va='top', fontsize=12, fontweight='bold', color=C['c2_t'])
-    ax.text(144, 4, 'NCCL', ha='left', va='center', fontsize=12, fontweight='bold', color=C['c2_t'])
-    ax.set_xlim(0, 360)
-    ax.set_ylim(-2.2, 4.5)
+            ax.barh(y, b - a, left=a, height=0.68, color=color[name], edgecolor='white', lw=0.6)
+        ax.text(-5, y, f'T{row}', ha='right', va='center', fontsize=13, fontweight='bold', color=C['text'])
+    ax.text(78, -1.25, 'negotiate: 131 ms', ha='center', va='center', fontsize=13.5, fontweight='bold', color=C['c3'])
+    ax.text(208, -1.25, 'wait: ~175 ms', ha='center', va='center', fontsize=13.5, fontweight='bold', color=C['neutral'])
+    ax.text(342, -1.25, 'NCCL: 19 ms (6%)', ha='center', va='center', fontsize=13.5, fontweight='bold', color=C['c2_t'])
+    ax.set_xlim(0, 385)
+    ax.set_ylim(-2.0, 4.55)
     ax.set_yticks([])
-    ax.spines['left'].set_visible(False)
     ax.set_xticks([0, 100, 200, 300])
-    ax.set_xlabel('Time in the trace (ms after 18,500 ms)', fontsize=12)
-    sp.save(fig, out / 'horovod_trace.svg')
+    ax.set_xticklabels(['0 ms', '100 ms', '200 ms', '300 ms'], fontsize=13)
+    ax.spines['left'].set_visible(False)
+    sp.save(fig, out / 'horovod_trace_banner.svg')
 if __name__ == '__main__':
-    horovod_trace()
+    horovod_trace_steps()
+    ring_allreduce_steps()
+    errfb_steps()
     for k in (1, 2, 3):
         horovod(k)
         traffic(k)
@@ -452,5 +667,6 @@ if __name__ == '__main__':
     a2a_matrix()
     payback()
     onebit()
-    ring()
+    recall_ab_strip()
+    rs_ag_strip()
     print('figures written to', out)

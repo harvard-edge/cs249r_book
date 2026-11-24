@@ -226,12 +226,19 @@ def test_prefill_solvers_use_explicit_head_geometry(explicit_width):
         phase="prefill",
     )
     linear = 2 * params * seq * batch
-    rectangular_attention = 4 * layers * heads * explicit_width * seq**2 * batch
-    expected_serving = Q_(linear + rectangular_attention, "flop") / (hardware.compute.peak_flops * efficiency)
-    expected_streaming = Q_(linear + rectangular_attention / 2, "flop") / (hardware.compute.peak_flops * efficiency)
-    assert serving.ttft.m_as("second") == pytest.approx(expected_serving.m_as("second"))
-    assert batching.ttft.m_as("second") == pytest.approx(expected_serving.m_as("second"))
-    assert (streaming.layer_compute_time * layers).m_as("second") == pytest.approx(expected_streaming.m_as("second"))
+    causal_attention = 2 * layers * heads * explicit_width * seq**2 * batch
+    bidirectional_attention = 4 * layers * heads * explicit_width * seq**2 * batch
+    expected_causal = Q_(linear + causal_attention, "flop") / (hardware.compute.peak_flops * efficiency)
+    expected_bidirectional = Q_(linear + bidirectional_attention, "flop") / (hardware.compute.peak_flops * efficiency)
+    assert serving.ttft.m_as("second") == pytest.approx(expected_causal.m_as("second"))
+    assert batching.ttft.m_as("second") == pytest.approx(expected_causal.m_as("second"))
+    assert (streaming.layer_compute_time * layers).m_as("second") == pytest.approx(expected_causal.m_as("second"))
+    serving_bidir = ServingModel().solve(model, hardware, seq, batch, efficiency=efficiency, causal=False)
+    batching_bidir = ContinuousBatchingModel().solve(
+        model, hardware, max_seq_len=seq, max_batch_size=batch, efficiency=efficiency, causal=False
+    )
+    assert serving_bidir.ttft.m_as("second") == pytest.approx(expected_bidirectional.m_as("second"))
+    assert batching_bidir.ttft.m_as("second") == pytest.approx(expected_bidirectional.m_as("second"))
     kv_bytes = 2 * layers * kv_heads * explicit_width * seq * batch * 2
     expected_utilization = (Q_(kv_bytes, "byte") * 1.1 / hardware.memory.capacity).m_as("")
     assert streaming.wafer_memory_utilization == pytest.approx(expected_utilization)

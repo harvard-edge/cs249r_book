@@ -12,7 +12,7 @@ export function revealSource(source, {document: doc = document, window: win = do
   const node = saved?.range.startContainer;
   let target = saved?.element.isConnected && node?.isConnected && node.ownerDocument === doc
     ? (node.nodeType === 1 ? node : node.parentElement) : null;
-  if (target) target = target.closest('p, li, blockquote, pre, figure, h1, h2, h3, h4, h5, h6, section, main, article') || target;
+  if (target) target = target.closest('p, li, blockquote, figcaption, dd, pre, figure, h1, h2, h3, h4, h5, h6, section, main, article, [role="main"]') || target;
   if (!target) {
     try {
       const url = new URL(source.url, win.location.href);
@@ -22,7 +22,7 @@ export function revealSource(source, {document: doc = document, window: win = do
       target = id ? doc.getElementById(id) : null;
     } catch { return false; }
   }
-  if (!target?.isConnected || !target.closest('main, article') || target.closest(EXCLUDED)) return false;
+  if (!target?.isConnected || !target.closest('main, article, [role="main"]') || target.closest(EXCLUDED)) return false;
   target.scrollIntoView({block: 'center', behavior: win.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'});
   const tabindex = target.getAttribute('tabindex');
   if (tabindex === null) {
@@ -78,6 +78,44 @@ function visibleMathText(node) {
   return [...node.childNodes].map(visibleMathText).join('');
 }
 
+function extractExploreSummary(rootElement) {
+  if (!rootElement || typeof rootElement.querySelectorAll !== 'function') return '';
+  const panels = [...rootElement.querySelectorAll('[data-mlsys-explore] .mlsys-explore-panel')];
+  if (!panels.length) return '';
+  const pairs = [];
+  for (const panel of panels) {
+    if (panel.closest?.('form, fieldset, nav, aside, [hidden], [inert]')) continue;
+    for (const ctrl of panel.querySelectorAll('input[type="range"], select')) {
+      if (ctrl.closest?.('form, fieldset, [hidden], [inert]')) continue;
+      let label = (ctrl.getAttribute('aria-label') || '').trim();
+      if (!label && ctrl.id && ctrl.ownerDocument) {
+        const explicit = ctrl.ownerDocument.querySelector(`label[for="${ctrl.id.replace(/"/g, '\\"')}"]`);
+        if (explicit) label = explicit.textContent.trim();
+      }
+      if (!label) {
+        const parentLabel = ctrl.closest('label');
+        if (parentLabel) {
+          label = [...parentLabel.childNodes]
+            .filter(n => n !== ctrl && !(n.nodeType === 1 && n.contains(ctrl)))
+            .map(n => n.textContent || '')
+            .join(' ')
+            .trim();
+        }
+      }
+      if (!label && ctrl.previousElementSibling && /^(LABEL|SPAN)$/i.test(ctrl.previousElementSibling.tagName)) {
+        label = ctrl.previousElementSibling.textContent.trim();
+      }
+      label = label.replace(/[:\s]+$/, '').replace(/\s+/g, ' ').trim();
+      const rawValue = ctrl.tagName === 'SELECT'
+        ? (ctrl.selectedOptions?.[0]?.textContent || ctrl.value || '')
+        : (ctrl.value || '');
+      const value = String(rawValue).replace(/\s+/g, ' ').trim();
+      if (label && value) pairs.push(`${label} = ${value}`);
+    }
+  }
+  return pairs.length ? `[Interactive figure parameters: ${pairs.join(', ')}]` : '';
+}
+
 export function readableText(element, {mathItems = [], range = null} = {}) {
   if (excludedAncestor(element)) return '';
   const registered = new Map(mathItems.map(item => [itemRoot(item), itemTex(item)]));
@@ -107,6 +145,10 @@ export function readableText(element, {mathItems = [], range = null} = {}) {
     }
   };
   visit(element);
+  if (!range) {
+    const exploreSummary = extractExploreSummary(element);
+    if (exploreSummary) parts.push(` ${exploreSummary} `);
+  }
   return parts.join('').replace(/\s+/g, ' ').trim();
 }
 
@@ -121,8 +163,8 @@ export function captureSelection({document: doc = document, window: win = window
 export function captureParagraph(node, {document: doc = document, window: win = doc.defaultView, volume, version = ''} = {}) {
   const target = elementOf(node);
   if (!target?.isConnected || target.ownerDocument !== doc || excludedAncestor(target) || target.closest(PARAGRAPH_INTERACTIVE)) return null;
-  const paragraph = target.closest('p');
-  if (!paragraph?.closest('main, article') || paragraph.closest(EXCLUDED) || paragraph.querySelector(`${EXCLUDED}, ${PARAGRAPH_CONTROLS}`)) return null;
+  const paragraph = target.closest('p') || target.closest('li, blockquote, figcaption, dd');
+  if (!paragraph?.closest('main, article, [role="main"]') || excludedAncestor(paragraph) || paragraph.closest(EXCLUDED) || paragraph.querySelector(`${EXCLUDED}, ${PARAGRAPH_CONTROLS}`)) return null;
   const range = doc.createRange();
   range.selectNodeContents(paragraph);
   return captureRange(range, {document: doc, window: win, volume, version});
@@ -131,7 +173,7 @@ export function captureParagraph(node, {document: doc = document, window: win = 
 function captureRange(range, {document: doc, window: win, volume, version}) {
   const start = elementOf(range.startContainer);
   const end = elementOf(range.endContainer);
-  const main = start?.closest('main, article');
+  const main = start?.closest('main, article, [role="main"]');
   if (!main || !main.contains(end) || excludedAncestor(start) || excludedAncestor(end)) return null;
   const section = elementOf(range.commonAncestorContainer).closest('section') || main;
   const mathItems = mathItemsWithin(win, section);
@@ -165,12 +207,24 @@ function captureRange(range, {document: doc, window: win, volume, version}) {
     context = context.slice(begin, begin + 12000);
   }
   const rect = range.getBoundingClientRect();
+  const clientRects = typeof range.getClientRects === 'function'
+    ? [...range.getClientRects()].filter(r => r.width > 1 && r.height > 1)
+    : [];
+  const firstRect = clientRects[0] || rect;
+  const lastRect = clientRects[clientRects.length - 1] || rect;
   const title = [...doc.querySelectorAll('h1')].find(node => !excludedAncestor(node));
   const source = {
     quote, context, title: title ? readableText(title) || doc.title : doc.title,
     section: heading ? readableText(heading) : '', url: url.href,
     volume: volume || win.location.pathname.match(/(?:^|\/)(vol[1-4])(?:\/|$)/)?.[1] || '',
-    version, rect: {top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height},
+    version, rect: {
+      top: firstRect.top,
+      bottom: lastRect.bottom,
+      left: firstRect.left,
+      right: firstRect.right,
+      width: firstRect.width || rect.width,
+      height: firstRect.height || rect.height,
+    },
   };
   sourceRanges.set(source, {range: range.cloneRange(), element: start});
   return source;

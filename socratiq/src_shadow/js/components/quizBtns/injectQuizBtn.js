@@ -3,6 +3,7 @@ import { SIZE_LIMIT_LLM_CALL} from '../../../configs/env_configs.js' // Adjust t
 import {reduceTextSize} from '../../libs/utils/textUtils.js'
 import {QuizStorage} from '../../libs/memory/quizStorage.js'
 import { ChapterDataCollector } from '../../libs/memory/chapterDataCollector.js';
+import { extractReadableBookText } from '../../utils/textExtractor.js';
 
 
 // Index context independently of the optional controls inserted into the book.
@@ -20,9 +21,7 @@ export function indexPageSections() {
     const headingText = heading.textContent.trim();
     const title = dataNumber && !headingText.startsWith(dataNumber + ' ') ? `${dataNumber} ${headingText}` : headingText;
     const sectionId = section.id || heading.id || `section-${entries.length + 1}`;
-    const copy = section.cloneNode(true);
-    copy.querySelectorAll('script, style, nav, aside, button, input, textarea, select, [hidden], [aria-hidden="true"]').forEach(element => element.remove());
-    const sectionText = copy.textContent.trim();
+    const sectionText = extractReadableBookText(section);
     entries.push({ section, sectionId, title, sectionText, dataNumber });
   }
   window.sectionData = Object.fromEntries(entries.map(entry => [entry.sectionId, { title: entry.title, content: entry.sectionText }]));
@@ -84,6 +83,7 @@ export function injectSvgButtons(shadowRoot) {
 
 function createIconWrapper(title, sectionText, sectionId, shadowRoot) {
   const wrapperDiv = document.createElement('div');
+  wrapperDiv.setAttribute('data-socratiq-ignore', 'true');
   wrapperDiv.style.cssText = `
     margin-top: 0.5rem;
     display: flex;
@@ -144,6 +144,7 @@ function createIconWrapper(title, sectionText, sectionId, shadowRoot) {
 
 function createQuizComponent(quizTitles, shadowRoot) {
   const component = document.createElement('div');
+  component.setAttribute('data-socratiq-ignore', 'true');
   component.className = 'callout callout-style-simple callout-exercise no-icon callout-titled custom-quiz-callout';
   
   // Add custom CSS for the callout

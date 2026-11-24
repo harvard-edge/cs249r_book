@@ -1,0 +1,163 @@
+% Study sheet: Volume III, Chapter 5, KV Cache Management.
+% Numbers: \val{...} from kv_cache_studysheet_numbers.tex, written by kv_cache_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{kv_cache_studysheet_numbers}
+\sheetvolume{3}
+\sheetchapter{5}{KV Cache Management}
+\sheetsources{Numbers from the chapter's mlsysim scenarios; assumed inputs are marked.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+An agent generating nothing can still fill the machine serving it: the \hl{keys and values} computed
+from its token prefix stay in accelerator memory. Retained bytes decide how many contexts \hl{fit};
+time in a slot decides how many turns that memory \hl{serves}.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Derived, not recorded.}{KV state follows from the exact token prefix and model configuration.
+  Dropped, prefill rebuilds it from the token log, which is the task record.}
+\idea{Retained length sets capacity.}{Fit falls as $1/\SequenceLength$. The attention design fixed at
+  pretraining sets bytes per token; the harness sets $\SequenceLength$.}
+\idea{Count unique physical blocks.}{Fixed-size blocks waste under one block per sequence. Forks share
+  prefix blocks and copy only a partial tail before writing.}
+\idea{Reusable is not applicable.}{A hit needs compatible, resident, permitted blocks; none
+  proves evidence current.}
+\idea{Chunk the prefill.}{Prompt chunks plus one token per decode fit the budget,
+  ${\sum_i \PrefillAllocatedTokenCount_i + \lvert\DecodeRequestSet\rvert \le \IterationTokenBudget}$; decodes go first, so each waits one iteration.}
+\idea{Lossy changes the computation.}{Eviction or quantization can break dormant constraints,
+  exact identifiers and schemas; judge it by task acceptance, not perplexity.}
+\end{ideas}
+
+\vspace{8pt}
+\fcard{Footprint and resident fit}%
+  {\begin{gathered}\KvCacheBytesPerToken = 2\,\LayerCount\,\KvHeadCount\,\AttentionHeadDimension\,\ElementStorageSize,
+   \qquad \KvCacheMemory = \SequenceLength\,\KvCacheBytesPerToken\\[2pt]
+   \BatchSize = \left\lfloor \frac{\KvPoolMemory}{\KvCacheMemory} \right\rfloor,
+   \qquad \KvPoolMemory = \NodeHbmCapacity - \WeightMemory - \RuntimeReserveMemory\end{gathered}}%
+  {A key and a value per layer per stored head per token; $\SequenceLength$ tokens retained,
+  $\BatchSize$ contexts resident.}%
+  {Reference node: \val{nodecount} accelerators of \val{accgib} GiB (\val{accgb} GB) each, Llama 3 70B
+  (\val{layers} layers, \val{kvheads} KV heads, head dimension \val{headdim}), \val{elembits}-bit ($\ElementStorageSize = \val{elembytes}$ bytes),
+  weights \val{weightsgb} GB, reserve \val{reservegb} GB.}{}
+\end{leftcol}%
+\begin{rightcol}
+\fcard{Residency tax (Little's law)}%
+  {\MeanSlotOccupancy = \ArrivalRate\,\MeanHoldTime
+   \quad\Rightarrow\quad \frac{\text{released rate}}{\text{kept rate}} = 1 + \frac{\ToolTime}{\ModelTime}}%
+  {Turns per second ($\ArrivalRate$) = slots ($\MeanSlotOccupancy$) $\div$ mean residence. A slot kept through a wait resides
+  $\ModelTime + \ToolTime$; a released one, $\ModelTime$.}%
+  {Means only: bursts of returns need headroom.}%
+  {\begin{tikzpicture}[sheet]
+     \pgfmathsetmacro\sc{200/\val{cycle}}
+     \draw[hotbox] (0,0) rectangle ({\val{gen}*\sc},14);
+     \draw[nbox] ({\val{gen}*\sc},0) rectangle ({\val{cycle}*\sc},14);
+     \node[lab, anchor=center] at ({(\val{gen}+\val{cycle})*\sc/2},7) {tool wait \val{wait} s};
+     \node[small, anchor=north west] at (0,-2) {generate \val{gen} s};
+     \draw[dim] (0,18) -- (0,22) -- ({\val{cycle}*\sc},22) -- ({\val{cycle}*\sc},18);
+     \node[note, anchor=south] at ({\val{cycle}*\sc/2},23) {kept: slot held \val{cycle} s, rate $\div$ \val{tax}};
+     \node[note, anchor=west] at ({\val{cycle}*\sc+4},7) {repair turn};
+   \end{tikzpicture}}
+
+\fcard{Sharing and reuse}%
+  {\text{gain} \approx \frac{1}{1-\SharedPrefixFraction}, \qquad
+   \PrefixHitRate = \frac{\sum_{\WorkloadRequestIndex} \ReusedPrefixLength^{(\WorkloadRequestIndex)}}{\sum_{\WorkloadRequestIndex} \PromptLength^{(\WorkloadRequestIndex)}}}%
+  {$\SharedPrefixFraction$: share of each request's blocks (input plus output allowance) in a prefix stored once. $\PrefixHitRate$ counts
+  prompt tokens attached: resident, permitted, rounded down to whole blocks.}%
+  {A changed early token ends the match: invariant tokens go first.}{}
+
+\vspace{8pt}
+\sheetsec{A paused trajectory: keep, move, or drop}
+\begin{sheettable}{@{}l L L@{}}
+\thead{Policy} & \thead{Choose when} & \thead{Cost on return}\\ \midrule
+Keep & wait under the round trip; memory uncontested; or a user waits and host memory is full & none\\
+Move & longer wait, memory contested, host memory free & reload over host links\\
+Drop & host memory full or resume unlikely; no user waiting & prefill rebuild\\
+\end{sheettable}
+\vspace{3pt}
+{\fontsize{8.6}{11}\selectfont\color{muted}Only uniquely owned blocks free memory. For \val{ctx} tokens
+(\val{kvgb} GB): reload \val{reload} ms, round trip \val{roundtrip} ms, rebuild \val{recompute} s; all scale with $\SequenceLength$.\par}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{$\lfloor \val{poolgb} \div \val{supkvgb} \rfloor = \val{supfit}$ sessions. Kept:
+  \val{supfit} $\div$ \val{supcycle} s = \val{supkept} turns/s; released: \val{supfit} $\div$ \val{supgen} s =
+  \val{supfreed} turns/s, a tax of \val{suptax}$\times$. Avoid drop: a \val{suprecompute} s rebuild (vs.\
+  \val{supreload} ms reload) delays the waiting customer (table).}
+\ans{1}{(a) \val{qshared} $\div$ \val{qblk} = \val{qshblocks} of \val{qtotblocks} blocks: $\SharedPrefixFraction =
+  \val{qf}$, gain about \val{qgain}$\times$. (b) The match ends at the first token: nothing
+  shared (sharing card).}
+\ans{2}{(a) \val{cpbudget} $-$ \val{cpqdec} = up to \val{cpqchunk} per iteration; $\lceil \val{cpprompt} \div \val{cpqchunk} \rceil
+  = \lceil \val{cpqratio} \rceil$ = \val{cpqiters} iterations (was \val{cpchunks}). (b) One iteration: decodes go
+  first; the prompt finishes later (chunk key idea).}
+\columnbreak
+\ans{3}{(a) Each later request reuses \val{qreuse} whole-block tokens: \val{qreusesum} $\div$ \val{qtotal} =
+  \val{qrho}\%. (b) \val{qreuse} + \val{qreusecut} = \val{qreusesumcut} $\div$ \val{qtotal} = \val{qrhocut}\%.
+  Not a defect: the cache cannot see staleness; the lost reuse buys current evidence (sharing card).}
+\ans{4}{Dormant constraints, exact identifiers and schema delimiters: quiet for
+  turns, then decisive. Require task acceptance on repair trajectories against a lossless baseline (lossy key idea).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{How many repair turns per second can the node's memory sustain?}
+Reference node and model (footprint card). Each repair context retains \val{ctx} tokens; each turn
+generates for \val{gen} s, then waits \val{wait} s on its test.\par\vspace{2pt}
+\begin{steps}
+\item Per token $2 \times \val{layers} \times \val{kvheads} \times \val{headdim} \times \val{elembytes}$ =
+  \val{tokbytes} B; per context $\times$ \val{ctx} = \res{\val{kvgb} GB}.
+\item Pool: \val{nodecount} $\times$ \val{accgb} GB (\val{accgib} GiB) = \val{hbmgb} GB; \val{hbmgb} $-$ \val{weightsgb} $-$ \val{reservegb} =
+  \val{poolgb} GB. Payload fit $\lfloor \val{poolgb} \div \val{kvgb} \rfloor$ = \res{\val{fit}}.
+\item As allocated, each request also holds \val{outtok} output tokens (\val{reqtok}: \val{reqgb} GB) and
+  \val{headpct}\% stays free: $\lfloor \val{headkeep} \times \val{poolgb} \div \val{reqgb} \rfloor$ =
+  $\lfloor \val{usegb} \div \val{reqgb} \rfloor$ = \res{\val{chapfit} slots}.
+\item Kept: \val{chapfit} $\div$ \val{cycle} s = \res{\val{chapkept} turns/s}. Released:
+  \val{chapfit} $\div$ \val{gen} s = \res{\val{chapfreed} turns/s}, \val{tax}$\times$ more.
+\end{steps}
+\takeaway{Throughput is fit divided by residence; an idle wait counts.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{The support agent on the same node}
+Each session retains \val{supctx} tokens, generates for \val{supgen} s, then waits \val{supwait} s for
+the customer. Payload fit (step 2).\par\vspace{4pt}
+\textbf{Given:} \val{supctx} $\times$ \val{tokbytes} B = \val{supkvgb} GB per session.\par
+\textbf{You:} find the fit, the kept and released turn rates, the tax, and the pause policy to avoid.\par\vspace{30pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``Reserve each request's full context cap; then it can never run out.''}%
+  {With a \val{cap}-token cap and a mean final length of \val{meanfinal}, a reservation ends
+   \val{efficiency}\% full: \val{reservations} fit; paging by actual length fits about \val{pagedfit}
+   (\val{pagedgain}$\times$).}{}
+\mistake{``A prefix hit means the cached evidence is current.''}%
+  {A hit on a \val{hitprefix}-token prefix replaces \val{rebuild} ms of prefill with a \val{hitpass} ms
+   pass, whether the tokens describe r17 or r18: matching checks tokens, not the repository.}{}
+\mistake{``Offload paused state at every tool call.''}%
+  {Moving costs a \val{roundtrip} ms round trip, \val{reload} ms of it on resume; with free blocks it
+   buys nothing. Under contention, it frees memory for \val{freedwait} s of a \val{wait} s test.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} repair requests of \val{qin} input and \val{qout} output tokens, \val{qblk}-token
+  blocks, a \val{qshared}-token workspace prefix shared. (a) $\SharedPrefixFraction$ and the gain?
+  (b) A per-request timestamp becomes the first token. Now?
+\item \assumed{} the chapter's \val{cpbudget}-token iteration (\val{cpchunk}-token chunks beside \val{cpdecodes}
+  decodes) now carries \val{cpqdec} decodes. (a) Prompt tokens per iteration, and iterations for a
+  \val{cpprompt}-token prompt? (b) What bounds a decode's gap between tokens?
+\item \assumed{} \val{qreq} requests of \val{qprompt} prompt tokens share their first \val{qsame}; whole
+  \val{qb}-token blocks only; the first finds nothing cached. (a) $\PrefixHitRate$? (b) The third replaces
+  the stale r17 log from token \val{qcut}. Now? A defect?
+\item A token-eviction policy halves KV memory and barely moves perplexity. What could it break in
+  the repair agent, and what evidence must it show?
+\end{qs}
+\end{rightcol}
+\end{document}

@@ -56,7 +56,7 @@ export class UINotificationHandler {
                     width: 16px;
                     height: 16px;
                     border: 2px solid #e2e8f0;
-                    border-top-color: #3b82f6;
+                    border-top-color: #8e1537;
                     border-radius: 50%;
                     animation: spin 0.8s linear infinite;
                 }
@@ -146,7 +146,7 @@ export class UINotificationHandler {
                     width: 16px;
                     height: 16px;
                     border: 2px solid #e2e8f0;
-                    border-top-color: #3b82f6;
+                    border-top-color: #8e1537;
                     border-radius: 50%;
                     animation: spin 0.8s linear infinite;
                 }

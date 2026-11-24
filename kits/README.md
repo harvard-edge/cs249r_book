@@ -95,6 +95,11 @@ This is where AI systems meet the physical world.
       <td>Full Linux SBC for edge AI</td>
       <td>Complex pipelines, prototyping</td>
     </tr>
+    <tr>
+      <td align="center"><b>Arduino UNO Q</b></td>
+      <td>Linux MPU and real-time MCU on one board</td>
+      <td>Edge GenAI with physical I/O</td>
+    </tr>
   </tbody>
 </table>
 
@@ -171,7 +176,7 @@ Each platform includes progressive labs:
 ```text
 kits/
 ├── contents/                # Lab content
-│   ├── arduino/             # Arduino Nicla Vision labs
+│   ├── arduino/             # Arduino Nicla Vision and UNO Q labs
 │   ├── seeed/               # Seeed XIAO & Grove Vision labs
 │   ├── raspi/               # Raspberry Pi labs
 │   └── shared/              # Shared resources (DSP, features)
@@ -264,7 +269,7 @@ Thanks to these wonderful people who helped improve the hardware kits!
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧪 🛠️</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Mjrovai"><img src="https://avatars.githubusercontent.com/Mjrovai?v=4?s=80" width="80px;" alt="Marcelo Rovai"/><br /><sub><b>Marcelo Rovai</b></sub></a><br />✍️ 🧑‍💻 🎨 tutorial</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Mjrovai"><img src="https://avatars.githubusercontent.com/Mjrovai?v=4?s=80" width="80px;" alt="Marcelo Rovai"/><br /><sub><b>Marcelo Rovai</b></sub></a><br />🧑‍💻 🎨 ✍️ 🧪 🛠️ tutorial</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=80" width="80px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=80" width="80px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 🎨</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Nishitha-Rajesh"><img src="https://avatars.githubusercontent.com/u/222974421?v=4?v=4?s=80" width="80px;" alt="Nishitha-Rajesh"/><br /><sub><b>Nishitha-Rajesh</b></sub></a><br />🪲 🧑‍💻 ✍️</td>

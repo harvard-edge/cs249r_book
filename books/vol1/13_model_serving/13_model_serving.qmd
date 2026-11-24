@@ -36,7 +36,7 @@ notation-local: [\BatchedRequestLatency, \BatchFormationDelay, \BatchingLatencyB
 
 ::: {.content-visible unless-format="pdf"}
 ::: {.column-margin}
-![](images/svg/margin_stack.svg){width="100%" fig-alt="Machine Learning Systems Architecture Stack"}
+![](images/svg/margin_stack.svg){width="100%" fig-alt="Seven-layer ML systems stack, hardware at the bottom to applications at the top, used as a chapter map: serving is highlighted in full crimson as the chapter's focus; operations is strongly shaded; hardware, frameworks, models, and applications are moderately shaded; training is lightly shaded; the data bar beside the stack has a moderate tint."}
 
 *Architecture stack focus for this chapter.*
 :::
@@ -472,21 +472,26 @@ Two services carry the chapter, one per half, and each lighthouse arrives in the
 
 Large language model (LLM) serving then follows a GPT-2 XL chat service, the bandwidth-bound lighthouse whose decoding step @sec-network-architectures-inference-memory-bandwidth-wall-98d1 traced. Each generated token streams all `{python} ServingLighthouses.gpt2_weights_gb_str` of its FP16 weights from memory, about `{python} ServingLighthouses.gpt2_read_ms_str` on the book's reference H100, so memory bandwidth sets token latency and the memory each conversation holds sets concurrency. Llama 3 8B, a larger member of the same transformer family, extends that case where the per-conversation cache grows large enough to bound how many requests share the accelerator. DLRM, the capacity-bound lighthouse, appears once as a contrast in which embedding lookups rather than arithmetic dominate a request, and MobileNetV2 appears where the target device cannot hold ResNet-50 at all.
 
-| **Section**                      | **What it decides**                                                           | **Running case**                            | **Iron law term or resource it targets**                    |
-|:---------------------------------|:------------------------------------------------------------------------------|:--------------------------------------------|:------------------------------------------------------------|
-| **Serving System Architecture**  | How a replica turns arriving requests into accelerator work                   | ResNet-50 service                           | Fixed overhead $\Latency$ (protocol, serialization, copies) |
-| **Request Lifecycle**            | Where one request's latency budget goes                                       | ResNet-50 request; DLRM contrast            | Every term, stage by stage                                  |
-| **Queuing Theory**               | How much headroom many concurrent requests need                               | ResNet-50 capacity plan                     | Queueing delay added to $\Latency$                          |
-| **Throughput Optimization**      | How many requests share each weight read                                      | ResNet-50 batching sweep                    | $\DataVolume/\Bandwidth$ and $\Latency$ per request         |
-| **Inference Runtime Selection**  | Which engine and number format execute a batch                                | ResNet-50 runtimes and precisions           | Hardware efficiency $\EfficiencyHw$ and bytes $\DataVolume$ |
-| **Node-Level Optimization**      | What stalls the path between network socket and accelerator                   | ResNet-50 node profile                      | Host-side $\Latency$                                        |
-| **Model Loading and Versioning** | How fast a new replica serves, and whether it computes what training computed | ResNet-50 cold start and preprocessing skew | Startup time and prediction accuracy                        |
-| **LLM Serving**                  | How token streams share memory bandwidth and capacity                         | GPT-2 XL decode; Llama 3 8B cache           | $\DataVolume/\Bandwidth$ per token; memory capacity         |
-| **Economics and Planning**       | How many accelerators, at what cost per completed request                     | ResNet-50 fleet; Llama 3 8B tokens          | Cost per request that meets the SLO                         |
+| **Section**                      | **What it decides**                                                           | **Running case**                            | **Iron law term or resource it targets**                       |
+|:---------------------------------|:------------------------------------------------------------------------------|:--------------------------------------------|:---------------------------------------------------------------|
+| **Serving Modes and Placement**  | Whether predictions run offline or on demand, and on which device tier        | ResNet-50 library vs. API; tier spectrum    | Batch size $\BatchSize$, device memory, and network $\Latency$ |
+| **Serving System Architecture**  | How a replica turns arriving requests into accelerator work                   | ResNet-50 service                           | Fixed overhead $\Latency$ (protocol, serialization, copies)    |
+| **Request Lifecycle**            | Where one request's latency budget goes                                       | ResNet-50 request; DLRM contrast            | Every term, stage by stage                                     |
+| **Queuing Theory**               | How much headroom many concurrent requests need                               | ResNet-50 capacity plan                     | Queueing delay added to $\Latency$                             |
+| **Throughput Optimization**      | How many requests share each weight read                                      | ResNet-50 batching sweep                    | $\DataVolume/\Bandwidth$ and $\Latency$ per request            |
+| **Inference Runtime Selection**  | Which engine and number format execute a batch                                | ResNet-50 runtimes and precisions           | Hardware efficiency $\EfficiencyHw$ and bytes $\DataVolume$    |
+| **Node-Level Optimization**      | What stalls the path between network socket and accelerator                   | ResNet-50 node profile                      | Host-side $\Latency$                                           |
+| **Model Loading and Versioning** | How fast a new replica serves, and whether it computes what training computed | ResNet-50 cold start and preprocessing skew | Startup time and prediction accuracy                           |
+| **LLM Serving**                  | How token streams share memory bandwidth and capacity                         | GPT-2 XL decode; Llama 3 8B cache           | $\DataVolume/\Bandwidth$ per token; memory capacity            |
+| **Economics and Planning**       | How many accelerators, at what cost per completed request                     | ResNet-50 fleet; Llama 3 8B tokens          | Cost per request that meets the SLO                            |
 
-: **Chapter Map**: Each section answers one serving decision on one of the running cases and names the iron law term or resource that decision most affects. The first four rows follow a single ResNet-50 replica from its architecture to batching; the remaining rows change what the replica executes, how it starts, what it produces, and what it costs. {#tbl-model-serving-chapter-spine tbl-colwidths="[22,32,22,24]"}
+: **Chapter Map**: Each section answers one serving decision on one of the running cases and names the iron law term or resource that decision most affects. After placement fixes when and where predictions run, the next four rows follow a single ResNet-50 replica from its architecture to batching; the remaining rows change what the replica executes, how it starts, what it produces, and what it costs. {#tbl-model-serving-chapter-spine tbl-colwidths="[22,32,22,24]"}
 
-The first four sections in @tbl-model-serving-chapter-spine follow a single ResNet-50 replica from its internal request path through single-request latency, multi-request queuing, and batching; the remaining five change the runtime engine, host-to-device execution path, replica startup, output modality, and fleet economics. Before a team designs any of those layers, however, two placement decisions fix the operating regime: a temporal choice of whether predictions are computed ahead of time or on demand, and a spatial choice of where the model physically runs.
+Across @tbl-model-serving-chapter-spine, every serving decision trades hardware utilization, memory residency, or host overhead against the request's latency deadline. Meeting an online SLO therefore depends on the entire request path, from where the prediction runs to how each replica schedules, executes, and prices its work.
+
+## Serving Modes and Placement {#sec-model-serving-modes-placement-7c41}
+
+Before a team designs an inference server or tunes a runtime, two placement decisions fix the operating regime: a temporal choice of whether predictions are computed ahead of time or on demand, and a spatial choice of where the model physically runs. Together they determine whether the model executes in large offline batches, behind a networked API under tail-latency SLOs, inside a mobile application process, or directly from microcontroller flash.
 
 ### Static vs. dynamic inference {#sec-model-serving-static-vs-dynamic-inference-e864}
 
@@ -498,77 +503,7 @@ Static inference\index{Static inference!precomputed predictions} (also called of
 
 #### Dynamic inference {#sec-model-serving-dynamic-inference-d2d5}
 
-**Dynamic inference**\index{Dynamic inference!definition}\index{Online inference|see{Dynamic inference}} (also called online or real-time inference) evaluates inputs on demand as requests arrive. On-demand execution accommodates arbitrary, previously unseen inputs within the model schema and immediately reflects newly deployed model weights without requiring precomputation. However, executing the model directly within the user request path subjects inference to the strict end-to-end latency budget set by its SLO. Because user requests arrive stochastically, the serving runtime cannot delay execution indefinitely to accumulate large batches. Serving requests individually or in small batches ($\BatchSize=1$ to $\BatchSize=4$) can expose weight traffic or launch overhead that larger batches amortize. When these costs dominate execution, the device completes fewer queries per unit time, increasing provisioned cost per query. This tension between interactive response time and hardware efficiency can make dynamic serving more expensive per query than offline batching (example \ref{exmp-cost-latency}).
-
-```{python}
-#| echo: false
-#| label: cost-latency-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ COST OF LATENCY CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "The Cost of Latency" (Serving Paradigm section)
-# │
-# │ Goal: Quantify the economic trade-off between response time and hardware bill.
-# │ Show: That batch one costs several times more per query than batch eight
-# │       for almost the same latency.
-# │ How: ResNet-50 eager FP16 profile on the H100 at batch 1 and batch 8.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Scenarios
-from mlsysim.fmt import check, fmt, fmt_usd, fmt_time, fmt_rate
-
-class CostLatencyCalc:
-    """Quantifies the economic trade-off between latency and hardware cost per million queries."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    _s = Scenarios.ResNet50BatchOneVersusEightCostH100  # the chapter's ResNet-50 reference profile, batch 1 and 8
-    gpu_cost_per_hour_value = _s.price
-    batch_a, batch_b = _s.batch_sizes
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    latency_a_ms_value = _s.service.service_time(batch_a)
-    throughput_a_rps_value = _s.service.throughput(batch_a)
-    latency_b_ms_value = _s.service.service_time(batch_b)
-    throughput_b_rps_value = _s.service.throughput(batch_b)
-    cost_per_million_a_value = _s.cost_per_million(batch_a)
-    cost_per_million_b_value = _s.cost_per_million(batch_b)
-    cost_increase_pct_value = (_s.cost_ratio - 1) * 100
-    cost_ratio_value = _s.cost_ratio
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(cost_ratio_value > 1, "Scenario A (low latency) must cost more per query than Scenario B.")
-    check(7.45 < cost_ratio_value < 7.55, f"Prose prints a 7.5x cost ratio, matching the printed dollar values; got {cost_ratio_value:.3f}.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    gpu_cost_per_hour_str = fmt_usd(gpu_cost_per_hour_value, precision=0, commas=False, per="hour")
-    latency_a_ms_str = fmt_time(latency_a_ms_value, 'millisecond', precision=1, commas=False)
-    throughput_a_rps_str = fmt_rate(round(throughput_a_rps_value.magnitude) * (count / second), 'req/s', precision=0, commas=True)
-    latency_b_ms_str = fmt_time(latency_b_ms_value, 'millisecond', precision=1, commas=False)
-    throughput_b_rps_str = fmt_rate(round(throughput_b_rps_value.magnitude) * (count / second), 'req/s', precision=0, commas=True)
-    cost_a_str = fmt_usd(cost_per_million_a_value, precision=2, commas=False)
-    cost_b_str = fmt_usd(cost_per_million_b_value, precision=2, commas=False)
-    cost_ratio_mult_str = fmt_multiple(cost_ratio_value, precision=1, commas=False)
-```
-
-::: {#exmp-cost-latency .callout-example title="The cost of latency"}
-
-Latency constraints directly dictate infrastructure costs. The figures below come from the ResNet-50 reference profile that @sec-model-serving-batching-helps-f1dc later sweeps across batch sizes. Consider a GPU server renting for `{python} CostLatencyCalc.gpu_cost_per_hour_str`.
-
-Scenario A (low latency): Batch size 1.
-
-*   Latency: `{python} CostLatencyCalc.latency_a_ms_str`.
-*   Throughput: `{python} CostLatencyCalc.throughput_a_rps_str`.
-*   Cost per million queries: `{python} CostLatencyCalc.cost_a_str`.
-
-Scenario B (high throughput): Batch size 8.
-
-*   Latency: `{python} CostLatencyCalc.latency_b_ms_str`, barely above batch one, because the fixed launch cost dominates both.
-*   Throughput: `{python} CostLatencyCalc.throughput_b_rps_str`.
-*   Cost per million queries: `{python} CostLatencyCalc.cost_b_str`.
-
-**Systems insight**: Serving one image at a time saves only the difference between `{python} CostLatencyCalc.latency_b_ms_str` and `{python} CostLatencyCalc.latency_a_ms_str` of latency, yet multiplies the hardware cost per million queries by `{python} CostLatencyCalc.cost_ratio_mult_str`. The batch-8 latency counts execution only; it leaves out the time the server spends waiting for eight requests to arrive, the formation delay that @sec-model-serving-batching-tax quantifies. Engineers must quantify whether that speedup generates enough business value to justify the `{python} CostLatencyCalc.cost_ratio_mult_str` cost increase.
-
-:::
+**Dynamic inference**\index{Dynamic inference!definition}\index{Online inference|see{Dynamic inference}} (also called online or real-time inference) evaluates inputs on demand as requests arrive. On-demand execution accommodates arbitrary, previously unseen inputs within the model schema and immediately reflects newly deployed model weights without requiring precomputation. However, executing the model directly within the user request path subjects inference to the strict end-to-end latency budget set by its SLO. Because user requests arrive stochastically, the serving runtime cannot delay execution indefinitely to accumulate large batches. Serving requests individually or in small batches ($\BatchSize=1$ to $\BatchSize=4$) can expose weight traffic or launch overhead that larger batches amortize. When these costs dominate execution, the device completes fewer queries per unit time, increasing provisioned cost per query. This tension between interactive response time and hardware efficiency can make dynamic serving several times more expensive per query than batched execution (@sec-model-serving-batching-helps-f1dc).
 
 ```{python}
 #| echo: false
@@ -712,7 +647,7 @@ These two modes optimize for different operating regimes. Static inference maxim
 
 ### The spectrum of serving architectures {#sec-model-serving-spectrum-serving-architectures-8966}
 
-A cloud server can pool accelerators behind an HTTP endpoint at the cost of a network round trip and multi-second cold starts, whereas a hearing aid or industrial sensor microcontroller cannot afford a network hop or an operating system at all. Although "serving" often implies a networked server processing API requests, the four deployment paradigms (Cloud, Edge, Mobile, and TinyML) and the physical constraints that give rise to them—the light barrier, the power wall, and the memory wall—shape the serving stack into different forms.
+A cloud server can pool accelerators behind an HTTP endpoint at the cost of a network round trip and multi-second cold starts, whereas a hearing aid or industrial sensor microcontroller cannot afford a network hop or an operating system at all. Although "serving" often implies a networked server processing API requests, the four deployment paradigms (Cloud, Edge, Mobile, and TinyML) and the physical constraints that give rise to them (the light barrier, the power wall, and the memory wall) shape the serving stack into different forms.
 
 Serving spans a continuum. At the cloud end, **centralized networked microservices**\index{Microservice!cloud model serving} pool accelerators to optimize throughput and cost per query, at the expense of network round-trip overhead and cold-start latency. Further along, **application-embedded edge serving**\index{Edge serving!embedded function calls} runs models inside client processes via direct function calls, which eliminates network latency and preserves privacy at the expense of strict device memory and power limits. At the far end, **bare-metal firmware execution**\index{TinyML!bare-metal serving} runs on microcontrollers. The four deployment paradigms of @sec-ml-systems-deployment-paradigm-framework-0d25 map onto these three architectures with some overlap. Cloud deployments and on-premises edge servers use networked serving, mobile apps and embedded edge devices run the model inside an application, and TinyML compiles it into firmware. Each tier's memory and power limits stay in force at serving time, and serving adds a latency SLO and cost pressure on top of them, because a training job can run longer to absorb a limit, whereas a live request has a deadline. The same model may therefore require different serving strategies depending on where it runs.
 
@@ -726,7 +661,7 @@ The three architectures differ in what limits them. Networked serving\index{Serv
 ↩ The MLPerf SingleStream, MultiStream, Server, and Offline scenarios are established in @sec-benchmarking-mlperf-execution-scenarios-89f0.
 :::
 
-Embedded execution enables **zero-copy inference**\index{Inference!zero-copy, mobile optimization}. When data moves through a system, each copy consumes CPU cycles and memory bandwidth. In cloud serving, separate physical memory spaces force repeated transfers. A camera frame passes from a network socket buffer to user space, through a preprocessing buffer into page-locked host DRAM, and across PCIe into accelerator memory. A mobile pipeline can eliminate these intermediate copies when its camera, image signal processor (ISP), CPU, and NPU exchange shared buffer descriptors in unified system memory. In unified-memory system-on-chip (SoC) architectures, such as Apple A- and M-series processors or Qualcomm Snapdragon, all compute engines share a single physical DRAM pool. When software passes buffer handles rather than duplicating bytes, inference latency drops and memory bus power decreases, although format conversions may still require CPU or ISP intervention.
+Embedded execution enables **zero-copy inference**\index{Inference!zero-copy, mobile optimization}. When data moves through a system, each copy consumes CPU cycles and memory bandwidth. In cloud serving, separate physical memory spaces force repeated transfers, sending a camera frame from a network socket buffer to user space, through a preprocessing buffer into page-locked host DRAM, and across PCIe into accelerator memory. A mobile pipeline can eliminate these intermediate copies when its camera, image signal processor (ISP), CPU, and NPU exchange shared buffer descriptors in unified system memory. In unified-memory system-on-chip (SoC) architectures, such as Apple A- and M-series processors or Qualcomm Snapdragon, all compute engines share a single physical DRAM pool. When software passes buffer handles rather than duplicating bytes, inference latency drops and memory bus power decreases, although format conversions may still require CPU or ISP intervention.
 
 ```{python}
 #| echo: false
@@ -847,13 +782,7 @@ The deployment tiers differ first in their operating envelopes (latency targets,
 \endgroup
 ```
 
-::: {#psp-resnet-serving .callout-perspective title="ResNet-50 across the serving spectrum"}
-
-**Systems insight**: It is tempting to read @tbl-resnet-serving-spectrum as one model deployed three ways. That reading is misleading, because the cloud and mobile tiers share the ResNet-50 graph but use different precision and runtimes, while the TinyML tier cannot run ResNet-50 at all and substitutes an architecture designed for its constraints. Treating these as one model hides the work that makes each deployment possible.
-
-:::
-
-Whichever tier hosts it, a networked deployment runs the model inside a server process, and each such replica must turn an irregular stream of requests into work its accelerator can execute efficiently. That conversion is the job of the inference server's internal architecture.
+Reading @tbl-resnet-serving-spectrum as a single model deployed three ways would miss the engineering work behind each column: cloud and mobile share the ResNet-50 graph under different precisions and runtimes, whereas TinyML cannot fit ResNet-50 at all and substitutes an architecture built for its SRAM ceiling. Temporal and spatial placement therefore fix when predictions are computed and which form of the model fits the target hardware tier's memory and power envelope. On the networked tiers where this chapter's ResNet-50 and LLM services run, each model replica still has to accept live client traffic inside a server process.
 
 ## Serving System Architecture {#sec-model-serving-serving-system-architecture-4879}
 
@@ -1179,13 +1108,13 @@ At that network boundary, a request's wire representation can cost more CPU time
 
 #### The serialization bottleneck {#sec-model-serving-serialization-bottleneck-aaa0}
 
-Machine learning payloads differ from conventional web API payloads. They consist of multi-dimensional arrays of floating-point numbers (such as image tensors, dense embedding vectors, or token sequence logits). While text-based JSON is ubiquitous in web services, serializing dense numerical arrays into text incurs severe CPU and memory penalties. Serialization overhead\index{Serialization!overhead} manifests because JSON parsers must scan every byte sequentially, validate syntax, allocate heap nodes, and invoke string-to-float conversion routines (such as `strtod`). Each 32-bit float expands from 4 raw bytes into 7 to 15 ASCII characters including punctuation. Furthermore, raw binary data (such as compressed JPEG or raw image bytes) requires Base64 encoding to travel within JSON strings, imposing a 33 percent size inflation before parsing begins.
+Machine learning payloads differ from conventional web API payloads because they consist of multi-dimensional arrays of floating-point numbers (such as image tensors, dense embedding vectors, or token sequence logits). While text-based JSON is ubiquitous in web services, serializing dense numerical arrays into text incurs severe CPU and memory penalties. Serialization overhead\index{Serialization!overhead} manifests because JSON parsers must scan every byte sequentially, validate syntax, allocate heap nodes, and invoke string-to-float conversion routines (such as `strtod`). Each 32-bit float expands from 4 raw bytes into 7 to 15 ASCII characters including punctuation. In addition, raw binary data (such as compressed JPEG or raw image bytes) requires Base64 encoding to travel within JSON strings, imposing a 33 percent size inflation before parsing begins.
 
 ::: {.column-margin .margin-pointer}
 ↩ Clipper's decomposition of serving latency, in which serialization rivals model execution, is established in @sec-benchmarking-endtoend-vs-component-latency-9952.
 :::
 
-Binary serialization formats, such as Protocol Buffers[^fn-protobuf-serialization-overhead] and FlatBuffers,[^fn-flatbuffers-zerocopy-deserialization] bypass this text conversion cost. Float arrays transmit directly as packed IEEE 754 byte streams with zero ASCII conversion and zero Base64 framing. Furthermore, FlatBuffers organizes serialized records with internal relative offsets, enabling zero-copy deserialization\index{FlatBuffers!zero-copy serialization}. The serving application reads tensor dimensions, data types, and byte offsets directly out of the network receive buffer without allocating an intermediate object graph on the heap.
+Binary serialization formats, such as Protocol Buffers[^fn-protobuf-serialization-overhead] and FlatBuffers,[^fn-flatbuffers-zerocopy-deserialization] bypass this text conversion cost. Float arrays transmit directly as packed IEEE 754 byte streams with zero ASCII conversion and zero Base64 framing. FlatBuffers also organizes serialized records with internal relative offsets, enabling zero-copy deserialization\index{FlatBuffers!zero-copy serialization} in which the serving application reads tensor dimensions, data types, and byte offsets directly out of the network receive buffer without allocating an intermediate object graph on the heap.
 
 [^fn-protobuf-serialization-overhead]: **Protocol Buffers (Protobuf)**\index{Protocol Buffers!serialization}: Protobuf uses a predefined schema (from a `.proto` file) to encode structured data into a compact binary format [@protobufDocs]. Because the schema carries field names and types, the wire payload need not repeat them as JSON does. Its wire format is still not identical to a C++ object's in-memory layout, so it requires a parsing step and does not provide the same direct zero-copy access pattern that FlatBuffers targets.
 
@@ -1193,7 +1122,7 @@ Binary serialization formats, such as Protocol Buffers[^fn-protobuf-serializatio
 
 #### REST vs. gRPC {#sec-model-serving-rest-vs-grpc-c7b7}
 
-Transport protocol selection governs connection life cycles and socket multiplexing. Conventional REST APIs typically deploy HTTP/1.1 with JSON payloads. HTTP/1.1 clients commonly use multiple persistent TCP connections for concurrency. Establishing each connection incurs handshake and, for HTTPS, TLS costs, but keep-alive reuse amortizes setup across requests. HTTP/1.1 also returns the responses on a connection in request order, so one slow response delays every response behind it. While REST APIs can adopt HTTP/2 or binary encodings, the combination of HTTP/1.1 and JSON creates significant socket overhead and CPU parsing contention when serving high-throughput tensor workloads.
+Once the wire payload format is chosen, transport protocol selection governs connection life cycles and socket multiplexing. Conventional REST APIs typically deploy HTTP/1.1 with JSON payloads. HTTP/1.1 clients commonly use multiple persistent TCP connections for concurrency. Establishing each connection incurs handshake and, for HTTPS, TLS costs, but keep-alive reuse amortizes setup across requests. HTTP/1.1 also returns the responses on a connection in request order, so one slow response delays every response behind it. While REST APIs can adopt HTTP/2 or binary encodings, the combination of HTTP/1.1 and JSON creates significant socket overhead and CPU parsing contention when serving high-throughput tensor workloads.
 
 In contrast, gRPC (gRPC Remote Procedure Call)[^fn-grpc-inference-protocol] pairs HTTP/2 transport with Protocol Buffers serialization. HTTP/2 establishes a single long-lived TCP connection and multiplexes hundreds of concurrent request and response streams simultaneously using binary framing. Because responses no longer share one ordered channel, a slow response no longer delays the others at the HTTP level. Protobuf, meanwhile, enforces strongly typed contracts and serializes binary tensor payloads efficiently. Consequently, gRPC is the standard protocol for internal microservice communication in model serving clusters, where low latency, compact wire payloads, and bidirectional token streaming are primary design criteria. Even a modest embedding payload shows the gap in wire footprint and host parsing time.
 
@@ -1511,6 +1440,8 @@ Laid on the node's hardware, the same budget occupies three resources in turn, a
 # │       phase; a hatched idle band on the GPU lane.
 # │ How:  Phase durations from LatencyTableCalc laid end to end;
 # │       book_style.setup_plot().
+# │ Provenance: Modeled (serialized host-CPU preprocessing, PCIe transfer, and
+# │             GPU forward-pass phase durations from LatencyTableCalc).
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 from binder.tools.figures import style as book_style
@@ -1586,9 +1517,9 @@ plt.close()
 
 :::
 
-The capacity plan in @sec-model-serving-tail-latency-5376 uses the reference profile as the service time, the batching sweep in @sec-model-serving-batching-helps-f1dc starts from it at batch one, and the cold-start timeline in @sec-model-serving-model-loading-initialization-cc5a assumes its warm steady state. The runtime and precision comparisons in @sec-model-serving-inference-runtime-selection-5eef change one term of the same model at a time, so the effect of each change is visible.
+Once the tensor crosses PCIe in @fig-model-serving-request-timeline, the GPU's batch-one ResNet-50 forward pass becomes the reference profile that later sections vary one mechanism at a time. The capacity plan in @sec-model-serving-tail-latency-5376 uses that forward pass as the worker service time, the batching sweep in @sec-model-serving-batching-helps-f1dc starts from it at batch one, and the cold-start timeline in @sec-model-serving-model-loading-initialization-cc5a assumes its warm steady state. The runtime and precision comparisons in @sec-model-serving-inference-runtime-selection-5eef then change one term of that latency profile at a time, so the effect of each optimization stays visible.
 
-In the ResNet-50 scenario, dense convolutional arithmetic dominates the model stage's work. That does not make the stage compute bound at every batch size. At batch size one on the reference H100, issuing the kernels takes `{python} ResNetH100Profile.eager_issue_ms_str`, `{python} ResNetH100Profile.overhead_share_pct_str` of the forward pass, so the stage is overhead-bound and runs far below peak arithmetic throughput. Reading the weights, the other fixed cost named in the chapter's opening, costs far less in this eager profile than issuing the kernels. Batching amortizes both fixed costs and fills the machine (@sec-model-serving-batching-helps-f1dc). Changing the model architecture can move the dominant cost out of dense arithmetic entirely, and recommendation systems make this shift concrete.
+Inside that ResNet-50 forward pass, dense convolutional arithmetic dominates the model stage's work. That does not make the stage compute bound at every batch size. At batch size one on the reference H100, issuing the kernels takes `{python} ResNetH100Profile.eager_issue_ms_str`, `{python} ResNetH100Profile.overhead_share_pct_str` of the forward pass, so the stage is overhead-bound and runs far below peak arithmetic throughput. Reading the weights, the other fixed cost named in the chapter's opening, costs far less in this eager profile than issuing the kernels. Batching amortizes both fixed costs and fills the machine (@sec-model-serving-batching-helps-f1dc). Changing the model architecture can move the dominant cost out of dense arithmetic entirely, and recommendation systems make this shift concrete.
 
 ```{python}
 #| echo: false
@@ -1740,7 +1671,7 @@ Beyond model forward-pass execution, every request pays fixed overheads to the h
 # │
 # │ Goal: Quantify the share of the reference forward pass consumed by the
 # │       named microsecond-scale overheads.
-# │ Show: Serialization + dispatch + data copy range as a percentage of budget.
+# │ Show: Serialization + dispatch + data copy range as a share of the forward pass.
 # │ How: Sum lower/upper bounds and divide by the reference forward-pass time.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -1796,9 +1727,9 @@ class ServingTaxMicrosecondsCalc:
 
 #### The killer microseconds problem {#sec-model-serving-killer-microseconds-problem-bc00}
 
-Barroso, Patterson, and colleagues identified a gap in how computer systems handle latency across time scales\index{Killer microseconds!latency gap} [@barroso2017]. Nanosecond-scale stalls (such as cache misses) are hidden by the processor, which keeps executing other instructions, while millisecond-scale delays (such as disk I/O or network RPCs) are hidden by operating system thread context switching. Operations in the microsecond range (1–100 $\MicroUnitPrefix\text{s}$) fall into the gap between these two mechanisms. They are too long to spin-wait on a CPU core without wasting compute cycles and power, yet too short for the operating system to context-switch to another thread without paying scheduling overheads that exceed the wait time itself.
+Most of those host-side overheads fall into a gap that Barroso, Patterson, and colleagues identified in how computer systems handle latency across time scales\index{Killer microseconds!latency gap} [@barroso2017]. Nanosecond-scale stalls (such as cache misses) are hidden by the processor, which keeps executing other instructions, while millisecond-scale delays (such as disk I/O or network RPCs) are hidden by operating system thread context switching. Operations in the microsecond range (1–100 $\MicroUnitPrefix\text{s}$) fall into the gap between these two mechanisms. They are too long to spin-wait on a CPU core without wasting compute cycles and power, yet too short for the operating system to context-switch to another thread without paying scheduling overheads that exceed the wait time itself.
 
-Serving infrastructure operates directly in this killer microseconds regime. Using the representative ranges in @tbl-serving-tax, serialization at 50–500 $\MicroUnitPrefix\text{s}$, dispatch at 10–50 $\MicroUnitPrefix\text{s}$, and data copy at 100–500 $\MicroUnitPrefix\text{s}$ are each individually small. For the `{python} ServingTaxMicrosecondsCalc.inference_ms_str` reference forward pass, however, these named microsecond-scale overheads collectively add about `{python} ServingTaxMicrosecondsCalc.micro_tax_min_pct_str` to `{python} ServingTaxMicrosecondsCalc.micro_tax_max_pct_str` of the latency budget before network and queuing delays are counted. No single overhead justifies optimization in isolation, yet together they determine whether the system meets its SLO.
+Serving infrastructure operates directly in this killer microseconds regime. Using the representative ranges in @tbl-serving-tax, serialization at 50–500 $\MicroUnitPrefix\text{s}$, dispatch at 10–50 $\MicroUnitPrefix\text{s}$, and data copy at 100–500 $\MicroUnitPrefix\text{s}$ are each individually small. For the `{python} ServingTaxMicrosecondsCalc.inference_ms_str` reference forward pass, however, these named microsecond-scale overheads collectively add about `{python} ServingTaxMicrosecondsCalc.micro_tax_min_pct_str` to `{python} ServingTaxMicrosecondsCalc.micro_tax_max_pct_str` of that forward-pass duration before network and queuing delays are counted. No single overhead justifies optimization in isolation, yet together they determine whether the system meets its SLO.
 
 Reducing this compound overhead requires changing the architecture across the software-hardware interface. When microsecond delays accumulate across serialization, kernel dispatch, and memory copies, isolated optimizations to individual functions yield negligible improvements. Instead, high-performance serving runtimes remove the boundaries themselves. They use zero-copy memory buffers between networking and execution runtimes, maintain persistent CUDA streams to bypass driver dispatch latencies, and migrate preprocessing kernels directly onto the accelerator to avoid intermediate host-device transfers. Eliminating those fixed boundary costs leaves the portion of preprocessing and execution that scales with the dimensions of the input payload itself.
 
@@ -1964,7 +1895,7 @@ class AdaptiveResolutionCalc:
 
 #### Adaptive resolution {#sec-model-serving-adaptive-resolution-cb4e}
 
-Adaptive resolution\index{Adaptive resolution!content-based selection} lets production systems select resolution dynamically based on content. One approach runs a lightweight classifier at $128{\times}128$ to categorize content type, then selects task-appropriate resolution with documents at $512{\times}512$, landscapes at $224{\times}224$, and faces at $384{\times}384$. In this illustrative scenario, the policy provides `{python} AdaptiveResolutionCalc.adaptive_throughput_improvement_mult_str` throughput improvement with `{python} AdaptiveResolutionCalc.adaptive_accuracy_retention_str` accuracy retention vs. fixed high resolution. This pattern trades preprocessing cost from running the lightweight classifier for inference savings on the main model. The stage after the model, postprocessing, usually costs far less, but it still crosses the device boundary and spends host CPU time.
+Adaptive resolution\index{Adaptive resolution!content-based selection} lets production systems select resolution dynamically based on content. One approach runs a lightweight classifier at $128{\times}128$ to categorize content type, then selects task-appropriate resolution with documents at $512{\times}512$, landscapes at $224{\times}224$, and faces at $384{\times}384$. In this illustrative scenario, the policy provides `{python} AdaptiveResolutionCalc.adaptive_throughput_improvement_mult_str` throughput improvement with `{python} AdaptiveResolutionCalc.adaptive_accuracy_retention_str` accuracy retention vs. fixed high resolution. This pattern trades preprocessing cost from running the lightweight classifier for inference savings on the main model.
 
 ### Postprocessing {#sec-model-serving-postprocessing-3b24}
 
@@ -2001,13 +1932,13 @@ response = {
         for label, prob in zip(labels, top5_probs)
     ],
     "model_version": "resnet50-v2.1",  # Client-side version tracking
-    "inference_time_ms": 5.2,  # Observability for latency monitoring
+    "inference_time_ms": 3.5,  # Observability for latency monitoring
 }
 ```
 
 :::
 
-In @lst-resnet-postprocessing, total postprocessing time is approximately `{python} LatencyTableCalc.l_post_ms_str`, negligible compared with preprocessing and inference. The GPU handles the normalization and top-5 reduction, so the subsequent `.tolist()` call transfers only tens of bytes across PCIe. However, `.tolist()` forces a synchronous device-to-host copy, blocking the host thread until the GPU stream finishes. In high-throughput pipelined servers, such synchronization barriers must be scheduled carefully to avoid stalling the CPU thread while it feeds subsequent requests.
+Moving softmax and top-5 selection onto the GPU in @lst-resnet-postprocessing, rather than running them on the host CPU as drawn in @fig-model-serving-request-timeline, keeps total postprocessing near `{python} LatencyTableCalc.l_post_ms_str` (still negligible compared with preprocessing and inference) while shrinking the PCIe return payload. Because the GPU handles the normalization and top-5 reduction, the subsequent `.tolist()` calls transfer only tens of bytes across PCIe. However, each `.tolist()` call forces a synchronous device-to-host copy, blocking the host thread until the GPU stream finishes. In high-throughput pipelined servers, such synchronization barriers must be scheduled carefully to avoid stalling the CPU thread while it feeds subsequent requests.
 
 #### Output formatting {#sec-model-serving-output-formatting-753f}
 
@@ -2127,7 +2058,7 @@ A request's latency is spent across every stage of its path, not only in the mod
 
 :::
 
-Tracing an isolated request reveals the intrinsic execution time of each pipeline phase. In production, however, multiple requests arrive concurrently and contend for shared accelerators, CPU cores, and memory buses, introducing queuing delays that dwarf raw computation time.
+Stage-by-stage timing, resolution scaling, postprocessing placement, and host-device pipelining set the service time and steady-state duty cycle of a replica when requests arrive in an orderly stream. Once unscheduled clients send requests faster than a worker can retire them, waiting time in the queue rather than work inside the stages begins to dominate the latency budget.
 
 ## Queuing Theory {#sec-model-serving-queuing-theory-tail-latency-29a6}
 
@@ -2372,13 +2303,15 @@ Plotted against the serving utilization $\ServingUtilization$, the fraction of t
 # │ TAIL LATENCY EXPLOSION FIGURE
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @fig-tail-latency-explosion—illustrates why tail latency diverges
-# │          from mean latency as system utilization approaches 100%
+# │          from mean latency as system utilization approaches saturation
 # │
 # │ Goal: Visually demonstrate the nonlinear explosion of p99 latency near
 # │       saturation using an M/M/1 queueing model approximation.
 # │ Show: Mean vs. p99 latency curves, with Safe Zone and Danger Zone annotations.
 # │ How: Compute mean = 1/(1-rho_serv) and p99 approx 4.6x mean; plot on shared axes.
-# │
+# │ Provenance: Modeled (closed-form M/M/1 normalized mean latency 1/(1 - rho)
+# │             and 99th-percentile latency -ln(0.01)/(1 - rho) over rho in
+# │             [0, 0.985]).
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -2392,16 +2325,16 @@ fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.3))
 # =============================================================================
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-utilization = np.linspace(0, 0.95, 100)
+utilization = np.linspace(0, 0.985, 400)
 mean_latency = 1 / (1 - utilization)
-p99_latency = mean_latency * 4.6
+p99_latency = mean_latency * (-np.log(0.01))
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 ax.plot(utilization, mean_latency, '--', color=COLORS['BlueLine'], label='Mean Latency', linewidth=2)
 ax.plot(utilization, p99_latency, '-', color=COLORS['RedLine'], label='Tail Latency (p99)', linewidth=2.5)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.set_xlabel('System Utilization (%)')
+ax.set_xlabel('System Utilization')
 ax.set_ylabel('Request Latency (normalized to service time)')
 ax.set_xlim(0, 1.0)
 ax.set_ylim(0, 50)
@@ -2563,7 +2496,7 @@ class CapacityPlanningCalc:
     check(cp_util_after_fail_value / 100 < cp_rho_safe_value, "N+1 claim: after one failure utilization must stay below the safe threshold.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    cp_mu_required_req_per_s_str = fmt_rate(cp_mu_required_value, 'req/s', precision=1, commas=False)
+    cp_mu_required_req_per_s_str = fmt_rate(cp_mu_required_value, 'req/s', precision=1, commas=True)
     cp_gpus_raw_str = fmt(cp_gpus_raw_value, precision=1, commas=False)
     cp_gpus_ceil_str = fmt_count(cp_gpus_ceil_value, precision=0, commas=False)
     cp_final_raw_str = fmt(cp_final_raw_value, precision=1, commas=False)
@@ -2573,23 +2506,23 @@ class CapacityPlanningCalc:
     cp_n_plus_2_min_gpus_str = fmt_count(cp_n_plus_2_min_value, precision=0, commas=False, label="GPU")
     cp_n_plus_2_headroom_gpus_str = fmt_count(cp_n_plus_2_headroom_value, precision=0, commas=False, label="GPU")
     cp_peak_qps_str = fmt_rate(cp_peak_qps_value, 'QPS', precision=0)
-    cp_single_gpu_rate_req_per_s_str = fmt_rate(round(cp_single_gpu_rate_value.magnitude) * (count / second), 'req/s', precision=0)
+    cp_single_gpu_rate_req_per_s_str = fmt_rate(cp_single_gpu_rate_value, 'req/s', precision=1, commas=False)
     _cp_mu_required_req_per_s_math_fragment = cp_mu_required_req_per_s_str.replace(" req/s", r"\,\mathrm{req}/\mathrm{s}")
     _cp_peak_qps_math_fragment = cp_peak_qps_str.replace(" QPS", r"\,\mathrm{QPS}")
-    cp_service_ms_str = fmt_time(cp_service_ms_value, 'millisecond', precision=1, commas=False)
+    cp_service_ms_str = fmt_time(cp_service_ms_value, 'millisecond', precision=2, commas=False)
     cp_p99_target_ms_str = fmt_time(cp_p99_target_ms_value, 'millisecond', precision=0, commas=False)
     _cp_service_ms_math_fragment = cp_service_ms_str.replace(" ms", r"\,\mathrm{ms}")
     _cp_p99_target_ms_math_fragment = cp_p99_target_ms_str.replace(" ms", r"\,\mathrm{ms}")
-    cp_rho_safe_str = fmt(cp_rho_safe_value, precision=2, commas=False)
-    cp_rho_safe_pct_str = fmt_percent(round(cp_rho_safe_value, 2), precision=0, commas=False, style='prose')
+    cp_rho_safe_str = fmt(cp_rho_safe_value, precision=3, commas=False)
+    cp_rho_safe_pct_str = fmt_percent(round(cp_rho_safe_value, 3), precision=1, commas=False, style='prose')
     mm1_p99_factor_str = fmt_ratio(mm1_p99_factor_value, precision=1, commas=False)
     cp_rho_safe_math = fmt_math(
         f"\\ServingUtilization \\leq "
         f"1 - ({mm1_p99_factor_str} \\times {_cp_service_ms_math_fragment})/"
-        f"{_cp_p99_target_ms_math_fragment} = {cp_rho_safe_str}"
+        f"{_cp_p99_target_ms_math_fragment} \\approx {cp_rho_safe_str}"
     )
     cp_mu_required_math = fmt_math(
-        f"\\RequiredServiceRate = " f"{_cp_peak_qps_math_fragment} / {cp_rho_safe_str} = " f"{_cp_mu_required_req_per_s_math_fragment}"
+        f"\\RequiredServiceRate = " f"{_cp_peak_qps_math_fragment} / {cp_rho_safe_str} \\approx " f"{_cp_mu_required_req_per_s_math_fragment}"
     )
     cp_headroom_pct_str = fmt_percent(cp_headroom_pct_value / 100, precision=0, commas=False, style='prose')
     cp_headroom_factor_str = fmt_ratio(cp_headroom_factor_value, precision=1, commas=False)
@@ -2612,7 +2545,7 @@ Consider designing a ResNet-50 serving system with these requirements:
 The worker model covers waiting for the GPU and the GPU forward pass only. This scenario gives the worker a p99 subbudget of `{python} CapacityPlanningCalc.cp_p99_target_ms_str`. All stages outside the worker (network transit, serialization, preprocessing, transfer, and postprocessing) get a separate combined upper bound of 18 ms. The end-to-end deadline is therefore the worker's `{python} CapacityPlanningCalc.cp_p99_target_ms_str` plus those 18 ms.
 
 **Step 1**: Find safe utilization.
-From @eq-p99-latency, $\TailRequestLatency\approx$ `{python} CapacityPlanningCalc.mm1_p99_factor_str` $\times$ service time / $(1 - \ServingUtilization)$. Setting $\TailRequestLatency\leq$ `{python} CapacityPlanningCalc.cp_p99_target_ms_str` with `{python} CapacityPlanningCalc.cp_service_ms_str` service time gives `{python} CapacityPlanningCalc.cp_rho_safe_math` (`{python} CapacityPlanningCalc.cp_rho_safe_pct_str` maximum utilization). This is an M/M/1 p99 estimate under the stated arrival and service assumptions; a load test must validate the tail.
+From @eq-p99-latency, $\TailRequestLatency\approx$ `{python} CapacityPlanningCalc.mm1_p99_factor_str` $\times$ service time / $(1 - \ServingUtilization)$. Setting $\TailRequestLatency\leq$ `{python} CapacityPlanningCalc.cp_p99_target_ms_str` with `{python} CapacityPlanningCalc.cp_service_ms_str` service time gives `{python} CapacityPlanningCalc.cp_rho_safe_math` (`{python} CapacityPlanningCalc.cp_rho_safe_pct_str` maximum utilization); the remaining steps retain unrounded intermediate values from the reference profile while displaying rounded operands. This is an M/M/1 p99 estimate under the stated arrival and service assumptions; a load test must validate the tail.
 
 **Step 2**: Calculate required service rate.
 `{python} CapacityPlanningCalc.cp_mu_required_math`
@@ -2620,7 +2553,7 @@ From @eq-p99-latency, $\TailRequestLatency\approx$ `{python} CapacityPlanningCal
 **Step 3**: Determine GPU count.
 In this M/M/1 model, the single-GPU rate is `{python} CapacityPlanningCalc.cp_single_gpu_rate_req_per_s_str`.
 
-GPUs needed = `{python} CapacityPlanningCalc.cp_mu_required_req_per_s_str` / `{python} CapacityPlanningCalc.cp_single_gpu_rate_req_per_s_str` = `{python} CapacityPlanningCalc.cp_gpus_raw_str` → `{python} CapacityPlanningCalc.cp_gpus_ceil_str` GPUs
+GPUs needed = `{python} CapacityPlanningCalc.cp_mu_required_req_per_s_str` / `{python} CapacityPlanningCalc.cp_single_gpu_rate_req_per_s_str` ≈ `{python} CapacityPlanningCalc.cp_gpus_raw_str` → `{python} CapacityPlanningCalc.cp_gpus_ceil_str` GPUs
 
 This single-GPU rate is the batch-1 service rate. Each request holds the GPU for the full service time, which keeps the M/M/1 model closed-form. Dynamic batching (@sec-model-serving-throughput-optimization-18d1) amortizes fixed overhead across requests and raises the per-GPU rate several-fold, so a batched deployment may need fewer GPUs after its own latency distribution is validated. @Sec-model-serving-capacity-planning-96a3 compares the two regimes.
 
@@ -2628,7 +2561,7 @@ This single-GPU rate is the batch-1 service rate. Each request holds the GPU for
 This scenario adds `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom for traffic spikes and variance: final count = `{python} CapacityPlanningCalc.cp_gpus_ceil_str` $\times$ `{python} CapacityPlanningCalc.cp_headroom_factor_str` = `{python} CapacityPlanningCalc.cp_final_raw_str`, rounded up to `{python} CapacityPlanningCalc.cp_final_ceil_str`.
 
 **Step 5**: Verify fault tolerance.
-The `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom addresses traffic variance, but production systems also need fault tolerance. With `{python} CapacityPlanningCalc.cp_final_ceil_str` GPUs, losing one leaves `{python} CapacityPlanningCalc.cp_gpus_after_fail_str` GPUs handling `{python} CapacityPlanningCalc.cp_peak_qps_str`. The postfailure utilization is `{python} CapacityPlanningCalc.cp_peak_qps_str` / (`{python} CapacityPlanningCalc.cp_single_gpu_rate_req_per_s_str` $\times$ `{python} CapacityPlanningCalc.cp_gpus_after_fail_str`) = `{python} CapacityPlanningCalc.cp_util_after_fail_pct_math`.
+The `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom addresses traffic variance, but production systems also need fault tolerance. With `{python} CapacityPlanningCalc.cp_final_ceil_str` GPUs, losing one leaves `{python} CapacityPlanningCalc.cp_gpus_after_fail_str` GPUs handling `{python} CapacityPlanningCalc.cp_peak_qps_str`. The postfailure utilization is `{python} CapacityPlanningCalc.cp_peak_qps_str` / (`{python} CapacityPlanningCalc.cp_single_gpu_rate_req_per_s_str` $\times$ `{python} CapacityPlanningCalc.cp_gpus_after_fail_str`) ≈ `{python} CapacityPlanningCalc.cp_util_after_fail_pct_math`.
 
 This remains well below the `{python} CapacityPlanningCalc.cp_rho_safe_pct_str` safe utilization threshold, confirming N+1 redundancy, enough capacity to lose any one GPU and still meet the target. For stricter fault tolerance requirements, N+2 redundancy (tolerating two simultaneous failures) would require `{python} CapacityPlanningCalc.cp_n_plus_2_min_gpus_str` under the same safe-utilization threshold, or about `{python} CapacityPlanningCalc.cp_n_plus_2_headroom_gpus_str` if the `{python} CapacityPlanningCalc.cp_headroom_pct_str` headroom must remain after two simultaneous failures.
 
@@ -2716,7 +2649,7 @@ Once traffic outgrows a single node's safe utilization knee, no single-machine t
 
 #### The tail at scale problem {#sec-model-serving-tail-scale-problem-958d}
 
-Dean and Barroso's analysis shows why tail latency matters more as systems scale beyond single machines [@dean2013]. When requests fan out to $\FanoutBackendCount$ parallel backends (querying an ensemble of models, searching sharded embedding indices, or parallelizing pipeline stages), the overall user request completes only when the slowest sub-task finishes. If sub-task completion events are independent and each has a 99 percent probability of finishing within latency threshold $\LatencySlo$, the probability that all $\FanoutBackendCount$ backends finish within $\LatencySlo$ is $(0.99)^\FanoutBackendCount$. For a fan-out of $\FanoutBackendCount= 10$, only $0.99^{10} \approx 90.4\%$ of requests meet the target; at $\FanoutBackendCount= 100$, that probability drops to $0.99^{100} \approx 36.6\%$, meaning nearly two-thirds of user requests experience a tail delay. This "tail at scale"\index{Tail at scale!fan-out amplification} effect means that overall system performance depends on controlling single-node tail variance.
+Dean and Barroso's analysis shows why tail latency matters more as systems scale beyond single machines [@dean2013]. When requests fan out to $\FanoutBackendCount$ parallel backends (querying an ensemble of models, searching sharded embedding indices, or parallelizing pipeline stages), the overall user request completes only when the slowest sub-task finishes. If sub-task completion events are independent and each has a 99 percent probability of finishing within latency threshold $\LatencySlo$, the probability that all $\FanoutBackendCount$ backends finish within $\LatencySlo$ is $(0.99)^{\FanoutBackendCount}$. For a fan-out of $\FanoutBackendCount= 10$, only $0.99^{10} \approx 90.4\%$ of requests meet the target; at $\FanoutBackendCount= 100$, that probability drops to $0.99^{100} \approx 36.6\%$, meaning nearly two-thirds of user requests experience a tail delay. This "tail at scale"\index{Tail at scale!fan-out amplification} effect means that overall system performance depends on controlling single-node tail variance.
 
 Hedging and tied requests limit the damage from a straggler replica. Under hedging,\index{Hedging!tail tolerance} a request that has not completed within the expected time is duplicated to another server, and the client keeps whichever response arrives first.[^fn-hedging-tail-tolerance] With a stable latency distribution, a threshold at the historical 95th percentile duplicates about 5 percent of requests; correlated slowdowns raise that fraction and can make hedging amplify overload instead of reducing the tail. Tied requests\index{Tied request!latency reduction} instead enter several server queues at once and cancel the other copies when one server begins processing, which avoids waiting to detect a slow response. Both techniques create duplicate work. Cancellation before dispatch prevents a losing copy from consuming accelerator time, whereas cancellation after dispatch only discards its result, so either needs spare capacity and an explicit duplicate-work budget. Canary requests\index{Canary request!fan-out protection}, a different use of the word from the canary rollouts that shift traffic between model versions, apply the same idea to fan-out, sending the request first to one or two servers and committing to the full fan-out only if they answer within the expected time. Replicas or streams on one machine can also race requests, but sharing an accelerator or memory bus can correlate their slowdowns and exhaust the same headroom.
 
@@ -2795,7 +2728,77 @@ Consider the reference ResNet-50 classifier on an H100\index{H100!batching throu
 
 ### Why batching helps {#sec-model-serving-batching-helps-f1dc}
 
-A single request often leaves an accelerator's compute units idle because its operations expose too little parallel work to hide kernel launch overhead or reuse weights streamed from memory (though large spatial inputs or smaller edge accelerators may already saturate at batch one). For workloads that underuse the device at small batches, increasing the batch size improves hardware efficiency\index{GPU utilization!batch size dependency} [@shen2019] by amortizing fixed costs across multiple requests and running inputs in parallel across the batch dimension.
+A single request often leaves an accelerator's compute units idle because its operations expose too little parallel work to hide kernel launch overhead or reuse weights streamed from memory (though large spatial inputs or smaller edge accelerators may already saturate at batch one). For workloads that underuse the device at small batches, increasing the batch size improves hardware efficiency\index{GPU utilization!batch size dependency} [@shen2019] by amortizing fixed costs across multiple requests and running inputs in parallel across the batch dimension (example \ref{exmp-cost-latency}).
+
+```{python}
+#| echo: false
+#| label: cost-latency-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COST OF LATENCY CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "The Cost of Latency" (@sec-model-serving-batching-helps-f1dc)
+# │
+# │ Goal: Quantify the economic trade-off between response time and hardware bill.
+# │ Show: That batch one costs several times more per query than batch eight
+# │       for almost the same latency.
+# │ How: ResNet-50 eager FP16 profile on the H100 at batch 1 and batch 8.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.fmt import check, fmt, fmt_usd, fmt_time, fmt_rate
+
+class CostLatencyCalc:
+    """Quantifies the economic trade-off between latency and hardware cost per million queries."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    _s = Scenarios.ResNet50BatchOneVersusEightCostH100  # the chapter's ResNet-50 reference profile, batch 1 and 8
+    gpu_cost_per_hour_value = _s.price
+    batch_a, batch_b = _s.batch_sizes
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    latency_a_ms_value = _s.service.service_time(batch_a)
+    throughput_a_rps_value = _s.service.throughput(batch_a)
+    latency_b_ms_value = _s.service.service_time(batch_b)
+    throughput_b_rps_value = _s.service.throughput(batch_b)
+    cost_per_million_a_value = _s.cost_per_million(batch_a)
+    cost_per_million_b_value = _s.cost_per_million(batch_b)
+    cost_increase_pct_value = (_s.cost_ratio - 1) * 100
+    cost_ratio_value = _s.cost_ratio
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(cost_ratio_value > 1, "Scenario A (low latency) must cost more per query than Scenario B.")
+    check(7.45 < cost_ratio_value < 7.55, f"Prose prints a 7.5x cost ratio, matching the printed dollar values; got {cost_ratio_value:.3f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    gpu_cost_per_hour_str = fmt_usd(gpu_cost_per_hour_value, precision=0, commas=False, per="hour")
+    latency_a_ms_str = fmt_time(latency_a_ms_value, 'millisecond', precision=1, commas=False)
+    throughput_a_rps_str = fmt_rate(round(throughput_a_rps_value.magnitude) * (count / second), 'req/s', precision=0, commas=True)
+    latency_b_ms_str = fmt_time(latency_b_ms_value, 'millisecond', precision=1, commas=False)
+    throughput_b_rps_str = fmt_rate(round(throughput_b_rps_value.magnitude) * (count / second), 'req/s', precision=0, commas=True)
+    cost_a_str = fmt_usd(cost_per_million_a_value, precision=2, commas=False)
+    cost_b_str = fmt_usd(cost_per_million_b_value, precision=2, commas=False)
+    cost_ratio_mult_str = fmt_multiple(cost_ratio_value, precision=1, commas=False)
+```
+
+::: {#exmp-cost-latency .callout-example title="The cost of latency"}
+
+Latency constraints directly dictate infrastructure costs on the ResNet-50 reference profile swept below. Consider a GPU server renting for `{python} CostLatencyCalc.gpu_cost_per_hour_str`.
+
+Scenario A (low latency): Batch size 1.
+
+*   Latency: `{python} CostLatencyCalc.latency_a_ms_str`.
+*   Throughput: `{python} CostLatencyCalc.throughput_a_rps_str`.
+*   Cost per million queries: `{python} CostLatencyCalc.cost_a_str`.
+
+Scenario B (high throughput): Batch size 8.
+
+*   Latency: `{python} CostLatencyCalc.latency_b_ms_str`, barely above batch one, because the fixed launch cost dominates both.
+*   Throughput: `{python} CostLatencyCalc.throughput_b_rps_str`.
+*   Cost per million queries: `{python} CostLatencyCalc.cost_b_str`.
+
+**Systems insight**: Serving one image at a time saves only the difference between `{python} CostLatencyCalc.latency_b_ms_str` and `{python} CostLatencyCalc.latency_a_ms_str` of latency, yet multiplies the hardware cost per million queries by `{python} CostLatencyCalc.cost_ratio_mult_str`. The batch-8 latency counts execution only; it leaves out the time the server spends waiting for eight requests to arrive, the formation delay that @sec-model-serving-batching-tax quantifies. Engineers must quantify whether that speedup generates enough business value to justify the `{python} CostLatencyCalc.cost_ratio_mult_str` cost increase.
+
+:::
 
 ```{python}
 #| echo: false
@@ -2900,6 +2903,9 @@ Throughput rises almost in proportion to batch size while the fixed overhead dom
 # │ Goal: Compare throughput saturation with formation-plus-inference latency.
 # │ Show: Two vertically aligned panels with the same batch sizes and knee.
 # │ How: Retain the serialized-worker model; give each metric its own panel.
+# │ Provenance: Modeled (affine serialized-worker batching latency and
+# │             throughput across batch sizes [1..2048] from BatchThroughputCalc
+# │             and Scenarios.ResNet50EagerFp16BatchingH100).
 # └─────────────────────────────────────────────────────────────────────────────
 import pandas as pd
 from binder.tools.figures import style as book_style
@@ -3108,7 +3114,7 @@ class BatchingTax:
     wait_time_b1_ms_str = fmt_time(round(w_form_b1), 'millisecond', precision=0, commas=False)
     wait_time_b32_ms_str = fmt_time(round(w_form_b32), 'millisecond', precision=0, commas=False)
     lat_b1_ms_str = fmt_time(round(lat_b1, 1), 'millisecond', precision=1, commas=False)
-    b1_rate_rps_str = fmt_rate(round(b1_rate, -1), 'requests/s', precision=0, commas=False)
+    b1_rate_rps_str = fmt_rate(round(b1_rate), 'requests/s', precision=0, commas=False)  # same 283 the cost example prints
     lat_b32_ms_str = fmt_time(round(lat_b32), 'millisecond', precision=0, commas=False)
     penalty_ratio_mult_str = fmt_multiple(round(penalty_ratio), precision=0, commas=False)
     lambda_qps_str = fmt_rate(lambda_qps, 'QPS', precision=0)
@@ -3130,9 +3136,9 @@ All four are planning models. Each screens candidate configurations under its st
 Formalizing the latency penalty of batch formation requires extending the single-server queuing notation. Let $\BatchServiceTime(\BatchSize)$ denote the execution duration for a batch of size $\BatchSize$. The unbatched service rate is $\ServiceRate= \EffectiveServiceRate(1) = 1/\BatchServiceTime(1)$, while batching $\BatchSize$ inputs yields an effective aggregate throughput of $\EffectiveServiceRate(\BatchSize) = \BatchSize/\BatchServiceTime(\BatchSize)$. In a count-triggered batcher, end-to-end response time decomposes into two distinct penalties. **Batch formation delay**\index{Batching!batch formation delay, definition} $(\BatchFormationDelay)$ is the time earlier requests wait while the batch accumulates to capacity. **Inference inflation**\index{Inference inflation!definition} is the modest increase in kernel execution duration $\BatchServiceTime(\BatchSize)$ as batch size expands from 1 to $\BatchSize$. Under stationary Poisson arrivals at rate $\ArrivalRate$, the first request in a batch waits an average of $(\BatchSize-1)/\ArrivalRate$ seconds while the final arrival waits zero, yielding an average formation delay of $(\BatchSize-1)/(2\ArrivalRate)$. Assuming an execution worker is immediately available upon batch assembly, @eq-batching-tax models the resulting latency-throughput Pareto frontier\index{Pareto Frontier!serving trade-offs}:
 $$ \BatchedRequestLatency\approx \underbrace{ \frac{\BatchSize-1}{2\ArrivalRate} }_{\text{Formation delay}} + \underbrace{ \BatchServiceTime(\BatchSize) }_{\text{Inference time}} $$ {#eq-batching-tax}
 
-@Eq-batching-tax formalizes the component trade-off between accelerator throughput and individual request latency, assuming an idle worker is immediately available upon batch assembly. Increasing $\BatchSize$ raises arithmetic intensity and amortizes memory bandwidth across inputs. Its price is a modest inference inflation in $\BatchServiceTime(\BatchSize)$ and a formation delay for early arrivals. Evaluated as a formation-plus-service component comparison using the service times from @tbl-model-serving-batching-throughput-tradeoff at `{python} BatchingTax.lambda_qps_str`, moving from batch 1 to batch 32 increases formation wait from `{python} BatchingTax.wait_time_b1_ms_str` to `{python} BatchingTax.wait_time_b32_ms_str`. That is a `{python} BatchingTax.penalty_ratio_mult_str` increase in isolated stage latency (`{python} BatchingTax.lat_b1_ms_str` to `{python} BatchingTax.lat_b32_ms_str`).
+@Eq-batching-tax shows that increasing $\BatchSize$ raises arithmetic intensity and amortizes memory bandwidth across inputs, while its price is a modest inference inflation in $\BatchServiceTime(\BatchSize)$ and a formation delay for early arrivals. Evaluated as a formation-plus-service component comparison using the service times from @tbl-model-serving-batching-throughput-tradeoff at `{python} BatchingTax.lambda_qps_str`, moving from batch 1 to batch 32 increases formation wait from `{python} BatchingTax.wait_time_b1_ms_str` to `{python} BatchingTax.wait_time_b32_ms_str`. That is a `{python} BatchingTax.penalty_ratio_mult_str` increase in isolated stage latency (`{python} BatchingTax.lat_b1_ms_str` to `{python} BatchingTax.lat_b32_ms_str`).
 
-Batch-one service, however, cannot sustain `{python} BatchingTax.lambda_qps_str` on a single worker whose peak service rate is only `{python} BatchingTax.b1_rate_rps_str`. Without batching, worker backlog diverges toward infinity, so `{python} BatchingTax.lat_b1_ms_str` does not represent a viable steady-state response time at this arrival rate. Batching is what makes `{python} BatchingTax.lambda_qps_str` feasible on that hardware in the first place, demonstrating that grouping requests can lower loaded end-to-end response time even while adding formation delay. Sizing $\BatchSize$ is therefore an operational stability screen before it is an economic optimization. Operators first enforce queue stability ($\ArrivalRate < \EffectiveServiceRate(\BatchSize)$) and then select the batch size that maximizes throughput within the memory ceiling and latency SLO $(\LatencySlo)$. Because @eq-batching-tax assumes the batcher waits for a full count of $\BatchSize$ requests before launching, the two batching policies below differ in how they relax that count-only assumption when traffic fluctuates.
+Batch-one service, however, cannot sustain `{python} BatchingTax.lambda_qps_str` on a single worker whose peak service rate is only `{python} BatchingTax.b1_rate_rps_str`. Without batching, worker backlog diverges toward infinity, so `{python} BatchingTax.lat_b1_ms_str` does not represent a viable steady-state response time at this arrival rate. Batching is what makes `{python} BatchingTax.lambda_qps_str` feasible on that hardware in the first place, demonstrating that grouping requests can lower loaded end-to-end response time even while adding formation delay. Sizing $\BatchSize$ is therefore an operational stability screen before it is an economic optimization. Operators first enforce queue stability ($\ArrivalRate < \EffectiveServiceRate(\BatchSize)$) and then select the batch size $\BatchSize$ that maximizes throughput within the memory ceiling and latency SLO $(\LatencySlo)$ under @eq-batching-tax.
 
 ### Static vs. dynamic batching {#sec-model-serving-static-vs-dynamic-batching-fd0a}
 
@@ -3205,7 +3211,7 @@ A `{python} BatchingBudgetCalc.max_wait_ms_str` batching window adds `{python} B
 #### Batch size distribution {#sec-model-serving-batch-size-distribution-b3d3}
 
 For fixed calendar windows, the number of requests collected during $\BatchingWindow$ follows a Poisson distribution with mean $\ArrivalRate \BatchingWindow$. @Eq-batch-distribution formalizes this relationship:
-$$\Pr(\text{batch size} = \WindowArrivalCount) = \frac{(\ArrivalRate \BatchingWindow)^\WindowArrivalCount e^{-\ArrivalRate \BatchingWindow}}{\WindowArrivalCount!}$$ {#eq-batch-distribution}
+$$\Pr(\text{batch size} = \WindowArrivalCount) = \frac{(\ArrivalRate \BatchingWindow)^{\WindowArrivalCount} e^{-\ArrivalRate \BatchingWindow}}{\WindowArrivalCount!}$$ {#eq-batch-distribution}
 where $\WindowArrivalCount$ is a nonnegative integer count of arrivals in the window.
 
 ```{python}
@@ -3372,7 +3378,7 @@ class BatchingOptimization:
 
 Applying @eq-latency-constrained-batch to the affine service model for a `{python} BatchingOptimization.slo_ms_str` mean budget shows how the choice of batching window shapes the feasible configuration space. A conservative `{python} BatchingOptimization.s1_window_ms_str` window adds `{python} BatchingOptimization.s1_wait_ms_str` of average formation wait (up to the full `{python} BatchingOptimization.s1_window_ms_str` for the first request in a window) and leaves `{python} BatchingOptimization.s1_budget_ms_str` for inference, enough by @eq-latency-constrained-batch for a batch of about `{python} BatchingOptimization.s1_latency_batch_str` images. The configured engine maximum batch of `{python} BatchingOptimization.engine_max_batch_str`, an assumed setting, is reached first, so the batch is capped at `{python} BatchingOptimization.s1_batch_str` and the worker sustains about `{python} BatchingOptimization.s1_throughput_img_per_s_str` when saturated. An aggressive `{python} BatchingOptimization.s2_window_ms_str` window adds `{python} BatchingOptimization.s2_wait_ms_str` of average wait and leaves `{python} BatchingOptimization.s2_budget_ms_str`, still enough for about `{python} BatchingOptimization.s2_latency_batch_str` images, so the same engine cap limits the batch and saturated capacity does not change. A tail SLO, unlike this mean-latency plan, must budget the full window rather than its average.
 
-This comparison quantifies the diminishing returns of expanding the batching window. Widening the window by `{python} BatchingOptimization.window_increase_ms_str` buys no saturated capacity while increasing average formation wait by `{python} BatchingOptimization.latency_avg_increase_ms_str`. On an accelerator this fast relative to its fixed cost, the latency budget no longer binds first. The engine's maximum batch does. The capped batch forms only when traffic delivers that many requests within one window, so the saturated rate above is a ceiling the worker reaches under heavy load, and at lighter traffic the arrival rate sets the batch size instead. However, this initial screen relies on mean formation wait and deterministic batch sizing. In production, stochastic arrivals introduce batch-size variance that can breach tail deadlines even when the mean latency appears well within the budget, requiring the percentile envelope analysis developed next.
+This comparison quantifies the diminishing returns of expanding the batching window. Widening the window by `{python} BatchingOptimization.window_increase_ms_str` buys no saturated capacity while increasing average formation wait by `{python} BatchingOptimization.latency_avg_increase_ms_str`. On an accelerator this fast relative to its fixed cost, the engine's maximum batch sets the limit before the latency budget does. The capped batch forms only when traffic delivers that many requests within one window, so that saturated rate is a ceiling the worker reaches under heavy load, and at lighter traffic the arrival rate sets the batch size instead. However, this initial screen relies on mean formation wait and deterministic batch sizing. In production, stochastic arrivals introduce batch-size variance that can breach tail deadlines even when the mean latency appears well within the budget, requiring the percentile envelope analysis developed next.
 
 #### SLO violation analysis {#sec-model-serving-slo-violation-analysis-6ebf}
 
@@ -3485,50 +3491,64 @@ The heuristic returns only a formation timer. Its inputs omit the time the oldes
 # │          @sec-model-serving-adaptive-batching-windows-c404
 # │
 # │ Goal: Tabulate the throughput-latency Pareto frontier across batching windows.
-# │ How: each (window, max-batch) config runs saturated on the affine service
-# │      model; avg = W/2 + service, p99 envelope = W + service.
+# │ How: pipelined calendar-window model on the affine service profile: each
+# │      window W carries the largest batch B*(W) that finishes within W
+# │      (T_svc(B) <= W), so throughput = B / W, avg = W/2 + T_svc(B), and
+# │      formation-plus-service envelope = W + T_svc(B).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_time, fmt_rate, fmt_percent, fmt_multiple, check
+from mlsysim.fmt import fmt, fmt_time, fmt_rate, fmt_multiple, check
 from mlsysim.core.units import ms
 
 class ParetoBatching:
-    """Batching Pareto frontier: five window/max-batch configurations on the reference profile."""
+    """Batching Pareto frontier: five pipelined calendar-window configs on the reference profile."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # Each configuration runs saturated: batches fill to the cap. Average latency is half the
-    # window plus service; the p99 column is the conservative envelope, full window plus service.
-    window_ms = [2, 5, 10, 20, 50]
-    max_batch = [8, 16, 32, 64, 128]
+    # Under pipelined calendar-window batching, a single worker launches one batch every W ms
+    # while the next window accumulates. Stability requires T_svc(B) <= W, so the largest
+    # sustainable batch cap for window W is floor((W - T_fixed) / T_per_image).
+    window_ms = [4, 6, 10, 15, 20]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    max_batch = []
+    service_ms = []
     avg_ms = []
     p99_ms = []
     throughput_value = []
-    for _w, _b in zip(window_ms, max_batch):
+    for _w in window_ms:
+        _b = int(((_w * ms - _FIXED) / _PER_IMAGE).to("").magnitude)
         _svc = _SERVICE.service_time(_b).to(ms).magnitude
+        max_batch.append(_b)
+        service_ms.append(_svc)
         avg_ms.append(_w / 2 + _svc)
         p99_ms.append(_w + _svc)
-        throughput_value.append(_b / (_svc / 1000))  # images per second
-    throughput_gain_value = throughput_value[-1] / throughput_value[0] - 1
+        throughput_value.append(_b / (_w / 1000))  # exact calendar-window rate B / W (img/s)
+    throughput_ratio_value = throughput_value[-1] / throughput_value[0]
     p99_ratio_value = p99_ms[-1] / p99_ms[0]
+    late_gain_value = throughput_value[-1] - throughput_value[2]
+    marginal_slopes = []
+    for _i in range(1, len(window_ms)):
+        marginal_slopes.append((throughput_value[_i] - throughput_value[_i - 1]) / (p99_ms[_i] - p99_ms[_i - 1]))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(all(s <= w for s, w in zip(service_ms, window_ms)), "Each batch must finish within its window for pipelined stability.")
     check(throughput_value == sorted(throughput_value), "Throughput must rise across the frontier.")
-    check(p99_ms == sorted(p99_ms), "p99 latency must rise across the frontier.")
+    check(p99_ms == sorted(p99_ms), "Formation-plus-service envelope must rise across the frontier.")
     check(len(set(throughput_value)) == len(throughput_value), "Every configuration must be nondominated.")
+    check(marginal_slopes == sorted(marginal_slopes, reverse=True), "Marginal throughput per ms of envelope must diminish past the knee.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     window_ms_str = [fmt_time(w * ms, 'millisecond', precision=0, commas=False) for w in window_ms]
     max_batch_str = [fmt(b, precision=0, commas=False) for b in max_batch]
     avg_ms_str = [fmt_time(round(a, 1) * ms, 'millisecond', precision=None, commas=False) for a in avg_ms]
     p99_ms_str = [fmt_time(round(p, 1) * ms, 'millisecond', precision=None, commas=False) for p in p99_ms]
-    throughput_str = [fmt_rate(round(t, -2), 'img/s', precision=0, commas=True) for t in throughput_value]
-    throughput_gain_str = fmt_percent(round(throughput_gain_value, 1), precision=0, commas=True, style='prose', max_ratio=10)
+    throughput_str = [fmt_rate(round(t, -1), 'img/s', precision=0, commas=True) for t in throughput_value]
+    throughput_ratio_mult_str = fmt_multiple(round(throughput_ratio_value, 1), precision=None, commas=False)
     p99_ratio_mult_str = fmt_multiple(round(p99_ratio_value, 1), precision=None, commas=False)
+    late_gain_str = fmt_rate(round(late_gain_value, -1), 'img/s', precision=0, commas=True)
 ```
 
-The nondominated batching configurations form a Pareto frontier\index{Pareto frontier!throughput-latency} where improving throughput requires accepting higher latency. Across five window and batch-cap configurations on the reference profile, from a `{python} ParetoBatching.window_ms_str[0]` window capped at batch `{python} ParetoBatching.max_batch_str[0]` to a `{python} ParetoBatching.window_ms_str[4]` window capped at batch `{python} ParetoBatching.max_batch_str[4]`, modeled throughput rises from `{python} ParetoBatching.throughput_str[0]` to `{python} ParetoBatching.throughput_str[4]`, a gain of `{python} ParetoBatching.throughput_gain_str`. The modeled p99 envelope rises from `{python} ParetoBatching.p99_ms_str[0]` to `{python} ParetoBatching.p99_ms_str[4]`, `{python} ParetoBatching.p99_ratio_mult_str` its initial value. Average latency over the same range grows from `{python} ParetoBatching.avg_ms_str[0]` to `{python} ParetoBatching.avg_ms_str[4]`.
+Whether the window is fixed or adaptive, the nondominated batching configurations form a Pareto frontier\index{Pareto frontier!throughput-latency} where improving throughput requires accepting higher latency. Under a pipelined calendar-window model in which each window carries the largest batch the worker can finish within that window ($\BatchServiceTime(\BatchSize) \leq \BatchingWindow$), sweeping five configurations on the reference profile from a `{python} ParetoBatching.window_ms_str[0]` window capped at batch `{python} ParetoBatching.max_batch_str[0]` to a `{python} ParetoBatching.window_ms_str[4]` window capped at batch `{python} ParetoBatching.max_batch_str[4]` raises modeled throughput from `{python} ParetoBatching.throughput_str[0]` to `{python} ParetoBatching.throughput_str[4]`, `{python} ParetoBatching.throughput_ratio_mult_str` the initial rate. Over the same range, the modeled formation-plus-service envelope rises from `{python} ParetoBatching.p99_ms_str[0]` to `{python} ParetoBatching.p99_ms_str[4]`, `{python} ParetoBatching.p99_ratio_mult_str` its initial value, while average latency grows from `{python} ParetoBatching.avg_ms_str[0]` to `{python} ParetoBatching.avg_ms_str[4]`. Most of that throughput gain arrives before the knee, as widening the window from `{python} ParetoBatching.window_ms_str[0]` to `{python} ParetoBatching.window_ms_str[2]` already reaches `{python} ParetoBatching.throughput_str[2]` while doubling the window again to `{python} ParetoBatching.window_ms_str[4]` adds only `{python} ParetoBatching.late_gain_str`.
 
 #### Practical configuration guidelines {#sec-model-serving-practical-configuration-guidelines-9791}
 
@@ -3696,6 +3716,8 @@ class BatchDispatchCalc:
     arrivals_ms_str = MarkdownStr(", ".join(_arrival_ms[:-1]) + f", and {_arrival_ms[-1]} ms")
 ```
 
+@Tbl-practical-batching-config screens the candidate window and batch cap under an idle-worker calendar model, whereas a live server runs a dual-trigger batcher whose ready batch can still wait behind an executing request. Tracing one batch from its oldest arrival through timeout, worker backlog, and response egress shows how those candidate settings govern an actual dispatch decision (example \ref{exmp-model-serving-batch-dispatch-decision}).
+
 ::: {#exmp-model-serving-batch-dispatch-decision .callout-example title="From a batching window to a dispatch decision"}
 
 **Problem**: In a hypothetical trace of the selected dual-trigger configuration, four requests arrive at `{python} BatchDispatchCalc.arrivals_ms_str`. No further requests arrive before dispatch. The worker becomes available at `{python} BatchDispatchCalc.dispatch_ms_str`, and the remaining response path takes `{python} BatchDispatchCalc.outside_ms_str`. Does the oldest request meet the `{python} BatchDispatchCalc.deadline_ms_str` deadline under the planning service-time model?
@@ -3852,7 +3874,7 @@ These physical constraints make edge serving optimization different from data-ce
 
 #### Traffic pattern summary {#sec-model-serving-traffic-pattern-summary}
 
-Traffic-adaptive batching\index{Traffic-adaptive batching!window tuning} adjusts the batching window as queue depth and request rate change. The four MLPerf inference scenarios that @sec-benchmarking-mlperf-execution-scenarios-89f0 defines map onto these traffic shapes and the batching strategy each favors (@tbl-traffic-patterns-summary). These scenarios are benchmark abstractions rather than deployment prescriptions, so the operative batching policy must still follow the service's current concurrency, deadline, and power constraints.
+Traffic-adaptive batching\index{Traffic-adaptive batching!window tuning} adjusts the batching window as queue depth and request rate change. The four MLPerf inference scenarios that @sec-benchmarking-mlperf-execution-scenarios-89f0 defines map onto these traffic shapes and the batching strategy each favors (@tbl-traffic-patterns-summary).
 
 | **Scenario**     | **Context**                      | **Strategy**                  | **Focus**                                |
 |:-----------------|:---------------------------------|:------------------------------|:-----------------------------------------|
@@ -3863,22 +3885,21 @@ Traffic-adaptive batching\index{Traffic-adaptive batching!window tuning} adjusts
 
 : **Traffic Patterns and Batching Strategies**: The four MLPerf inference scenarios approximate distinct deployment contexts. Server traffic (cloud APIs) uses dynamic batching with a timeout; MultiStream evaluates grouped queries under its version-specific latency rules, while a production sensor deadline requires separate validation; SingleStream processes requests individually; Offline uses large batches subject to memory capacity to maximize throughput. {#tbl-traffic-patterns-summary tbl-colwidths="[13,29,28,30]"}
 
-The examples developed here (cloud API traffic under the Server scenario, grouped sensor inputs motivated by MultiStream\index{MLPerf Inference!MultiStream scenario}, and throughput-dominated pipelines under Offline inference\index{MLPerf Inference!offline scenario}) all decide how requests share the accelerator. Together with the latency budget and the queueing model, they decide how one replica of the ResNet-50 service schedules its requests. None of them decides how efficiently the accelerator executes each batch once it forms. The same batch of the same model can run several times faster or slower depending on the engine that compiles and schedules its kernels and on the number format it computes in, and those choices are the next lever.
+Because the four rows of @tbl-traffic-patterns-summary are benchmark abstractions rather than deployment prescriptions, the operative batching policy must still follow the service's current concurrency, deadline, and power constraints.
 
 ::: {#chk-model-serving-batching-traffic-patterns .callout-checkpoint title="Batching and traffic patterns"}
 
-Batching is the primary lever for serving economics, but the optimal strategy depends on context.
+Batching is the primary lever for serving economics, but the optimal strategy depends on traffic arrivals and latency deadlines.
 
-- [ ] **Throughput-latency trade-off**: Explain why batch size 32 achieves `{python} BatchThroughputCalc.throughput_ratio_mult_str` higher throughput than batch size 1, yet a production system with a 20 ms end-to-end SLO, which must also cover preprocessing, transfer, and worker backlog, might still choose batch size 8.
-- [ ] **Wait vs. compute**: Given an end-to-end latency budget, can you separate batch formation, waiting for an available worker, and batch service time $\BatchServiceTime(\BatchSize)$? Which wait does a batching timeout control?
-- [ ] **Dynamic vs. static batching**: Describe why static batching fails under variable traffic arrival rates, and how dynamic batching with an adaptive time window resolves queue starvation.
-- [ ] **Traffic pattern matching**: Map deployment scenarios (cloud API, synchronized multi-camera stream, mobile app) to corresponding MLPerf scenarios, identifying the batching strategy suited to each operational constraint.
-- [ ] **Adaptive windows**: For a desired expected batch count, explain why higher traffic permits a shorter formation window. How would you check whether the realized batches can keep up with arrivals, and what must a load test verify before accepting the configuration?
-- [ ] **When not to batch**: Name a latency target, runtime limitation, or memory condition under which a batching window of zero is the right configuration.
-- [ ] **Bytes and joules per image**: Using @tbl-model-serving-resnet-batch-bytes, explain why energy per image falls steeply from batch 1 to batch 8 but only slightly from batch 8 to batch 32.
-- [ ] **One request, start to finish**: For one ResNet-50 request arriving at 500 QPS, name the stage that sets its latency floor, the quantity that sizes the queue's headroom, and the two things the scheduler's batch changes, and explain how each depends on the one before it.
+- [ ] **Throughput-latency trade-off**: Explain why batch size 32 achieves `{python} BatchThroughputCalc.throughput_ratio_mult_str` higher throughput than batch size 1, yet a service with a 20 ms end-to-end SLO covering preprocessing, transfer, and backlog may still cap batch size at 8 (or disable batching altogether when deadlines or memory leave zero formation headroom).
+- [ ] **Wait decomposition and dynamic windows**: Separate batch-formation wait, worker-queue wait, and batch service time $\BatchServiceTime(\BatchSize)$, and explain how dynamic batching with an adaptive timeout avoids static-batch starvation while shortening formation windows at higher arrival rates.
+- [ ] **Traffic pattern matching**: Map cloud APIs, synchronized multi-camera streams, mobile apps, and offline pipelines to their MLPerf scenarios and corresponding batching policies.
+- [ ] **Bytes and joules per image**: Using @tbl-model-serving-resnet-batch-bytes, explain why energy per image drops steeply from batch 1 to batch 8 as weight reads amortize, then flattens from batch 8 to batch 32.
+- [ ] **End-to-end request budget**: For one ResNet-50 request arriving at 500 QPS, trace the stage that sets its latency floor, the utilization margin that bounds queue growth, and the throughput-versus-latency shift introduced by the scheduler's batch size.
 
 :::
+
+The examples developed here (cloud API traffic under the Server scenario, grouped sensor inputs motivated by MultiStream\index{MLPerf Inference!MultiStream scenario}, and throughput-dominated pipelines under Offline inference\index{MLPerf Inference!offline scenario}) all decide how requests share the accelerator. Together with the latency budget and the queueing model, they decide how one replica of the ResNet-50 service schedules its requests. None of them decides how efficiently the accelerator executes each batch once it forms. The same batch of the same model can run several times faster or slower depending on the engine that compiles and schedules its kernels and on the number format it computes in, and those choices are the next lever.
 
 ## Inference Runtime Selection {#sec-model-serving-inference-runtime-selection-5eef}
 
@@ -3921,7 +3942,7 @@ class RuntimeSelectionOpener:
     speedup_floor_mult_str = fmt_multiple(speedup_floor, precision=0, commas=False)
 ```
 
-Running an unchanged ResNet-50 model through a compiled C++ engine rather than an eager Python interpreter cuts batch-one latency on the reference H100 by more than `{python} RuntimeSelectionOpener.speedup_floor_mult_str`, without altering a single weight. Dynamic batching and request scheduling govern how requests are grouped and queued, but an execution engine still has to map the resulting tensor operations onto physical execution units and memory hierarchies. The **inference runtime**\index{Inference runtime!execution engine}, the software layer that schedules tensor operations and manages device resources, therefore changes both latency and throughput for a fixed model architecture. Runtime engineering proceeds in two steps. Selection chooses the execution engine that fits the deployment target, and configuration tunes that engine for the model, hardware, input shapes, and latency budget.
+Running an unchanged ResNet-50 model through a compiled C++ engine rather than an eager Python interpreter cuts batch-one latency on the reference H100 by more than `{python} RuntimeSelectionOpener.speedup_floor_mult_str`, without altering a single weight. The **inference runtime**\index{Inference runtime!execution engine}, the software layer that maps tensor operations onto physical execution units and manages device memory hierarchies, therefore changes both latency and throughput for a fixed model architecture. Runtime engineering proceeds in two steps. Selection chooses the execution engine that fits the deployment target, and configuration tunes that engine for the model, hardware, input shapes, and latency budget.
 
 ### Runtime constraint map {#sec-ml-frameworks-quantitative-framework-efficiency-comparison-3b77}
 
@@ -3979,7 +4000,7 @@ When latency budgets or serving costs matter more than portability, specialized 
 
 [^fn-openvino-cpu-inference]: **OpenVINO (open visual inference and neural network optimization)**\index{OpenVINO!Intel inference}: An Intel-oriented inference toolkit that converts, optimizes, and runs models across Intel CPU, GPU, and NPU targets [@openvinoDocs]. Specializing for direct hardware execution departs from the portable execution guarantees of general-purpose frameworks, enabling the compiler to emit architecture-tuned vector instructions (such as AVX-512 or AMX) and exploit low-precision integer execution units. While speedups depend on the specific operator mix and target processor, this specialization can make CPU or edge serving economically viable for latency-sensitive models.
 
-Layer fusion[^fn-layer-fusion-serving]\index{Layer fusion|see{Kernel fusion}}\index{Kernel fusion!serving compilers} is kernel fusion (also called operator fusion) applied when the engine is built. For the convolution $\to$ batch normalization $\to$ ReLU block, whose folding @sec-model-compression-operator-fusion-ac1d derives, the serving compiler performs the fold once, at engine build time, because batch normalization is a fixed affine transform once training ends, and the fused kernel reads its input feature map from HBM once.
+Inside those specialized compilers, layer fusion[^fn-layer-fusion-serving]\index{Layer fusion|see{Kernel fusion}}\index{Kernel fusion!serving compilers} is kernel fusion (also called operator fusion) applied when the engine is built. For the convolution $\to$ batch normalization $\to$ ReLU block, whose folding @sec-model-compression-operator-fusion-ac1d derives, the serving compiler performs the fold once, at engine build time, because batch normalization is a fixed affine transform once training ends, and the fused kernel reads its input feature map from HBM once.
 
 ::: {.column-margin .margin-pointer}
 ↩ Kernel fusion, which merges adjacent operations so intermediates stay in registers and on-chip memory instead of round-tripping through HBM, is established in @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8.
@@ -4292,7 +4313,7 @@ Precision selection carries direct infrastructure sizing consequences. Under the
 
 ## Node-Level Optimization {#sec-model-serving-nodelevel-optimization-3d9d}
 
-Runtime selection and precision tuning operate at the model level, determining what computation runs and what numerical format it uses. In the reference ResNet-50 service, however, the forward pass accounts for `{python} LatencyTableCalc.l_inf_ms_str` out of `{python} LatencyTableCalc.l_total_ms_str` end to end, and once a compiled engine shrinks that forward pass to `{python} LatencyBudgetCalc.tensorrt_inference_ms_str`, host preprocessing alone consumes `{python} LatencyBudgetCalc.tensorrt_preprocess_pct_str` of the remaining time. An isolated model benchmark hides those host-side costs: JPEG decoding on CPU cores, copies across the PCIe bus, and the driver work that launches each kernel.
+In the reference ResNet-50 service, the forward pass accounts for `{python} LatencyTableCalc.l_inf_ms_str` out of `{python} LatencyTableCalc.l_total_ms_str` end to end, and once a compiled engine shrinks that forward pass to `{python} LatencyBudgetCalc.tensorrt_inference_ms_str`, host preprocessing alone consumes `{python} LatencyBudgetCalc.tensorrt_preprocess_pct_str` of the remaining time. An isolated model benchmark hides those host-side costs: JPEG decoding on CPU cores, copies across the PCIe bus, and the driver work that launches each kernel.
 
 A request and its model cross four physical boundaries. The storage boundary governs how a new replica loads its weights, and @sec-model-serving-model-lifecycle-management-ff2e and @sec-model-serving-loading-strategies-eb38 develop it. The other three lie on the active request path of a warmed node, and node-level optimization targets them:
 
@@ -4324,7 +4345,7 @@ Ahead-of-time compilation\index{Ahead-of-time compilation!predeployment} execute
 *Noisy neighbors stretch identical forward passes unevenly, widening the tail.*
 :::
 
-Compilation fixes what the accelerator executes; it does not control how steadily the host feeds it. The server shares its host with other work. On a single host, the operating system multiplexes hardware across background telemetry daemons, logging agents, and kernel worker threads. When these unisolated processes contend for execution resources, they intermittently preempt the inference pipeline. These noisy neighbors are a primary source of **latency jitter**\index{Latency jitter!resource contention}, where the physical time required to execute identical forward passes fluctuates unpredictably. This contention inflates 99th percentile (p99) tail latency even when average hardware utilization remains low. Resource contention thus widens tail latency through service-time variance, a physical degradation distinct from the queuing-delay accumulation along the saturation knee plotted in @fig-tail-latency-explosion.
+Compilation fixes what the accelerator executes; it does not control how steadily the host feeds it. Because the server shares its host with other work, the operating system multiplexes hardware across background telemetry daemons, logging agents, and kernel worker threads. When these unisolated processes contend for execution resources, they intermittently preempt the inference pipeline. These noisy neighbors are a primary source of **latency jitter**\index{Latency jitter!resource contention}, where the physical time required to execute identical forward passes fluctuates unpredictably. This contention inflates 99th percentile (p99) tail latency even when average hardware utilization remains low. Resource contention thus widens tail latency through service-time variance, a physical degradation distinct from the queuing-delay accumulation along the saturation knee plotted in @fig-tail-latency-explosion.
 
 Keeping latency predictable\index{Latency!deterministic}\index{Resource isolation!serving} requires isolating the serving process from the operating system's default time-sharing scheduler. Serving systems such as Clockwork demonstrate that deep neural network (DNN) inference execution times can be predictable down to sub-millisecond tolerances under their controlled workload and hardware conditions [@gujarati2020]. CPU affinity (thread pinning)\index{CPU affinity!latency reduction} establishes the baseline compute boundary by binding inference worker threads to designated physical cores. Without pinning, the OS scheduler periodically migrates threads between cores, so a migrated thread loses its warm cache contents and must refetch them. On multi-socket machines the penalty is larger, because memory left on the previous socket must then be reached across the link between sockets, adding tens of nanoseconds of latency per transaction. Pinning threads to specific cores and binding their memory allocations to local NUMA nodes reduces migration-related cache misses and remote-socket memory traffic.
 
@@ -4389,11 +4410,11 @@ Optimizing inference follows the request path from the outside in across four st
 
 :::
 
-A node tuned this way runs each request near its physical limit, but only once it is running. The compiled engine that makes the steady state fast took tens of seconds to build, its weights must cross storage, host memory, and the PCIe bus before the first request arrives, and its preprocessing must match what training used. How a replica reaches that steady state, and whether it computes what training computed once there, decides whether the fast node is also a correct and available one.
+Graph compilation, host resource isolation, CPU vectorization, and timeline profiling bring a serving node close to its physical limit once the replica is warmed up and running. That steady-state speed still leaves open what happens at the edges of a replica's lifecycle, when a container first starts or a new model version replaces an active one.
 
 ## Model Loading and Versioning {#sec-model-serving-model-lifecycle-management-ff2e}
 
-Every optimization so far assumed a replica that is already warmed up in device memory and a host pipeline that reproduces the exact transformations used during training. Both assumptions fail at the edges of a replica's lifecycle. Provisioning a new container or swapping an active model stalls traffic until weights and compiled engines are resident on the device, and any drift between training and serving preprocessing silently corrupts accuracy even when every latency target is met.
+Provisioning a new container or swapping an active model stalls traffic until weights and compiled engines are resident on the device, and any drift between training and serving preprocessing silently corrupts accuracy even when every latency target is met. Across a replica's lifecycle, serving infrastructure must bound cold-start initialization, stage checkpoints in local caches, share device memory safely across co-located models, and keep host transformations identical to training.
 
 ### Cold start and initialization dynamics {#sec-model-serving-model-loading-initialization-cc5a}
 
@@ -4500,7 +4521,7 @@ class ColdStartCalc:
 
 :::
 
-Without warmup, the first live request absorbs deferred JIT compilation, driver memory allocation, and kernel launch overhead. A request whose steady-state forward pass takes `{python} ResNetH100Profile.eager_b1_ms_str` can stall for hundreds of milliseconds during an unmitigated cold start, violating strict SLOs. Cold start also delays capacity. An autoscaler that adds replicas when a surge begins gains no useful throughput until each new replica has finished the whole timeline above, so the existing replicas absorb the surge alone for that long. A warm pool keeps a few spare replicas already loaded and warmed but receiving no traffic, so a scale-out event can route requests to them at once and pays the cold start only when the pool is refilled. Shortening the timeline itself requires systematic selection among storage, memory, and runtime loading strategies.
+Without warmup, the first live request absorbs deferred JIT compilation, driver memory allocation, and kernel launch overhead. A request whose steady-state forward pass takes `{python} ResNetH100Profile.eager_b1_ms_str` can stall for hundreds of milliseconds during an unmitigated cold start, violating strict SLOs. Cold start also delays capacity, because an autoscaler that adds replicas when a surge begins gains no useful throughput until each new replica has finished the whole initialization timeline, so the existing replicas absorb the surge alone for that long. A warm pool keeps a few spare replicas already loaded and warmed but receiving no traffic, so a scale-out event can route requests to them at once and pays the cold start only when the pool is refilled. Shortening the timeline itself requires systematic selection among storage, memory, and runtime loading strategies.
 
 ### Loading strategies and serialization formats {#sec-model-serving-loading-strategies-eb38}
 
@@ -4680,7 +4701,7 @@ The serving-specific manifestation of skew is **preprocessing divergence**\index
 
 :::
 
-A replica that loads quickly, runs predictably, and computes what training computed completes fixed-output serving. Every workload so far, however, has treated a request as one completed prediction. The fastest-growing category of serving workloads violates this assumption entirely. Large language models generate outputs token by token, with each token depending on every previous one. A single request may produce hundreds or thousands of tokens over seconds of elapsed time, yet must feel responsive from the first token onward. The shift from *fixed-output* to *variable-length, streaming-output* serving reopens each tool developed so far, from the latency budget to the runtime.
+A replica that loads quickly, isolates co-located models, and computes the same features training used completes the lifecycle of a fixed-output service. Every workload so far, however, has treated a request as a single forward pass that returns one completed prediction, and shifting to *variable-length, streaming-output* generation reopens each tool developed so far, from the latency budget to the runtime.
 
 ## LLM Serving {#sec-model-serving-llm-serving-b8bf}
 
@@ -4694,7 +4715,7 @@ Each property strains a different tool from the preceding sections. Sequential g
 
 [^fn-autoregressive-decoding-serving]: **Autoregressive**\index{Autoregressive model!autoregressive, serial bottleneck}: From Greek *auto-* (self) and Latin *regressus* (a going back), since the output "regresses" on itself; George Udny Yule introduced autoregressive models in 1927 for analyzing sunspot cycles. In language modeling, each output token conditions on all previously generated tokens, creating a serial dependency that prevents the parallelism exploited during training. Decode is often weight-bandwidth-bound at small batches; larger batches amortize the weight stream and can shift the bottleneck toward compute or KV-cache traffic [@pope2023efficiently].
 
-The chapter's second service carries the section. GPT-2 XL, the bandwidth-bound lighthouse, anchors the metrics, the decode floor, speculative decoding, and the energy per generated token, because its weight stream sets each of them. Llama 3 8B, introduced with the running cases, carries the cache budget, paging, and prefix reuse, because its longer contexts make memory capacity rather than bandwidth the first constraint to run out.
+The chapter's second service carries the section. GPT-2 XL, the bandwidth-bound lighthouse, anchors the metrics, the decode floor, and speculative decoding, because its weight stream sets each of them. Llama 3 8B, introduced with the running cases, carries the cache budget, paging, and prefix reuse, because its longer contexts make memory capacity rather than bandwidth the first constraint to run out. A larger production chat service then closes the section with the energy per generated token.
 
 ### Performance metrics: TTFT and TPOT {#sec-model-serving-performance-metrics-ttft-tpot-b009}
 
@@ -4861,7 +4882,7 @@ Batching changes which bytes dominate. Each sequence also reads its own KV cache
 
 Switching a chat endpoint from greedy decoding to four-way beam search quadruples both the arithmetic per step and the KV-cache memory each active user holds. The sampling algorithm executed at each step therefore shapes serving cost directly. Greedy decoding\index{Greedy decoding!LLM generation} takes the highest-scoring token and needs one forward pass per token, though it can fall into repetitive output because it never revisits an early choice. Beam search\index{Beam search!decoding strategy} keeps several candidate sequences and multiplies both computational work and KV-cache footprint by the beam width. Stochastic sampling\index{Sampling!temperature, top-k, top-p} instead draws each token at random from the model's output, after scaling the logits by a temperature and restricting the draw to the most likely tokens with top-$\TopTokenSampleCount$\index{Top-k!sampling} or top-$\NucleusProbabilityMass$ nucleus sampling\index{Nucleus sampling!top-p} [@holtzman2020curious]. For the serving system, beam width multiplies the state each request holds, while the sampling variants add only a small per-step reduction whose cost depends on its kernel implementation.
 
-Interactive LLM services commonly return tokens as they are produced rather than waiting for complete generation. This streaming response\index{Streaming response!LLM serving} transforms the user experience. A two-second total generation feels responsive when tokens stream continuously, but feels broken when users stare at a blank screen for two seconds. Streaming requires infrastructure support for incremental responses and client-side rendering. Once generation streams token by token, the serving unit changes from one fixed-output prediction to a stateful sequence whose length is unknown when it is admitted and whose memory footprint grows on every step. The unknown length breaks the fixed-batch scheduling developed for fixed-output models, and the growing state turns accelerator memory into the next constraint.
+Interactive LLM services commonly return tokens as they are produced rather than waiting for complete generation. This streaming response\index{Streaming response!LLM serving} transforms the user experience. A two-second total generation feels responsive when tokens stream continuously, but feels broken when users stare at a blank screen for two seconds. Streaming requires infrastructure support for incremental responses and client-side rendering.
 
 ### Continuous batching {#sec-model-serving-continuous-batching-8bb6}
 
@@ -5004,7 +5025,7 @@ Keeping decode batches full, however, shifts the primary serving bottleneck to m
 
 **PagedAttention**\index{PagedAttention!memory fragmentation solution},[^fn-paged-attention-memory] introduced in vLLM, resolves this fragmentation by applying operating system virtual memory paging to accelerator memory [@kwon2023]. In static contiguous allocation, reserving maximum sequence length memory up front causes internal waste, while freed regions may be too small or poorly placed to satisfy a new contiguous reservation. Instead of allocating one contiguous region per sequence, PagedAttention divides the KV cache into fixed-size blocks mapped through a block table. A sequence's cache can therefore occupy noncontiguous physical blocks. When a sequence completes, its blocks return to a free pool for reuse. Rather than copying noncontiguous blocks into a temporary contiguous buffer before computing attention, a specialized PagedAttention CUDA kernel traverses the block table directly, staging noncontiguous blocks into on-chip SRAM during query-key multiplication.
 
-By eliminating external fragmentation and bounding internal waste to each sequence's last, partially filled block, PagedAttention reduced KV-cache waste below 4 percent in the reported evaluation and enabled substantially higher batch concurrency on the same accelerator hardware [@kwon2023]. Paging decides where cache blocks live, however. It does not reduce the KV bytes stored per token; a sequence needs another block only when its current allocation fills.
+Eliminating external fragmentation and bounding internal waste to each sequence's last, partially filled block allowed PagedAttention to reduce KV-cache waste below 4 percent in the reported evaluation and enable substantially higher batch concurrency on the same accelerator hardware [@kwon2023]. Paging decides where cache blocks live, however, rather than reducing the KV bytes stored per token; a sequence needs another block only when its current allocation fills.
 
 A block table separates a sequence's token order from its physical placement. @Fig-serving-paged-kv-mapping uses an eight-block pool: requests C and D occupy the middle pairs, leaving four free blocks in two separated runs. A request E that needs four blocks can use those scattered blocks without moving C or D.
 
@@ -5128,11 +5149,11 @@ class KvBudget:
 
 Once contexts grow, the cache rather than the weights sets how many conversations one accelerator can hold, and Llama 3 8B makes the budget concrete. Each token stores a key vector and a value vector in every layer for every key-value head. Grouped-query attention (GQA) [@dubey2024llama] lets the model's `{python} KvBudget.heads_str` query heads share a smaller set of key-value heads, which cuts the cache by `{python} KvBudget.mha_ratio_mult_str` relative to full multi-head attention. Storing 16-bit Key and Value tensors across $\LayerCount=32$ layers with $\KvHeadCount=8$ such key-value heads of dimension $\AttentionHeadDimension=128$ requires $2 \times 32 \times 8 \times 128 \times 2\text{ bytes} = 131{,}072\text{ bytes} \approx 131\text{ KB}$ per token per sequence. An `{python} KvBudget.context_tokens_str`-token conversation therefore holds `{python} KvBudget.kv_per_seq_gb_str`.
 
-With `{python} KvBudget.weights8_gb_str` of FP16 weights resident on an H100 whose `{python} KvBudget.capacity_gib_str` datasheet capacity is `{python} KvBudget.capacity_gb_str` in the decimal units used for tensor footprints, about `{python} KvBudget.free8_gb_str` remains for caches before runtime workspace, room for about `{python} KvBudget.n_seq_str` such conversations at once. The weights are a fixed cost; every additional conversation, and every additional thousand tokens of context, draws on the same remainder.
+With `{python} KvBudget.weights8_gb_str` of FP16 weights resident on an H100 whose `{python} KvBudget.capacity_gib_str` binary datasheet capacity ($80 \times 2^{30}\text{ B}$) equals `{python} KvBudget.capacity_gb_str` in the decimal gigabytes ($10^9\text{ B}$) used for tensor footprints, about `{python} KvBudget.free8_gb_str` remains for caches before runtime workspace, room for about `{python} KvBudget.n_seq_str` such conversations at once. The weights are a fixed cost; every additional conversation, and every additional thousand tokens of context, draws on the same remainder.
 
 Larger models make the cache the limiting constraint sooner. For a 70-billion-parameter-class model with grouped-query attention, 4-bit weights consume `{python} KvBudget.weights70_gb_str` of the same H100, leaving `{python} KvBudget.free70_gb_str` for FP16 cache before runtime workspace. A batch of `{python} KvBudget.batch_large_str` conversations exhausts that budget at roughly `{python} KvBudget.crossing70_str` tokens of context, so serving engines trade concurrent batch size against context length to avoid out-of-memory failures (@fig-kv-cache-growth).
 
-::: {#fig-kv-cache-growth data-explore="original-v1-kv-cache-growth" data-explore-key="vol1:fig-kv-cache-growth" fig-env="figure" fig-pos="htb" fig-cap="**The KV-Cache Explosion**: FP16 KV-cache usage vs. context length for a 70-billion-parameter-class model with GQA. On the modeled H100's 80 GB of HBM (85.9 GB decimal), 35.3 GB of INT4 weights leave 50.6 GB for KV cache before runtime overhead. Batch size 32 reaches that cache budget at roughly 4.8k tokens, forcing a trade-off between batch size and context length." fig-alt="Line chart of FP16 KV-cache size against context length for batch sizes 1, 4, 16, and 32. All four lines rise linearly, with steeper slopes for larger batches. A red dashed horizontal line marks the cache budget remaining after the INT4 weights on the modeled H100; batch size 32 crosses it near 4.8k tokens. The region above the budget line is shaded red and labeled Out of Memory (OOM) Zone."}
+::: {#fig-kv-cache-growth data-explore="original-v1-kv-cache-growth" data-explore-key="vol1:fig-kv-cache-growth" fig-env="figure" fig-pos="htb" fig-cap="**The KV-Cache Explosion**: FP16 KV-cache usage vs. context length for a 70-billion-parameter-class model with GQA. On the modeled H100's 80 GB binary datasheet HBM capacity ($80 \times 2^{30}\text{ B}$, or 85.9 GB decimal), 35.3 GB of INT4 weights leave 50.6 GB for KV cache before runtime overhead. Batch size 32 reaches that cache budget at roughly 4.8k tokens, forcing a trade-off between batch size and context length." fig-alt="Line chart of FP16 KV-cache size against context length for batch sizes 1, 4, 16, and 32. All four lines rise linearly, with steeper slopes for larger batches. A red dashed horizontal line marks the cache budget remaining after the INT4 weights on the modeled H100; batch size 32 crosses it near 4.8k tokens. The region above the budget line is shaded red and labeled Out of Memory (OOM) Zone."}
 
 ```{python}
 #| echo: false
@@ -5148,7 +5169,9 @@ Larger models make the cache the limiting constraint sooner. For a 70-billion-pa
 # │       16, 32; post-weight cache budget annotated; OOM zone shaded.
 # │ How: Compute KV cache bytes = 2 × layers × d_model × seq × batch × bytes
 # │      ÷ gqa_ratio; convert to GB; plot per-batch-size using book.tools.figures.style palette.
-# │
+# │ Provenance: Modeled (analytical FP16 GQA KV-cache byte formula for
+# │             Models.Language.Llama3_70B against remaining H100 HBM capacity
+# │             after resident INT4 weights).
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -5238,7 +5261,7 @@ Tensor parallelism pays for its split with a collective operation after each lay
 
 #### Prefix caching and memory offloading {#sec-model-serving-prefix-caching-offloading}
 
-Many requests carry identical prefixes, and recomputing their cache entries wastes both prefill compute and memory. **Prefix caching**\index{Prefix caching!KV cache reuse} stores the KV states of common instruction prefixes (such as a 2,000-token system prompt or a shared retrieval-augmented generation (RAG) context), allowing independent requests to reuse the prefill result for an identical prefix. For $\SharedPrefixRequestCount$ requests sharing a prefix of $\SharedPrefixLength$ tokens, the avoided prefill work is roughly $(\SharedPrefixRequestCount-1)\SharedPrefixLength$ token steps, subject to cache hits, eviction, and implementation overhead. Prefix caching saves memory as well, because requests that share a prefix can map to the same stored cache blocks rather than each holding a copy. The shared tokens then count once against the cache budget, which leaves room for more resident conversations. For multi-turn conversations, the same principle lets a subsequent turn process only the new suffix after reusing compatible prior state.
+Within the memory budget of one device or tensor-parallel group, cache capacity also depends on whether requests share state. Many requests carry identical prefixes, and recomputing their cache entries wastes both prefill compute and memory. **Prefix caching**\index{Prefix caching!KV cache reuse} stores the KV states of common instruction prefixes (such as a 2,000-token system prompt or a shared retrieval-augmented generation (RAG) context), allowing independent requests to reuse the prefill result for an identical prefix. For $\SharedPrefixRequestCount$ requests sharing a prefix of $\SharedPrefixLength$ tokens, the avoided prefill work is roughly $(\SharedPrefixRequestCount-1)\SharedPrefixLength$ token steps, subject to cache hits, eviction, and implementation overhead. Prefix caching saves memory as well, because requests that share a prefix can map to the same stored cache blocks rather than each holding a copy. The shared tokens then count once against the cache budget, which leaves room for more resident conversations. For multi-turn conversations, the same principle lets a subsequent turn process only the new suffix after reusing compatible prior state.
 
 When the aggregate KV cache exceeds GPU VRAM, systems can use **KV cache offloading**\index{KV cache!offloading}. This strategy spills inactive or low-priority context windows to host CPU RAM or NVMe SSD, freeing VRAM for active generation. The reload cost is bounded below by bytes moved divided by PCIe or NVMe bandwidth, before software overhead and queueing are added. Offloading therefore prevents OOM failures and enables larger context windows, but it also creates affinity, invalidation, and hot-decode latency risks that must be budgeted explicitly.
 
@@ -5388,9 +5411,9 @@ class ChatMeasuredAnchor:
 
 ::: {#nbk-carbon-chat .callout-notebook title="The energy cost of a chat"}
 
-**Problem**: How much energy does an H100-backed chat service spend per generated token and for a response with `{python} CarbonCostCalc.cc_response_tokens_str`?
+**Problem**: How much energy does an H100-backed production chat service spend per generated token and for a response with `{python} CarbonCostCalc.cc_response_tokens_str`?
 
-As LLMs scale, joules per token becomes a first-class operational metric alongside latency. Assuming the H100 draws its `{python} CarbonCostH100Tdp.h100_tdp_w_str` thermal design power (TDP), this scenario estimate follows from throughput and power [@choquette2023]:
+As LLMs scale, joules per token becomes a first-class operational metric alongside latency. Consider a larger production chat model whose per-H100 decode throughput is far lower than the smaller GPT-2 XL lighthouse in @sec-model-serving-decode-floor-7d3a. Assuming the H100 draws its `{python} CarbonCostH100Tdp.h100_tdp_w_str` thermal design power (TDP), this scenario estimate follows from throughput and power [@choquette2023]:
 
 1.  **Throughput**: `{python} CarbonCostCalc.cc_concurrent_str` concurrent requests $\times$ `{python} CarbonCostCalc.cc_tokens_req_tokens_per_s_str` per request ≈ `{python} CarbonCostCalc.cc_total_tokens_per_s_str`.
 2.  **Power**: `{python} CarbonCostH100Tdp.h100_tdp_w_str` (GPU) + `{python} CarbonCostCalc.cc_host_overhead_w_str` (Host/Overhead) = `{python} CarbonCostCalc.cc_total_power_w_str`.
@@ -5412,11 +5435,15 @@ The primary way to reduce J/token is to increase hardware utilization and elimin
 
 :::
 
+The chat-energy calculation shows that how many sequences share each weight stream and how much accelerator memory each sequence holds also sets the joules spent per useful token: each decode step streams the weights once for the whole active batch, so a well-filled batch divides that energy across concurrent sequences. Unlike fixed-output inference, LLM energy also grows directly with response length, a dependency that becomes even steeper when models generate internal reasoning traces before answering.
+
 ::: {#psp-model-serving-looking-ahead-rise-inference-time-compute-system-2 .callout-perspective title="Looking ahead: Spending more compute per query"}
 
 Every lever so far takes the number of tokens a request generates as given, and fixed-output serving minimizes latency ($\EndToEndRequestLatency \to 0$) for a fixed amount of work per request. Reasoning models and other inference-time-compute systems\index{Reasoning model!inference-time compute}\index{Inference-time compute!reasoning models} make that token count a choice. They deliberately spend more computation per query to improve answer quality, generating intermediate reasoning or search tokens before the visible answer. The optimization target then expands to include answer quality, and every extra reasoning token pays the decode costs this section derived. It adds one more step of decode work at the batch's cadence, holds one more KV-cache entry until the response ends, and takes its share of the joules per token. Answer quality now trades directly against TPOT, cache capacity, and energy per query.
 
 :::
+
+Together, two-phase latency (TTFT and TPOT), iteration-level KV-cache management, and per-token energy accounting form the single-node foundation of autoregressive serving.
 
 ::: {#chk-model-serving-llm-serving-fundamentals .callout-checkpoint title="LLM serving fundamentals"}
 
@@ -5430,11 +5457,11 @@ LLM serving introduces constraints absent from traditional model serving.
 
 :::
 
-Every LLM serving optimization ultimately decides how many sequences share each weight stream and how much accelerator memory each sequence holds. The chat-energy calculation showed that the same sharing sets the joules spent per useful token, because each decode step streams the weights once for the whole active batch, so a well-filled batch divides that energy across sequences. Unlike fixed-output inference, LLM energy also grows with response length. These per-token bounds, however, describe one accelerator. Deciding how many accelerators a service needs, and what each generated token costs, requires carrying them, together with the fixed-output results of the earlier sections, into capacity planning and unit economics.
+These per-token bounds describe one accelerator or single-node tensor-parallel group. Deciding how many accelerators a service needs, and what each generated token costs at fleet scale, requires carrying them, together with the fixed-output results of the earlier sections, into capacity planning and unit economics.
 
 ## Economics and Planning {#sec-model-serving-economics-capacity-planning-3e7e}
 
-A team that has raised an H100's ResNet-50 throughput several-fold through batching still faces a fleet-level question, namely whether serving a `{python} CapacityPlanningCalc.cp_peak_qps_str` target within the same p99 latency SLO costs less on a few H100s or on several times as many lower-cost T4s. Batching, precision tuning, kernel fusion, graph compilation, and the LLM levers that share each weight stream across sequences all improve single-node performance, but production deployment requires choosing how many machines to rent, of what type, and at what total bill. Serving infrastructure cost grows continuously with request volume [@zhang2019mark], while training cost follows a one-time dataset, model, and optimization budget. The bitter lesson sharpens this asymmetry. The methods that win are the ones that scale, so successive models grow larger, and while training pays for that scale once, serving pays for it on every request.
+A team that has raised an H100's ResNet-50 throughput several-fold through batching still faces a fleet-level question, namely whether serving a `{python} CapacityPlanningCalc.cp_peak_qps_str` target within the same p99 latency SLO costs less on a few H100s or on several times as many lower-cost T4s. Serving infrastructure cost grows continuously with request volume [@zhang2019mark], while training cost follows a one-time dataset, model, and optimization budget. The bitter lesson sharpens this asymmetry. The methods that win are the ones that scale, so successive models grow larger, and while training pays for that scale once, serving pays for it on every request.
 
 ::: {.column-margin .margin-pointer}
 ↩ The bitter lesson, that general methods which scale with computation keep outperforming hand-engineered ones, is established in @sec-introduction-bitter-lesson-79c7.
@@ -5454,7 +5481,7 @@ Tail latency dictates the technical design of a serving system, but economics di
 
 :::
 
-The same serving-economics pressure appears in public API prices. @Fig-intelligence-deflation tracks this cost collapse across representative public API list-price snapshots from late 2022 to early 2025 on a logarithmic scale. The steep downward trend line isolates how prompt token pricing fell by multiple orders of magnitude, from thirty dollars per million tokens for original GPT-4 down to several cents for Gemini 1.5 Flash and DeepSeek-V3. Vendor prices change frequently, so these points should be read as historical provenance for the trend rather than as current purchasing guidance [@openai2023chatgptwhisper; @openai2023gpt4web; @openaiCommunity2024gpt4oApi; @openai2024gpt4oMini; @anthropic2024claude3family; @google2024gemini15flashPricing; @deepseek2024v3]. Each order-of-magnitude drop changes which applications are economically viable, and a provider can sustain such prices only if its serving stack extracts more completed requests from each accelerator-hour. Converting engineering efficiency into unit cost draws on the latency, batching, and memory mechanisms of the preceding sections.
+The same serving-economics pressure appears in public API prices. @Fig-intelligence-deflation tracks this cost collapse across representative public API list-price snapshots from late 2022 to early 2025 on a logarithmic scale. The steep downward trend line isolates how prompt token pricing fell by multiple orders of magnitude, from thirty dollars per million tokens for original GPT-4 down to under ten cents for Gemini 1.5 Flash and under thirty cents for uncached DeepSeek-V3. Vendor prices change frequently, so these points should be read as historical provenance for the trend rather than as current purchasing guidance [@openai2023chatgptwhisper; @openai2023gpt4web; @openaiCommunity2024gpt4oApi; @openai2024gpt4oMini; @anthropic2024claude3family; @google2024gemini15flashPricing; @deepseek2024v3]. Each order-of-magnitude drop changes which applications are economically viable, and a provider can sustain such prices only if its serving stack extracts more completed requests from each accelerator-hour. Converting engineering efficiency into unit cost draws on the latency, batching, and memory mechanisms of the preceding sections.
 
 ::: {#fig-intelligence-deflation fig-env="figure" fig-pos="htb" fig-cap="**Intelligence Deflation**: Representative public API input-token list prices per 1M tokens (\$) over time (Log Scale). Nine model-version list prices come from the launch and pricing announcements of OpenAI, Anthropic, Google, and DeepSeek between late 2022 and 2025; the dashed line is a log-linear fit through the price floor, the points that each set a new low. The series is intended as a market trend indicator, not a controlled or current-price comparison. API token-processing prices have collapsed by multiple orders of magnitude, transforming the economics of automated AI workflows." fig-alt="Log-scale scatter plot of nine public API input-token list prices from late 2022 to early 2025, ranging from 30 dollars to 0.075 dollars per million tokens. Blue points are labeled by model, and a red dashed trend line fitted through the cheapest price at each date slopes downward across the plot."}
 
@@ -5471,7 +5498,10 @@ The same serving-economics pressure appears in public API prices. @Fig-intellige
 # │ Show: Named input/prompt-token price points on a log scale with deflation trend line.
 # │ How: data/llm_api_input_prices.csv; log-linear fit through the price
 # │      floor (each point that sets a new minimum); annotate each model.
-# │
+# │ Provenance: Measured (vendor-announced public API prompt/input token list
+# │             prices in USD per million tokens from
+# │             vol1/13_model_serving/data/llm_api_input_prices.csv, with an
+# │             OLS log-linear trend through the running price floor).
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
@@ -5511,7 +5541,7 @@ floor = np.minimum.accumulate(prices)
 on_floor = prices <= floor
 trend_years, trend_prices = years[on_floor], prices[on_floor]
 slope, intercept = np.polyfit(trend_years, np.log10(trend_prices), 1)
-line_years = np.linspace(years.min(), 2025.5, 100)
+line_years = np.linspace(years.min(), years.max(), 100)
 line_prices = 10 ** (slope * line_years + intercept)
 
 # -----------------------------------------------------------------------------
@@ -5790,7 +5820,7 @@ class LlmCaseStudyHwSpecs:
     case_study_ttft = service.ttft
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(round(case_study_ttft.to(ms).magnitude, 1) == 41.9, f"Expected 41.9 ms TTFT, got {case_study_ttft}")
+    check(round(case_study_ttft.to(ms).magnitude, 1) == 41.3, f"Expected 41.3 ms TTFT, got {case_study_ttft}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     h100_mem_gb_str = fmt_memory_capacity(h_h100.memory.capacity, unit=GiB, commas=False)
@@ -5841,7 +5871,7 @@ class LlmCaseStudyH100BwRecap:
 Four fixed parameters anchor the latency, memory, and cost calculations for this single-GPU deployment:
 
 *   **Model**: 8-billion-parameter Llama 3 (quantized to 4-bit using activation-aware weight quantization (AWQ); see @sec-model-compression-quantization-precision-cd46 for quantization techniques) [@dubey2024llama; @lin2023awq].
-*   **Hardware**: 1$\times$ NVIDIA H100 SXM5 GPU (`{python} LlmCaseStudyHwSpecs.h100_mem_gb_str` HBM3 device capacity, equivalent to `{python} LlmCaseStudyHwSpecs.h100_mem_decimal_gb_str` on the decimal basis used for tensor footprints, `{python} LlmCaseStudyH100BwRecap.h100_bw_tb_per_s_str` bandwidth) [@choquette2023].
+*   **Hardware**: 1$\times$ NVIDIA H100 SXM5 GPU (`{python} LlmCaseStudyHwSpecs.h100_mem_gb_str` binary datasheet HBM3 capacity, $80 \times 2^{30}\text{ B}$, equivalent to `{python} LlmCaseStudyHwSpecs.h100_mem_decimal_gb_str` on the decimal $10^9$-byte basis used for tensor footprints, `{python} LlmCaseStudyH100BwRecap.h100_bw_tb_per_s_str` bandwidth) [@choquette2023].
 *   **Request characteristics**: `{python} LlmCaseStudyHwSpecs.prompt_tokens_str`-token input prompt (Prefill), `{python} LlmCaseStudyHwSpecs.decode_tokens_str`-token generated response (Decode).
 *   **Target SLOs**: TTFT $<$ `{python} LlmCaseStudyHwSpecs.ttft_target_ms_str`, TPOT $<$ `{python} LlmCaseStudyHwSpecs.tpot_target_ms_str`.
 
@@ -5944,7 +5974,7 @@ class LlmServingCalc:
     request_rate_str = fmt_rate(request_rate_value, 'requests/s', precision=0, commas=False)
 ```
 
-Dividing the `{python} LlmServingCalc.model_weight_gb_str` weight tensor by the `{python} LlmCaseStudyH100BwRecap.h100_bw_tb_per_s_str` bandwidth yields the theoretical floor: $\DecodeTokenTimeFloor\approx$ `{python} LlmServingCalc.token_time_theoretical_ms_str`. The modeled TPOT of `{python} LlmServingCalc.realized_tpot_ms_str` assumes that the serving engine captures the decode step into a single CUDA Graph, so it adds only a small assumed residual per-layer dispatch cost to that floor. Without graph capture, each token would launch 8–10 discrete GPU kernels (normalization, positional encoding, projections, attention, multilayer perceptron (MLP)) in each of the model's 32 layers. At batch size one, those roughly 250–320 small kernels would add several milliseconds of CPU-GPU submission and driver overhead on top of the modeled TPOT. Generating all `{python} LlmServingCalc.decode_tokens_str` therefore takes `{python} LlmServingCalc.decode_tokens_str` $\times$ `{python} LlmServingCalc.realized_tpot_ms_str` = `{python} LlmServingCalc.total_decode_s_str`.
+Dividing the `{python} LlmServingCalc.model_weight_gb_str` weight tensor by the `{python} LlmCaseStudyH100BwRecap.h100_bw_tb_per_s_str` bandwidth yields the theoretical floor: $\DecodeTokenTimeFloor\approx$ `{python} LlmServingCalc.token_time_theoretical_ms_str`. The modeled TPOT of `{python} LlmServingCalc.realized_tpot_ms_str` adds streaming of the request's 16-bit KV cache across the same HBM bus and assumes that the serving engine captures the decode step into a single CUDA Graph so per-layer host launch overhead is eliminated. Without graph capture, each token would launch 8–10 discrete GPU kernels (normalization, positional encoding, projections, attention, multilayer perceptron (MLP)) in each of the model's 32 layers. At batch size one, those roughly 250–320 small kernels would add several milliseconds of CPU-GPU submission and driver overhead on top of the modeled TPOT. Generating all `{python} LlmServingCalc.decode_tokens_str` therefore takes `{python} LlmServingCalc.decode_tokens_str` $\times$ `{python} LlmServingCalc.realized_tpot_ms_str` = `{python} LlmServingCalc.total_decode_s_str`.
 
 #### Memory and throughput {#sec-model-serving-memory-throughput-63dd}
 
@@ -5954,7 +5984,7 @@ With 4-bit weights occupying `{python} LlmServingCalc.model_weight_gb_str`, the 
 
 Consider a representative H100 SXM5 rental cost of approximately `{python} LlmServingCalc.hourly_cost_str` and an assumed isolated prefill rate of `{python} LlmServingCalc.prefill_rate_str` prompt tokens/s, deliberately below the rate implied by the model-side TTFT estimate above to allow for scheduling and kernel inefficiency. Steady-state request throughput cannot exceed either the rate at which the GPU prefills incoming prompts or the rate at which resident KV-cache slots turn over completed responses. Dividing the `{python} LlmServingCalc.prefill_rate_str` prompt tokens/s prefill rate by the `{python} LlmServingCalc.prompt_tokens_str`-token prompt bounds admissions to `{python} LlmServingCalc.request_rate_str`. For this calculation, each completed request counts both its prompt and its generated output tokens, `{python} LlmServingCalc.tokens_per_req_str` in total. The result is therefore a blended cost over every token the request processes, not a price for input or output tokens alone. Multiplying a `{python} LlmServingCalc.request_rate_str` limiting rate by this token count and the 3,600 seconds in an hour gives `{python} LlmServingCalc.m_tokens_per_hour_str`, and dividing the hourly rental cost by that throughput gives `{python} LlmServingCalc.cost_per_million_tokens_usd_str`.
 
-KV-cache capacity sets a second ceiling on request throughput. Little's Law converts the ~`{python} LlmServingCalc.concurrent_batch_str` that the KV cache can hold at once into a maximum turnover rate by dividing that resident count by the modeled time each request needs to finish prefill and decode. That rate assumes every resident request advances at the modeled batch-one pace, which a real decode batch does not achieve, so it is an optimistic ceiling. Even so, it comes out more than ten times higher than the `{python} LlmServingCalc.request_rate_str` prefill bound. The smaller of the two ceilings sets the cost floor, so isolated prefill, not KV residency, prices this service. Neither ceiling is a measured throughput. Prefill and decode contend for the same accelerator, so the request rate the service sustains while meeting its SLO must come from a load test, and the checkpoint that follows lays out that experiment. Until that measurement exists, the cost computed here is a floor on what serving this workload costs, not the price of a deployment.
+KV-cache capacity sets a second ceiling on request throughput. Little's Law converts the ~`{python} LlmServingCalc.concurrent_batch_str` that the KV cache can hold at once into a maximum turnover rate by dividing that resident count by the modeled time each request needs to finish prefill and decode. That rate assumes every resident request advances at the modeled batch-one pace, which a real decode batch does not achieve, so it is an optimistic ceiling. Even so, it comes out more than ten times higher than the `{python} LlmServingCalc.request_rate_str` prefill bound. The smaller of the two ceilings sets the cost floor, so isolated prefill, not KV residency, prices this service. Neither ceiling is a measured throughput, however, because prefill and decode contend for the same accelerator, so the request rate the service sustains while meeting its SLO must come from a load test, and the checkpoint that follows lays out that experiment. Until that measurement exists, the cost computed here is a floor on what serving this workload costs, not the price of a deployment.
 
 ::: {#chk-model-serving-llm-capacity-acceptance .callout-checkpoint title="Complete the LLM capacity decision"}
 
@@ -6035,7 +6065,7 @@ class FallacyLatencyCalc:
 
 Engineers who optimize model inference expect proportional improvement in user-perceived latency\index{Latency!inference vs. user-perceived}, but serving systems introduce latency sources absent from offline benchmarks. Under load, queuing delay dominates: @eq-mm1-wait shows that at `{python} FallacyLatencyCalc.fl_utilization_high_pct_str` utilization with `{python} FallacyLatencyCalc.fl_service_slow_ms_str` service time, average wait time is `{python} FallacyLatencyCalc.fl_wait_slow_ms_str` before inference even begins. Reducing inference from `{python} FallacyLatencyCalc.fl_service_slow_ms_str` to `{python} FallacyLatencyCalc.fl_service_fast_ms_str` changes service time but also shifts utilization from `{python} FallacyLatencyCalc.fl_utilization_high_pct_str` to `{python} FallacyLatencyCalc.fl_utilization_new_pct_str`, reducing queuing wait from `{python} FallacyLatencyCalc.fl_wait_slow_ms_str` to `{python} FallacyLatencyCalc.fl_wait_fast_ms_str`, a `{python} FallacyLatencyCalc.fl_queuing_improvement_mult_str` queuing improvement that dwarfs the `{python} FallacyLatencyCalc.fl_inference_gain_ms_str` inference gain.
 
-This nonlinear interaction between inference speed and queuing behavior produces an apparent paradox. The system-level speedup (`{python} FallacyLatencyCalc.fl_total_slow_ms_str` → `{python} FallacyLatencyCalc.fl_total_fast_ms_str`, or `{python} FallacyLatencyCalc.fl_system_speedup_mult_str`) far exceeds the model-level speedup (`{python} FallacyLatencyCalc.fl_service_slow_ms_str` → `{python} FallacyLatencyCalc.fl_service_fast_ms_str`, or `{python} FallacyLatencyCalc.fl_model_speedup_mult_str`). At first glance, this superlinear improvement appears to contradict Amdahl's law, which states that total system speedup is strictly bounded by the enhanced execution fraction. However, the fixed-fraction Amdahl calculation holds other stage costs unchanged; serving is a dynamic queueing system. Average queue waiting time scales nonlinearly with server utilization: $\QueueWaitTime \propto \frac{\ServingUtilization}{1 - \ServingUtilization}$, where $\ServingUtilization = \ArrivalRate \cdot \BatchServiceTime(1)$ for unbatched service. When kernel optimization cuts service time $\BatchServiceTime(1)$, it both accelerates execution and lowers server utilization $\ServingUtilization$. Pulling utilization away from saturation collapses queue waiting times nonlinearly. A kernel optimization therefore shortens the request twice, once in the service time and again in the queue that the lower utilization drains. Conversely, profiling inference latency in isolation without modeling arrival load conceals the primary driver of user-perceived performance.
+This nonlinear interaction between inference speed and queuing behavior produces an apparent paradox. The system-level speedup (`{python} FallacyLatencyCalc.fl_total_slow_ms_str` → `{python} FallacyLatencyCalc.fl_total_fast_ms_str`, or `{python} FallacyLatencyCalc.fl_system_speedup_mult_str`) far exceeds the model-level speedup (`{python} FallacyLatencyCalc.fl_service_slow_ms_str` → `{python} FallacyLatencyCalc.fl_service_fast_ms_str`, or `{python} FallacyLatencyCalc.fl_model_speedup_mult_str`). At first glance, this superlinear improvement appears to contradict Amdahl's law, which states that total system speedup is strictly bounded by the enhanced execution fraction. However, the fixed-fraction Amdahl calculation holds other stage costs unchanged; serving is a dynamic queueing system. In an M/M/1 queue, average queue waiting time equals $\QueueWaitTime = \BatchServiceTime(1) \cdot \frac{\ServingUtilization}{1 - \ServingUtilization}$, where $\ServingUtilization = \ArrivalRate \cdot \BatchServiceTime(1)$ for unbatched service. When kernel optimization cuts service time $\BatchServiceTime(1)$ at a fixed arrival rate $\ArrivalRate$, it shrinks both the leading $\BatchServiceTime(1)$ factor and the utilization term $\frac{\ServingUtilization}{1 - \ServingUtilization}$ together. Pulling utilization away from saturation collapses queue waiting times nonlinearly. A kernel optimization therefore shortens the request twice, once in the service time and again in the queue that the lower utilization drains. Conversely, profiling inference latency in isolation without modeling arrival load conceals the primary driver of user-perceived performance.
 
 :::
 
@@ -6377,7 +6407,7 @@ Token-streaming language models stretch the whole toolkit at once. On the chapte
 
 Capacity planning converts throughput that meets the SLO into replica count and unit cost, while the Llama 3 case study in @sec-model-serving-production-case-study-serving-llama38b-0499 separates calculable capacity bounds from the load experiment needed to establish valid throughput. A faster kernel that neither reduces provisioned capacity nor improves the SLO has not produced an economic gain.
 
-Every row of the chapter map (@tbl-model-serving-chapter-spine) reduces to a few counting rules, collected in @tbl-model-serving-key-equations. Each formula links an observable workload parameter—arrival rate, service time, batch window, weight volume, or hourly node rate—to the operational metric it governs. Together they let an engineer estimate a service's latency budget, headroom, batch size, decode floor, and cache budget before a load test confirms them.
+Every row of the chapter map (@tbl-model-serving-chapter-spine) reduces to a few counting rules, collected in @tbl-model-serving-key-equations. Each formula links an observable workload parameter (arrival rate, service time, batch window, weight volume, or hourly node rate) to the operational metric it governs. Together they let an engineer estimate a service's latency budget, headroom, batch size, decode floor, and cache budget before a load test confirms them.
 
 | **Quantity**                      | **Formula**                                                                                        | **Where derived**                          |
 |:----------------------------------|:---------------------------------------------------------------------------------------------------|:-------------------------------------------|

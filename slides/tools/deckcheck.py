@@ -55,16 +55,22 @@ unused-images  (error)   A file git ships in images/ that the .tex does not
 style          (error)   An em dash (the character or ---) in slide text,
                          notes, credits or titles; a British spelling (colour,
                          behaviour, optimise, centre, modelling, labelled,
-                         cancelled, ...).
+                         cancelled, ...); banned prose-craft tokens ("ledger",
+                         "binding constraint/limit/...", and metaphorical
+                         "gate/gates/gated/gating" outside technical ML,
+                         hardware, or physical-gate contexts).
                (warning) A hype word (crucial, massive, game-changing,
                          revolutionary, unprecedented, cutting-edge) outside
                          credits; an em dash used as an empty table cell.
-notes          (error)   Every frame has a note that opens with [N min]; every
-                         content note carries [CORE] or [OPTIONAL] (anywhere,
-                         usually in FLEX); notes total 68 to 73 minutes; no
-                         note over 220 words (the notes PDF cuts it off
-                         silently); no \\note between frames and no
-                         \\mlsysnote replaced before a theme frame uses it.
+notes          (error)   Every frame has a note that opens with
+                         \\mlsysnotemeta{N min}{Core|Optional} (or legacy
+                         [N min] + [CORE]/[OPTIONAL]); no robotic ALL-CAPS
+                         note tags (NARRATE:, ENGAGE:, WARN:, LINK:, FLEX:,
+                         LAND:, BEAT:); notes total 68 to 73 minutes; no
+                         note over 220 words (keeps Portrait US Letter study
+                         notes cleanly clear of the footer); no \\note between
+                         frames and no \\mlsysnote replaced before a theme
+                         frame uses it.
                (warning) Untagged title, divider, or closing notes
                          (takeaways, open questions, reading, next lecture).
 activity       (error)   At least 3 \\mlsysactivity frames, and no stretch of
@@ -966,6 +972,17 @@ BRITISH = re.compile(r"\b(colou?r(?<=colour)\w*|behaviour\w*|favour\w*|optimis(?
                      r"organis(?:e|ed|es|ing|ation)\b|grey\b)", re.I)
 HYPE = re.compile(r"\b(crucial(?:ly)?|massive(?:ly)?|game[- ]changing|game[- ]changer|revolutionary|"
                   r"revolutioni[sz]e[sd]?|unprecedented|cutting[- ]edge)\b", re.I)
+LEDGER = re.compile(r"\bledgers?\b", re.I)
+BINDING_CONSTRAINT = re.compile(
+    r"\bbinding\s+(?:constraint|limit|resource|bottleneck|term|stage|axis|budget|wall|factor|cap)s?\b", re.I)
+GATE_WORD = re.compile(r"\b(?:gates?|gated|gating)\b", re.I)
+GATE_TECH_ALLOW = re.compile(
+    r"gate/\.style|\b(?:LSTM|GRU|forget|input|output|candidate|update|reset|valves?|four\s+gate\s+maps|"
+    r"logic|AND|OR|NAND|NOR|XOR|CMOS|transistor|inverter|clock|power|quantum|FPGA|silicon|"
+    r"SwiGLU|GeGLU|MLP|MLPs|MoE|expert|experts|network|networks|human-gated|HG-DAgger|"
+    r"spring|latch|fence|fenced|track|carton|carriage|stop\s+line|chains|poles|driver|drivers|"
+    r"delay|oxide|voltage|channel|source|drain|gate\s+case|stops?\s+before\s+the\s+gate|when\s+a\s+gate\s+opens)\b",
+    re.I)
 
 
 def rule_style(deck, vol, out):
@@ -986,9 +1003,10 @@ def rule_style(deck, vol, out):
                 f"em dash as an empty table cell; prefer a blank cell or \"n/a\": \"{context(s, off)}\"")
             continue
         out("style", "error", slide, line, f"em dash: \"{context(s, off)}\"")
-    # Prose regions only: slide text, titles, notes, credits.
+    # Prose regions only: slide text, titles, figure labels, notes, credits.
     for f in deck.frames:
-        regions = [("slide", f.text), ("note", detex(f.note))] + [("credit", detex(c)) for c in f.credits]
+        regions = [("slide", f.text), ("figure", f.figtext), ("note", detex(f.note))] + [
+            ("credit", detex(c)) for c in f.credits]
         for where, text in regions:
             for m in BRITISH.finditer(text):
                 w = m.group(0)
@@ -999,19 +1017,58 @@ def rule_style(deck, vol, out):
                 continue   # titles of cited papers are quoted as published
             for m in HYPE.finditer(text):
                 out("style", "warning", f.num, f.line, f"hype word \"{m.group(0)}\" in the {where}")
+            for m in LEDGER.finditer(text):
+                out("style", "error", f.num, f.line,
+                    f"banned coined noun \"{m.group(0)}\" in the {where} (name the artifact: log, catalog, audit trail, table)")
+            for m in BINDING_CONSTRAINT.finditer(text):
+                out("style", "error", f.num, f.line,
+                    f"banned phrase \"{m.group(0)}\" in the {where} (use \"limiting ...\")")
+            for m in GATE_WORD.finditer(text):
+                ctx = text[max(0, m.start() - 60):min(len(text), m.end() + 60)]
+                if not GATE_TECH_ALLOW.search(ctx):
+                    out("style", "error", f.num, f.line,
+                        f"metaphorical \"{m.group(0)}\" in the {where} (use check, criterion, threshold, or hold): \"{ctx.strip()}\"")
 
 
 def context(s, off, width=40):
     return re.sub(r"\s+", " ", s[max(0, off - width):off + width]).strip()
 
 
-MIN_RE = re.compile(r"^\s*\[(\d+(?:\.\d+)?)\s*min\]")
-TAG_RE = re.compile(r"\[(CORE|OPTIONAL)\b[^\]]*\]")
+MIN_RE = re.compile(
+    r"^\s*(?:\[(\d+(?:\.\d+)?)\s*min\]|\\mlsysnotemeta\{(\d+(?:\.\d+)?)\s*min\})")
+TAG_RE = re.compile(
+    r"\[(CORE|OPTIONAL)\b[^\]]*\]|\\mlsysnotemeta\{[^}]*\}\{(Core|Optional)\b[^}]*\}", re.I)
+LLM_NOTE_TAG = re.compile(r"\b(NARRATE|ENGAGE|WARN|LINK|FLEX|LAND|BEAT)\s*:")
+# 2026-11-23: notes address the learner; classroom mechanics live only in
+# \notecue{Teach}{...}. These phrases outside a Teach cue mean the note is
+# talking to the instructor (see rules/slides/speaker-notes.md).
+INSTRUCTOR_VOICE = re.compile(
+    r"\b(?:Ask|Have|Give|Let|Invite|Poll|Remind)\s+(?:students|pairs|the class|anyone)\b"
+    r"|\b(?:Most|Many|Some) students\b|\bClick(?:ing)?\b(?: forward)?|\bshow of hands\b"
+    r"|\bthumbs (?:up|down)\b|\bvote with\b|\b50-minute class\b"
+    r"|\bStep \d+ (?:reveals|shows|adds|highlights|plots)\b")
+
+
+def strip_teach_cues(text):
+    """Remove every \\notecue{Teach}{...} (balanced braces) from a note."""
+    out, i, key = [], 0, "\\notecue{Teach}{"
+    while True:
+        j = text.find(key, i)
+        if j < 0:
+            return "".join(out) + text[i:]
+        out.append(text[i:j])
+        k, depth = j + len(key), 1
+        while k < len(text) and depth:
+            depth += {"{": 1, "}": -1}.get(text[k], 0)
+            k += 1
+        i = k
 
 
 def note_minutes(text):
     m = MIN_RE.match(text)
-    return float(m.group(1)) if m else None
+    if not m:
+        return None
+    return float(m.group(1) or m.group(2))
 
 
 CLOSING_TITLE = re.compile(r"^(Takeaways|Open questions|Read and explore|Read, practice|Five things)", re.I)
@@ -1071,6 +1128,14 @@ def rule_notes(deck, vol, out):
                 total += mins
             if not TAG_RE.search(text):
                 untagged.append(f)
+            bad_tag = LLM_NOTE_TAG.search(text)
+            if bad_tag:
+                out("notes", "error", f.num, deck.line_of(off),
+                    f"robotic note tag \"{bad_tag.group(0)}\"; write natural prose with \\mlsysnotemeta and \\notecue{{Check|Watch for|Teach|Next}}{{...}}")
+            voice = INSTRUCTOR_VOICE.search(strip_teach_cues(text))
+            if voice:
+                out("notes", "warning", f.num, deck.line_of(off),
+                    f"note speaks to the instructor (\"{voice.group(0)}\"); address the learner and move classroom mechanics into \\notecue{{Teach}}{{...}}")
             n = len(detex(re.sub(r"\\[A-Za-z]+", " ", text)).split())
             if n > NOTE_WORD_LIMIT:
                 out("notes", "error", f.num, deck.line_of(off),
@@ -1469,11 +1534,110 @@ def rule_numbers(deck, vol, out):
                     f"Lecture{'s' if len(major_decks) > 1 else ''} {', '.join(major_decks)}: \"{sent[:110]}\"")
 
 
+# ----------------------------------------------------------------------------
+# Added 2026-11-20 (Pass 0 slides audit): guard against stale calcs.py /
+# retired Literature.* credits, missing dividerstack opt-in, broken chapter
+# §X.Y(.Z) citations, and vanishing elements inside \mlsyssteps SVG builds.
+# ----------------------------------------------------------------------------
+
+DEAD_REF_RE = re.compile(
+    r"\b(?:images/)?(?:calcs|deckvals)\.py\b|numbers\.tex|\\val\{|\bLiterature\.[A-Z][A-Za-z0-9_]*")
+EXT_SEC_CONTEXT = ("NTSB", "HAR-19", "Goyal", "Dubey", "arXiv", "ISO", "IEC", "NIST")
+WAVE_STEP_ALLOW = {"wave4_step"}
+
+
+def rule_dead_refs(deck, vol, out):
+    for lno, line in enumerate(deck.raw.splitlines(), 1):
+        m = DEAD_REF_RE.search(line)
+        if m:
+            out("dead-refs", "error", None, lno,
+                f"stale reference '{m.group(0)}' (retired in numbers.md / Three-Tier Architecture)")
+
+
+def rule_dividerstack(deck, vol, out):
+    start = deck.src.find("\\mlsyssetup{")
+    if start == -1:
+        return
+    end = match_brace(deck.src, start + len("\\mlsyssetup"))
+    setup = deck.src[start:end]
+    if "dividerstack" not in setup:
+        lno = deck.src.count("\n", 0, start) + 1
+        out("dividerstack", "error", None, lno,
+            "\\mlsyssetup omits dividerstack (section dividers fall back to illegible thumbnail stack)")
+
+
+def _book_chapter_sections(vol, vol_name, ch_num):
+    cache = getattr(vol, "_chapter_secs", None)
+    if cache is None:
+        cache = {}
+        cfg = ROOT.parent / "books" / "config" / f"_quarto-pdf-{vol_name}.yml"
+        if cfg.exists():
+            qmds = re.findall(r"(\d+_[^/\s'\"]+/[^\s'\"]+\.qmd)", cfg.read_text(encoding="utf-8", errors="ignore"))
+            for idx, rel in enumerate(qmds, 1):
+                p = ROOT.parent / "books" / vol_name / rel
+                if not p.exists():
+                    continue
+                h2 = h3 = 0
+                secs = set()
+                for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    if line.startswith("## ") and "unnumbered" not in line:
+                        h2 += 1
+                        h3 = 0
+                        secs.add(f"{idx}.{h2}")
+                    elif line.startswith("### ") and "unnumbered" not in line:
+                        h3 += 1
+                        secs.add(f"{idx}.{h2}.{h3}")
+                cache[idx] = secs
+        vol._chapter_secs = cache
+    return cache.get(ch_num)
+
+
+def rule_section_refs(deck, vol, out):
+    m = re.match(r"^(\d+)b?_", deck.path.name)
+    if not m or int(m.group(1)) == 0:
+        return
+    cn = int(m.group(1))
+    secs = _book_chapter_sections(vol, deck.volume, cn)
+    if not secs:
+        return
+    pat = re.compile(rf"(?:\\S|§)\s*({cn}\.\d+(?:\.\d+)?)")
+    for lno, line in enumerate(deck.src.splitlines(), 1):
+        for sm in pat.finditer(line):
+            before = line[max(0, sm.start() - 90):sm.start()]
+            if any(ext in before for ext in EXT_SEC_CONTEXT):
+                continue
+            ref = sm.group(1)
+            if ref not in secs:
+                out("section-refs", "error", None, lno,
+                    f"book section §{ref} does not exist in current chapter {cn} .qmd")
+
+
+def rule_step_continuity(deck, vol, out):
+    elem_re = re.compile(r"<(?:rect|path|circle|ellipse|polygon|line|text)\b")
+    for m in re.finditer(r"\\mlsyssteps(?:\[[^\]]*\])?\{([^}]+)\}\{(\d+)\}", deck.src):
+        pref, cnt = m.group(1), int(m.group(2))
+        if "\\mlsyskit" in pref or pref in WAVE_STEP_ALLOW:
+            continue
+        counts = []
+        for k in range(1, cnt + 1):
+            sp = deck.path / "images" / f"{pref}{k}.svg"
+            if sp.exists():
+                counts.append((k, len(elem_re.findall(sp.read_text(encoding="utf-8", errors="ignore")))))
+        for i in range(1, len(counts)):
+            if counts[i][1] < counts[i - 1][1] - 3 and counts[i][1] < 0.85 * counts[i - 1][1]:
+                lno = deck.src.count("\n", 0, m.start()) + 1
+                out("step-continuity", "warning", None, lno,
+                    f"step build '{pref}' drops visual primitives mid-build: {counts}")
+                break
+
+
 RULES = {
     "cover": rule_cover, "callbacks": rule_callbacks, "next-lecture": rule_next,
     "unused-images": rule_unused, "style": rule_style, "notes": rule_notes,
     "activity": rule_activity, "title-vs-tag": rule_title_tag, "concepts": rule_concepts,
     "numbers-basis": rule_numbers,
+    "dead-refs": rule_dead_refs, "dividerstack": rule_dividerstack,
+    "section-refs": rule_section_refs, "step-continuity": rule_step_continuity,
 }
 
 

@@ -1,0 +1,187 @@
+% Study sheet: Volume II, Chapter 14, Robust AI.
+% Numbers: \val{...} from robust_ai_studysheet_numbers.tex, written by robust_ai_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{robust_ai_studysheet_numbers}
+\sheetvolume{2}
+\sheetchapter{14}{Robust AI}
+\sheetsources{Numbers from mlsysim, the chapter's modeled scenarios and its testbed data; questions marked assumed use new inputs.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+A fleet can stay fast and up while its answers go wrong: drift, attacks, poisoned data and silent
+faults leave health checks green. Each failure class needs its own \hl{behavioral evidence}.
+In C\textsuperscript{3} terms, checks spend compute and communication; coordination decides when evidence
+triggers investigation, fallback or a halt.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Uncertainty routes; it does not verify.}{Entropy and self-consistency flag hallucinations at extra
+  cost; only grounding or an external check bounds a claim.}
+\idea{Name what moved.}{Covariate shift moves $\ProbabilityFunction(\ModelInput)$, label shift
+  $\ProbabilityFunction(\ExampleLabel)$, concept drift $\ProbabilityFunction(\ExampleLabel\mid\ModelInput)$;
+  input monitors miss pure concept drift.}
+\idea{An alert opens an investigation, not a retrain.}{Update only when labels confirm it and an update
+  fixes the cause.}
+\idea{Answer request by request.}{A higher threshold lowers risk only if the score ranks errors;
+  every refused request becomes fallback load.}
+\idea{Robustness holds per threat model, and costs.}{Attacker access sets the test; adversarial
+  training multiplies training, certification multiplies inference.}
+\idea{Poisoning defense follows the data path.}{Source controls, sanitization, robust losses, release
+  checks, with lineage.}
+\end{ideas}
+
+\vspace{8pt}
+\sheetsec{Which shift? What stays fixed}
+\begin{sheettable}{@{}l l L@{}}
+\thead{Shift} & \thead{Fixed} & \thead{Remedy}\\ \midrule
+Covariate & $\ProbabilityFunction(\ExampleLabel\mid\ModelInput)$ & weight examples by new/old
+  $\ProbabilityFunction(\ModelInput)$; training must cover new inputs\\
+Label & $\ProbabilityFunction(\ModelInput\mid\ExampleLabel)$ & invert validation confusion matrix on predicted rates; scale posteriors by new/old rate\\
+Concept & neither & adapt on fresh labels\\
+\end{sheettable}
+
+\vspace{8pt}
+\sheetsec{Diagnose before defending}
+\begin{sheettable}{@{}l L@{}}
+\thead{Evidence} & \thead{Points to a system fault when}\\ \midrule
+Timing & starts at a release or dependency change\\
+Fixed-input replay & differs from one stage on (pipeline bug); repeats on one replica until reload (resident corruption)\\
+Telemetry & ECC or corruption counters rise\\
+Cheap checks & weight range check; golden-input canaries per replica\\
+\end{sheettable}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Formulas you will use}
+\fcard{Drift size: population stability index}%
+  {\text{PSI} = \sum_{\ReferenceBinIndex} (\CurrentBinProportion_{\ReferenceBinIndex} - \ReferenceBinProportion_{\ReferenceBinIndex})
+   \ln\frac{\CurrentBinProportion_{\ReferenceBinIndex}}{\ReferenceBinProportion_{\ReferenceBinIndex}}}%
+  {Shares per bin: baseline $\ReferenceBinProportion_{\ReferenceBinIndex}$, current $\CurrentBinProportion_{\ReferenceBinIndex}$.
+   Each nonnegative term shows which bin moved.}%
+  {Calibrate bands: warning from \val{psiwarn}, major from \val{psicrit}.}{}
+\fcard{Is it real? Two-sample KS test}%
+  {\KolmogorovSmirnovStatistic > \KsCriticalCoefficient(\HypothesisTestSignificanceLevel)
+   \sqrt{\frac{\DriftTestSampleSize+\ComparisonSampleSize}{\DriftTestSampleSize\ComparisonSampleSize}},
+   \quad \KsCriticalCoefficient = \sqrt{-\tfrac{1}{2}\ln\tfrac{\HypothesisTestSignificanceLevel}{2}}}%
+  {$\KolmogorovSmirnovStatistic$: largest gap between the samples' CDFs (sizes $\DriftTestSampleSize$,
+   $\ComparisonSampleSize$); $\KsCriticalCoefficient = \val{kscoeffive}$ at $0.05$. Many features: split the
+   level. Larger samples lower it.}%
+{}{}
+\fcard{Selective prediction}%
+  {\text{fallback load} = (1-\text{coverage})\,\ArrivalRate}%
+  {Answer if score $\SelectiveAcceptanceScore(\ModelInput) \ge \ResponseThreshold$, else route or abstain.
+   Coverage: answered share; $\ArrivalRate$: arrival rate.}%
+  {Conformal sets give marginal coverage under exchangeability, not per input; large sets add fallback load.}{}
+\fcard{What a robustness claim costs}%
+  {\text{passes per batch} = \AttackStepsPgd + 1, \qquad
+   \CertifiedRadius = \SmoothingNoiseStandardDeviation\,\StandardNormalCumulativeDistribution^{-1}(\SmoothedTopClassProbability)}%
+  {PGD with $\AttackStepsPgd$ attack steps multiplies training compute. Randomized smoothing
+   (noise $\SmoothingNoiseStandardDeviation$, lower bound $\SmoothedTopClassProbability$ on the top class)
+   certifies Euclidean radius $\CertifiedRadius$ at many noise samples per request.}{}%
+  {}
+
+\vspace{10pt}
+\sheetsec{Drift alert, then what?}
+{\centering
+\begin{tikzpicture}[sheet]
+  \node[small] at (100,50) {no input drift};
+  \node[small] at (196,50) {input drift};
+  \node[small, anchor=east] at (52,32) {error rises};
+  \node[small, anchor=east] at (52,10) {error in tolerance};
+  \node[hotbox, minimum width=92pt, minimum height=20pt, align=center, text width=86pt] at (100,32)
+    {probe: concept drift, joint change, pipeline fault};
+  \node[accbox, minimum width=92pt, minimum height=20pt, align=center, text width=86pt] at (196,32)
+    {isolate slices; test recalibrate, repair, retrain};
+  \node[nbox, minimum width=92pt, minimum height=20pt, align=center, text width=86pt] at (100,10)
+    {keep monitoring};
+  \node[nbox, minimum width=92pt, minimum height=20pt, align=center, text width=86pt] at (196,10)
+    {watch closer; find the source};
+\end{tikzpicture}\par}
+
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{Size factor \val{yscale}; \val{kscoef} $\times$ \val{yscale} = \val{ycrit}, above \val{yd}: not
+  significant. Error in tolerance: keep monitoring; the larger window has more power (KS card, grid).}
+\ans{1}{(a) \val{qrejlo}\% $\times$ \val{qlam} = \val{qloadlo}/s fits \val{qcap}/s; \val{qrejhi}\% gives
+  \val{qloadhi}/s, \val{qover} over. (b) Only if the score ranks errors, measured on deployment traffic
+  (selective card).}
+\ans{2}{Label shift: $\ProbabilityFunction(\ExampleLabel)$ moved, $\ProbabilityFunction(\ModelInput\mid\ExampleLabel)$
+  did not. Estimate new class rates from predicted-class rates through the validation confusion matrix;
+  rescale posteriors by new over old rate; confirm with labels (shift table).}
+\columnbreak
+\ans{3}{(a) \val{qpasses} passes: \val{qpasses} $\times$ \val{qbase} = \val{qhours} accelerator-hours.
+  (b) $\CertifiedRadius$ = \val{rssigma} $\times$ \val{rsq} = \val{rsr}; the box corner is \val{rseps} $\times$
+  \val{rssqrtd} = \val{rscorner}, longer: not covered (cost card).}
+\ans{4}{System fault; leading hypothesis: corrupted state resident on that replica (repeats there, gone
+  after reload). No release, no drift: not pipeline or shift; confirm by comparing its weights
+  with the checkpoint. Golden-input canaries catch it; a range check only if the value is extreme
+  (diagnosis table).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Does the fraud model's drift justify retraining?}
+After six months, user-country share Other rose from \val{othb} to \val{othc}, USA fell from \val{usab}
+to \val{usac}; three other bins add \val{restterm} to PSI. KS on transaction amount, \val{ksn} values each,
+corrected level \val{ksalpha}: $\KolmogorovSmirnovStatistic$ = \val{ksd}.\par\vspace{4pt}
+\begin{steps}
+\item Other bin: \val{othdiff} $\times \ln(\val{othc}/\val{othb})$ = \val{othdiff} $\times$ \val{othlog}
+  = \val{othterm}; USA adds \val{usaterm}.
+\item PSI = \val{othterm} + \val{usaterm} + \val{restterm} = \res{\val{psitotal}}, below \val{psiwarn}; yet
+  Other is \val{othshare}\% of it, so check that slice.
+\item KS: $\KsCriticalCoefficient$ = \val{kscoef}, size factor \val{ksscale}, so critical =
+  \res{\val{kscrit}}; \val{ksd} is \val{ksratio}$\times$ it: reject equal distributions.
+\item Serve on, monitor weekly, investigate the amount shift; update only if delayed labels show
+  degradation a retrain fixes.
+\end{steps}
+\takeaway{Significance says a shift is real; only outcomes say it matters.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{A daily window: still significant?}
+\assumed{} a daily test: \val{yn} values each, same level, $\KolmogorovSmirnovStatistic$ = \val{yd};
+labeled error is in tolerance.\par
+\textbf{Given:} $\KsCriticalCoefficient(\val{ksalpha})$ = \val{kscoef}.\par
+\textbf{You:} find the critical value, decide whether the shift is significant, and say what the team
+does next.\par\vspace{30pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``The sampled answers agree, so the answer is true.''}%
+  {Agreement routes; it does not verify: correlated samples can repeat one unsupported claim.
+   Only grounding or an external check bounds what it asserts.}{}
+\mistake{``Robust training costs \val{crossgap} points: \val{stdclean}\% clean, \val{robattacked}\% robust.''}%
+  {Two models, two conditions. Penalty = standard clean $-$ robust clean on one test set; benefit =
+   robust attacked $-$ standard attacked under one attack. The quoted pair fills one cell of each.}{}
+\mistake{``Validation accuracy held, so the training data is clean.''}%
+  {Targeted, backdoor and subpopulation poisons can leave it intact. Test named targets, cohorts and
+   triggers before release; keep lineage to roll back.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} \val{qlam} requests/s; coverage \val{qcovlo}\% at one threshold, \val{qcovhi}\% at a higher
+  one; the fallback serves \val{qcap}/s. (a) Load for each; which fits? (b) When does the higher
+  threshold lower answered risk?
+\item In an epidemic a hospital sees more pneumonia, but each diagnosis looks the same on the
+  scanner. Which shift? How do you correct the model without retraining?
+\item \assumed{} (a) Training moves to PGD-\val{qk}; the standard run took \val{qbase}
+  accelerator-hours. Cost now? (b) Smoothing at $\SmoothingNoiseStandardDeviation$ = \val{rssigma} gives
+  $\SmoothedTopClassProbability$ = \val{rsp} ($\StandardNormalCumulativeDistribution^{-1}$ = \val{rsq}) on a
+  \val{rsd}-value image. Is every change of \val{rslevels}/\val{rspix} = \val{rseps} per value certified? (It needs
+  $\CertifiedRadius \ge \AdversarialPerturbationBudget\sqrt{\InputCoordinateCount}$ for
+  $\InputCoordinateCount$ values; $\sqrt{\val{rsd}}$ = \val{rssqrtd}.)
+\item Accuracy falls on one replica; no release, no drift, health checks pass. Golden inputs fail on
+  it, pass on another replica and after reloading its weights. Which pillar and fault? Which cheap
+  check would have caught it?
+\end{qs}
+\end{rightcol}
+\end{document}

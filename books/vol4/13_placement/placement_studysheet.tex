@@ -1,0 +1,179 @@
+% Study sheet: Volume IV, Chapter 13, Workload Placement.
+% Numbers: \val{...} from placement_studysheet_numbers.tex, written by placement_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{placement_studysheet_numbers}
+\sheetvolume{4}
+\sheetchapter{13}{Workload Placement}
+\sheetsources{Numbers from the chapter's mlsysim scenarios for the warehouse mobile manipulator (illustrative profiles); questions marked assumed use new inputs.}
+\newcommand{\us}{\,\textmu s}
+% candidate letter beside a table head, kept lowercase as the chapter writes it
+\newcommand{\cand}[1]{~{\sheetsans\fontsize{7.4}{9}\selectfont\bfseries\color{muted}(#1)}}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+A refusal computed too late cannot stop the motion it was meant to prevent. Proposer and permission
+path can still share \hl{memory, power, clocks, reset and heat}. Placement decides whether the
+refusal arrives in time; work across the \hl{causal boundary} cannot be recalled.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Independence is argued one resource at a time.}{A separate core or chip is a hypothesis;
+  each shared resource is a claim a loaded test can refute.}
+\idea{Averages hide the real threat.}{A read waits on the traffic ahead of it; cache partitions
+  leave miss registers and writeback buffers shared.}
+\idea{Heat outlasts the load.}{Thermal mass holds a throttled clock for seconds after inference
+  stops, so shedding load cannot rescue the next tick.}
+\idea{The declared bound is the falsification threshold.}{A loaded tick above it refutes the
+  placement even when the deadline holds; a pass supports only the states tested.}
+\idea{Match the remedy to the coupling.}{Queues: regulate co-runners. Thrash: partition
+  cache or banks. Load: shed work. Rail, clock, reset: relocate.}
+\idea{Relocation buys separation with a board link.}{Its delay comes out of dispatch to
+  admission. The running machine's module does not expose its island.}
+\end{ideas}
+
+\vspace{9pt}
+\sheetsec{What each placement still shares}
+\begin{sheettable}{@{}L c c c@{}}
+\thead{Resource} & \thead{RT cluster}\cand{b} & \thead{Island}\cand{c} & \thead{MCU}\cand{d}\\ \midrule
+Cache, DRAM controller & \textbf{shared} & separate & separate\\
+Fabric carrying proposals & \textbf{shared} & \textbf{shared} & board link\\
+Core rail, clock & \textbf{shared} & separate & separate\\
+Reset chain & \textbf{shared} & evidence & separate\\
+Die heat, package & \textbf{shared} & \textbf{shared} & separate\\
+\end{sheettable}
+\par\vspace{3pt}{\fontsize{8.6}{11}\selectfont\color{muted}Shared cores (a) share every row; none removes
+the board supply. Rail droop slows gates whatever the privilege ring.\par}
+
+\vspace{9pt}
+\fcard{Watchdog service window}%
+  {\lvert \InterFeedInterval - \NominalTickPeriod \rvert \le (\MaximumCompletionOffset - \MinimumCompletionOffset) + \TickPeriodJitterBound}%
+  {Healthy feed interval: tick-start offsets ($\MaximumCompletionOffset$ includes
+   $\TaskBlockingTime + \TaskInterferenceTime$), phase jitter $\TickPeriodJitterBound$. Lower end: early trip $\WatchdogEarliestServiceTime$.}%
+  {Late trip $\WatchdogLatestServiceTime$: beyond the upper end.}{}
+\end{leftcol}%
+\begin{rightcol}
+\fcard{The permission tick's budget}%
+  {\begin{gathered}\LoadedEnforcerExecutionTime + \TaskBlockingTime + \TaskInterferenceTime \le \EnforcerDeadline\\[2pt]
+   \LoadedEnforcerExecutionTime = \IsolatedEnforcerExecutionTime + \SharedHardwareInterferenceDelay \le \PermissionTickWcet\end{gathered}}%
+  {$\TaskBlockingTime$, $\TaskInterferenceTime$: the controller's own tasks. Shared hardware adds $\SharedHardwareInterferenceDelay$
+   to $\IsolatedEnforcerExecutionTime$, the tick alone; the placement claims zero. Above $\PermissionTickWcet$:
+   $\IsolatedEnforcerExecutionTime$ too low or real interference; an idle rerun tells which.}%
+  {}%
+  {\begin{tikzpicture}[sheet]
+     \draw[accbox] (0,0) rectangle (\val{sunl},12);
+     \draw[nbox] (\val{sunl},0) rectangle (\val{swcet},12);
+     \draw[hotbox] (\val{swcet},0) rectangle (\val{sceil},12);
+     \draw[nbox] (\val{sceil},0) rectangle (\val{sdead},12);
+     \node[small, anchor=south] at ({\val{sunl}/2},13) {unloaded};
+     \node[small, anchor=south] at ({(\val{sunl}+\val{swcet})/2},13) {to bound};
+     \node[small, anchor=south] at ({(\val{swcet}+\val{sceil})/2},13) {refutes};
+     \node[small, anchor=south] at ({(\val{sceil}+\val{sdead})/2},13) {$\TaskBlockingTime + \TaskInterferenceTime$};
+     \foreach \x/\t in {\val{sunl}/\val{unloaded}, \val{swcet}/\val{wcet}, \val{sceil}/\val{ceiling}, \val{sdead}/\val{deadline}}{
+       \draw[dim] (\x,0) -- (\x,-3);
+       \node[note, anchor=north] at (\x,-4) {\t};}
+     \node[note, anchor=north west] at (0,-14) {\textmu s; \val{ceiling} = \val{deadline} $-$ ($\TaskBlockingTime + \TaskInterferenceTime$)};
+   \end{tikzpicture}}
+\fcard{Miss-stall share}%
+  {\CacheMissStallFraction \le \frac{\PermissionTickWcet/\UnloadedTickExecutionTime - 1}{\InterferenceSlowdownFactor - 1}}%
+  {Share $\CacheMissStallFraction$ of the unloaded tick $\UnloadedTickExecutionTime$ (= $\IsolatedEnforcerExecutionTime$) stalled on shared-cache misses,
+   slowed by $\InterferenceSlowdownFactor$, before the loaded tick crosses $\PermissionTickWcet$.}%
+  {Measured \val{smshr}$\times$, cache partitioned: \val{fmshr}\%. Attack \val{swb}$\times$: \val{fwb}\%.}{}
+\fcard{Thermal hangover}%
+  {\JunctionTemperature = \AmbientTemperature + \DevicePower\JunctionAmbientThermalResistance,
+   \qquad \ThrottleRecoveryTime = \PackageThermalTimeConstant \ln\frac{\ThrottleOnsetJunctionTemperature - \QuiescentJunctionTemperature}{\ThrottleClearTemperature - \QuiescentJunctionTemperature}}%
+  {Ambient $\AmbientTemperature$, junction-to-ambient resistance $\JunctionAmbientThermalResistance$. Throttled at
+   $\ThrottleTripTemperature$ until, cooling with time constant $\PackageThermalTimeConstant$ from $\ThrottleOnsetJunctionTemperature$
+   toward idle $\QuiescentJunctionTemperature$, it passes $\ThrottleClearTemperature$.}%
+  {Execution is cycles over clock: halving the clock doubles it.}%
+  {\begin{tikzpicture}[sheet]
+     \pgfmathsetmacro\tq{\val{ptq}}\pgfmathsetmacro\tk{\val{ptrip}}\pgfmathsetmacro\tc{\val{pclear}}\pgfmathsetmacro\tauth{\val{ptau}}
+     \fill[accentsoft] (0,0) rectangle (\val{ptrec},{(\tk-50)*1.3});
+     \draw[dim] (0,0) -- (165,0);
+     \draw[dim] (0,0) -- (0,64);
+     \node[note, anchor=south] at (0,65) {\textdegree C};
+     \draw[dim, dashed] (0,{(\tk-50)*1.3}) -- (160,{(\tk-50)*1.3});
+     \draw[dim, dashed] (0,{(\tc-50)*1.3}) -- (160,{(\tc-50)*1.3});
+     \draw[accent, line width=1pt, domain=0:8, samples=40] plot ({\x*20}, {(\tq + (\tk-\tq)*exp(-\x/\tauth) - 50)*1.3});
+     \node[small, anchor=west] at (162,{(\tk-50)*1.3}) {trip \val{trip}};
+     \node[small, anchor=west] at (162,{(\tc-50)*1.3}) {clear \val{clear}};
+     \node[lab, anchor=center] at ({\val{ptrec}/2},18) {\val{fthr}\,MHz};
+     \draw[dim] (\val{ptrec},0) -- (\val{ptrec},-3);
+     \node[note, anchor=north] at (\val{ptrec},-4) {\val{trec}\,s};
+     \node[note, anchor=north east] at (165,-4) {s after load stops};
+   \end{tikzpicture}}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{$\LoadedJunctionTemperature$ = \val{yamb} + \val{pl} $\times$ \val{rth} = \res{\val{ytl}\,\textdegree C}: it still trips.
+  \val{tau}\,s $\times \ln(\val{ynum}/\val{yden})$ = \res{\val{ytrec}\,s}, \res{\val{yticks} ticks}, \val{ylonger}\,ms longer.
+  Overrun still \val{over}\us: the clock sets it, the bay its duration (thermal card).}
+\ans{1}{(a) Fabric, die heat and package, board supply, and the reset chain (evidence needed), each by a
+  loaded test. (b) \res{Relocation to the MCU (d)}, paying the board link (table; relocation idea).}
+\columnbreak
+\ans{2}{$(\val{qratio} - \val{one})/(\val{qslow} - \val{one})$ = \res{\val{qshare}\%}, about \val{qstall}\us{} of stall;
+  against \val{fmshr}\% at \val{smshr}$\times$: bounding $\InterferenceSlowdownFactor$ buys margin (stall-share card).}
+\ans{3}{\val{qloaded} + \val{bplusi} = \val{qresp}\us: deadline met, \val{qspare}\us{} spare. But \res{\val{qover}\us{} over} the bound
+  refutes ``sound baseline, zero interference''. Rerun idle: still over means a low baseline (interference
+  may add); over only under load means interference (tick budget).}
+\ans{4}{Spread \val{qcmax} $-$ \val{qcmin} = \val{qspread}\us; \val{qtp} $\mp$ (\val{qspread} + \val{qjit}) gives \res{\val{qlo} to \val{qhi}\us}.
+  Lower end: early trip; late trip beyond the upper end (watchdog card).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\raggedright\boxtitle{How long does candidate (b) stay throttled?}
+The tick runs on a cluster sharing the die's package and governor; its
+\val{cycles} cycles meet $\PermissionTickWcet$ = \val{wcet}\us{} at \val{fnom}\,GHz. Bay \val{tamb}\,\textdegree C,
+$\JunctionAmbientThermalResistance$ = \val{rth}\,K/W, $\PackageThermalTimeConstant$ = \val{tau}\,s; \val{pq}\,W idle,
+\val{pl}\,W with inference. The clock halves at \val{trip}\,\textdegree C until below
+\val{clear}\,\textdegree C; $\TaskBlockingTime + \TaskInterferenceTime$ = \val{bplusi}\us. Inference stops as the junction trips.
+\begin{steps}
+\item Equilibria: \val{tamb} + \val{pq} $\times$ \val{rth} = \res{\val{tq}\,\textdegree C} idle;
+  \val{tamb} + \val{pl} $\times$ \val{rth} = \res{\val{tl}\,\textdegree C} loaded, past the trip.
+\item Throttled: \val{cycles} cycles at \val{fthr}\,MHz = \val{texec}\us; plus \val{bplusi} = \res{\val{rthr}\us},
+  \val{over}\us{} past the \val{deadline}\us{} deadline.
+\item Recovery: \val{tau}\,s $\times \ln(\val{wnum}/\val{wden})$ = \res{\val{trec}\,s}, or \res{\val{ticks} ticks} of \val{period}\,ms.
+\end{steps}
+\takeaway{Pausing the proposer cannot rescue the tick; fix the heat path or leave the governor's clock.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Same cluster, hotter bay}
+\assumed{} late in a shift the bay reaches \val{yamb}\,\textdegree C; nothing else changes.\par\vspace{4pt}
+\textbf{Given:} the idle level rises to \val{yamb} + \val{pq} $\times$ \val{rth} = \val{ytq}\,\textdegree C.\par
+\textbf{You:} does it still trip? How long, in seconds and ticks, until the clock returns?
+Does the overrun change?\par\vspace{48pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``The memory bus runs at a low average load, so the safety read is fast.''}%
+  {An average hides order: a controller favoring a streaming accelerator's row hits keeps passing the read. A \val{readtail}\us{} read tail leaves \val{afterread}\us{} before the \val{deadline}\us{} deadline,
+   less than the \val{compute}\us{} that checking and staging need.}{}
+\mistake{``A mutex protects the shared proposal record.''}%
+  {A proposer that stalls while holding the lock now owns the enforcement deadline. Publish immutable
+   records through a seqlock mailbox: the enforcer reads once per tick and discards a torn copy, never waiting.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item (a) If a module exposed the on-die safety island (c), which shared rows must qualification still
+  cover? (b) The running machine's module does not expose (c); what does that force?
+\item \assumed{} regulated co-runners hold the stalled share's slowdown to \val{qslow}$\times$. What share of
+  the \val{unloaded}\us{} unloaded tick may be miss stall before the loaded tick crosses \val{wcet}\us?
+\item \assumed{} a stress campaign on a shared die records a loaded cycle of \val{qloaded}\us.
+  With $\TaskBlockingTime + \TaskInterferenceTime$ = \val{bplusi}\us, is the deadline met? Which claim falls?
+  What observation separates a low baseline from interference?
+\item \assumed{} healthy ticks complete between $\MinimumCompletionOffset$ = \val{qcmin} and
+  $\MaximumCompletionOffset$ = \val{qcmax}\us{} after tick start, with $\TickPeriodJitterBound$ = \val{qjit}\us{} and a
+  \val{period}\,ms period. What feed intervals must the watchdog accept? Where do its two trips go?
+\end{qs}
+\end{rightcol}
+\end{document}

@@ -1,0 +1,183 @@
+% Study sheet: Volume III, Chapter 14, Operating Agents.
+% Numbers: \val{...} from agent_operations_studysheet_numbers.tex, written by agent_operations_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{agent_operations_studysheet_numbers}
+\sheetvolume{3}
+\sheetchapter{14}{Operating Agents}
+\sheetsources{Numbers from the chapter's mlsysim scenarios (hypothetical spans, samples and monitors); questions marked assumed use new inputs.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+In production every exposure arrives at once: the \hl{state} a failure leaves, the \hl{horizon} before a
+monitor decides, the \hl{authority} a rollback cannot recall. Decide in advance what to \hl{record}, how to
+\hl{test} an explanation, how much live work to \hl{expose}, and what a release must show.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Three records, three guarantees.}{A trace may sample or drop; the recovery log must persist;
+  the accounting record lists every admitted trial, unsampled.}
+\idea{A span's status is not a verdict.}{A test can exit cleanly with failed assertions;
+  acceptance comes from independent checks.}
+\idea{Elapsed time follows the critical path.}{Overlaps are not summed; shortening a
+  branch helps only until the next-longest takes over.}
+\idea{Retention waits for the verdict.}{Keep failed and pending trials plus a random control
+  sample. Redact at capture; masked bytes no longer replay exactly.}
+\idea{Test an explanation by intervening.}{Harness replay checks code on captured outputs. Only a branch from
+  a saved prefix, all else fixed, tests a cause, for that fixture.}
+\idea{Release in stages; a rollback settles nothing.}{A hold stops new admission; in-flight operations
+  keep their owners until recovery settles them.}
+\end{ideas}
+
+\vspace{8pt}
+\sheetsec{A trial's critical path}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\sc{18}
+  \pgfmathsetmacro\xo{16}
+  % time axis
+  \draw[dim] (\xo,0) -- ({\xo+12*\sc},0);
+  \foreach \t in {0,3,6,9,12}{\draw[dim] ({\xo+\t*\sc},-2) -- ({\xo+\t*\sc},2);
+    \node[small, anchor=north] at ({\xo+\t*\sc},-4) {\t};}
+  \node[small, anchor=north west] at ({\xo+12*\sc+6},-4) {s};
+  % serial lane: retrieve, propose, synthesize (all on the critical path)
+  \draw[hotbox] ({\xo+\val{sretrieve}*\sc},50) rectangle ++({\val{dretrieve}*\sc},14);
+  \draw[hotbox] ({\xo+\val{spropose}*\sc},50) rectangle ++({\val{dpropose}*\sc},14);
+  \node[lab, text=white] at ({\xo+(\val{spropose}+\val{dpropose}/2)*\sc},57) {propose \val{dpropose}};
+  \draw[hotbox] ({\xo+\val{ssynthesize}*\sc},50) rectangle ++({\val{dsynthesize}*\sc},14);
+  \node[lab, text=white] at ({\xo+(\val{ssynthesize}+\val{dsynthesize}/2)*\sc},57) {synth.\ \val{dsynthesize}};
+  \draw[dim] ({\xo+\val{dretrieve}*\sc/2},64) -- ({\xo+\val{dretrieve}*\sc/2},70);
+  \node[lab, anchor=south west] at (\xo-4,70) {retrieve \val{dretrieve}};
+  % parallel checks
+  \draw[hotbox] ({\xo+\val{stests}*\sc},29) rectangle ++({\val{dtests}*\sc},14);
+  \node[lab, text=white] at ({\xo+(\val{stests}+\val{dtests}/2)*\sc},36) {tests \val{dtests}};
+  \draw[nbox] ({\xo+\val{slint}*\sc},8) rectangle ++({\val{dlint}*\sc},14);
+  \node[lab] at ({\xo+(\val{slint}+\val{dlint}/2)*\sc},15) {lint \val{dlint}};
+  % unexplained gap
+  \draw[dim, dashed] ({\xo+(\val{stests}+\val{dtests})*\sc},29) -- ({\xo+(\val{stests}+\val{dtests})*\sc},70);
+  \draw[dim, dashed] ({\xo+\val{ssynthesize}*\sc},50) -- ({\xo+\val{ssynthesize}*\sc},70);
+  \node[note, anchor=south] at ({\xo+(\val{ssynthesize}-\val{gap}/2)*\sc},71) {gap \val{gap}};
+\end{tikzpicture}\par}
+\vspace{4pt}
+{\fontsize{8.6}{11}\selectfont\color{muted}Spans sum to \val{leaf}\,s; the critical path (solid) explains
+\val{crit}\,s of \val{wall}\,s. Tests cut to \val{fasttests}\,s save \val{saving}\,s,
+not \val{testcut}, if all else stays fixed: lint takes over.\par}
+\end{leftcol}%
+\begin{rightcol}
+\fcard{Head sampling misses rare failures}%
+  {\Pr(\text{no trace kept}) = (1-\HeadSamplingProbability)^{\FailureModeOccurrenceCount}}%
+  {Each trial kept with probability $\HeadSamplingProbability$ before its outcome is known.}%
+  {Tail selection keeps every failed and pending trial plus a control fraction of ordinary ones;
+   rates come from the accounting record, or kept traces weighted by inverse inclusion probability.}{}
+\fcard{Sizing a canary}%
+  {\begin{gathered}
+     \CumulativeLogLikelihoodRatio_\ObservedLabelCount = \AcceptedLabelCount_\ObservedLabelCount\ln\frac{\HypothesizedAcceptanceProbability_1}{\HypothesizedAcceptanceProbability_0}
+       + (\ObservedLabelCount-\AcceptedLabelCount_\ObservedLabelCount)\ln\frac{1-\HypothesizedAcceptanceProbability_1}{1-\HypothesizedAcceptanceProbability_0}\\[3pt]
+     \SprtUpperLogBoundary = \ln\frac{1-\HypothesisTestFalseNegativeRate}{\StatisticalSignificanceLevel},\qquad
+     \SprtLowerLogBoundary = \ln\frac{\HypothesisTestFalseNegativeRate}{1-\StatisticalSignificanceLevel}\\[3pt]
+     \SprtExpectedLogIncrement_1 = \HypothesizedAcceptanceProbability_1\ln\frac{\HypothesizedAcceptanceProbability_1}{\HypothesizedAcceptanceProbability_0}
+       + (1-\HypothesizedAcceptanceProbability_1)\ln\frac{1-\HypothesizedAcceptanceProbability_1}{1-\HypothesizedAcceptanceProbability_0}\\[3pt]
+     \mathbb{E}_1[\SprtStoppingSampleCount] \approx \frac{(1-\HypothesisTestFalseNegativeRate)\SprtUpperLogBoundary
+       + \HypothesisTestFalseNegativeRate\SprtLowerLogBoundary}{\SprtExpectedLogIncrement_1}
+   \end{gathered}}%
+  {$\AcceptedLabelCount_\ObservedLabelCount$ of $\ObservedLabelCount$ labels accepted; acceptance
+   $\HypothesizedAcceptanceProbability_0$ against degradation $\HypothesizedAcceptanceProbability_1$, error
+   targets $\StatisticalSignificanceLevel$, $\HypothesisTestFalseNegativeRate$; $\SprtExpectedLogIncrement_1$: expected
+   step per label. $\CumulativeLogLikelihoodRatio_\ObservedLabelCount \ge \SprtUpperLogBoundary$: hold; $\le \SprtLowerLogBoundary$:
+   reject this degradation; between: keep sampling.}%
+  {Allocation $\CanaryAllocationFraction$ of arrivals sets calendar time and unmeasured harm, not the count.
+   Tripwires stop admission at once.}{}
+\fcard{The release gate is a conjunction}%
+  {\begin{gathered}
+     \ShipDecision = \IndicatorFunction[\PairedDifferenceLowerLimit > -\NoninferiorityTolerance] \wedge
+     \IndicatorFunction[\CandidateTrajectoryGoodput \ge (1-\GoodputRelativeTolerance)\BaselineTrajectoryGoodput]\\
+     \wedge\ \IndicatorFunction[\CandidateTailCompletionTime \le \CompletionDeadline] \wedge
+     \IndicatorFunction[\CandidateViolationCount = 0]
+   \end{gathered}}%
+  {Paired lower limit, accepted tasks per hour, p99 completion, verified violations: all declared
+   before the data.}%
+  {Nothing offsets a failed term; nothing outside the four is checked. Tool-call drift routes to review.}{}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{\val{en} $\div$ \val{ratetwo} $\approx$ \val{admittwo}, plus \val{delay}: \val{tdectwo} h.
+  (\val{en} + \val{pendtwo}) $\times$ \val{gapacc} $\approx$ \val{excesstwo} excess failures, almost unchanged.
+  About half the wait, twice the rate of unmeasured harm (canary card).}
+\ans{Spans}{(a) Sum \val{qleaf} s; path \val{qret} + \val{qprop} + \val{qtests} + \val{qsyn} = \val{qcrit} s;
+  \val{qgap} s of \val{qwall} unattributed. (b) \val{qsave} s, not \val{qtestcut}: lint now limits. (c) All
+  else fixed; confirm by controlled trial (strip).}
+\ans{Retention}{(a) $\val{qheadc}^{\val{qocc}} \approx$ \val{qmiss}\%. (b) Head \val{qheadn} traces, \val{qheadmb} MB;
+  tail \val{qfailed} + \val{qpending} + \val{qctrln} = \val{qtailn}, \val{qtailmb} MB.
+  (c) \val{qfailed} $\div$ \val{qtailn} $\approx$ \val{qshare}\%; the accounting record gives \val{qrate}\% (card).}
+\columnbreak
+\ans{Postmortem}{(a) Harness replay of the captured result. (b) Only
+  branches from the saved prefix, with and without the notice, all else fixed. (c) The drop contributed, from this
+  prefix only; broader claims need held-out tasks (intervening).}
+\ans{Gate}{(a) $-\val{qlow} < -\val{qtol}$: first term zero, so hold; nothing offsets it. (b) Review, not a
+  fail (gate card). (c) In-flight operations keep their owners; recovery settles them (idea six).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{When does the canary decide, and at what cost?}
+$\HypothesizedAcceptanceProbability_0 = \val{pzero}$ against $\HypothesizedAcceptanceProbability_1 = \val{pone}$,
+$\StatisticalSignificanceLevel = \val{alpha}$, $\HypothesisTestFalseNegativeRate = \val{beta}$; \val{arrivals}
+tasks/h ($\ArrivalRate$), $\CanaryAllocationFraction = \val{rho}$\%, labels \val{delay} h after admission ($\CanaryLabelDelay$).\par\vspace{2pt}
+\begin{steps}
+\item $\SprtUpperLogBoundary = \ln(\val{betac}/\val{alpha}) = \val{upper}$;
+  $\SprtLowerLogBoundary = \ln(\val{beta}/\val{alphac}) = \val{lower}$.
+\item $\SprtExpectedLogIncrement_1 = \val{pone}\ln(\val{pone}/\val{pzero}) + \val{ponec}\ln(\val{ponec}/\val{pzeroc}) = \val{drift}$; $\mathbb{E}_1[\SprtStoppingSampleCount] \approx
+  (\val{betac} \times \val{upper} - \val{beta} \times \val{lowerabs}) / \val{drift}$ = \res{\val{en}} labels.
+\item Time $\approx \mathbb{E}_1[\SprtStoppingSampleCount]/(\CanaryAllocationFraction\ArrivalRate) + \CanaryLabelDelay$:
+  \val{en} $\div$ \val{rate} $\approx$ \val{admit} h, plus \val{delay} h $=$ \res{\val{tdec} h}.
+\item Excess $\approx (\mathbb{E}_1[\SprtStoppingSampleCount] + \CanaryAllocationFraction\ArrivalRate\CanaryLabelDelay)
+  (\HypothesizedAcceptanceProbability_0-\HypothesizedAcceptanceProbability_1)$: (\val{en} + \val{rate} $\times$ \val{delay}) $\times$ \val{gapacc}
+  $\approx$ \res{\val{excess} excess failures}; \val{excessfull} at full allocation (\val{pendfull} pending).
+\end{steps}
+\takeaway{The expected label count is fixed; a small canary waits longer, trimming only tasks awaiting labels.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{The same monitor at twice the allocation}
+$\CanaryAllocationFraction = \val{rhotwo}$\%, all else fixed.\par\vspace{4pt}
+\textbf{Given:} $\CanaryAllocationFraction\ArrivalRate = \val{ratetwo}$/h; $\mathbb{E}_1[\SprtStoppingSampleCount]$
+stays \val{en}.\par
+\textbf{You:} decision time, excess failures, what doubling buys and costs.\par\vspace{30pt}
+\end{practicebox}
+
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``The tool span returned cleanly, so the step succeeded.''}%
+  {Span status records how one operation ended. Acceptance comes from the accounting record.}{}
+\mistake{``A \val{theta}\% head sample keeps any failure that matters.''}%
+  {A mode seen \val{rarecount} times leaves no trace with $\val{thetafrac}^{\val{rarecount}} \approx \val{missrare}$\%
+   probability; only at \val{commoncount} does the miss fall to \val{misscommon}\%.}{}
+
+\mistake{``The fix passed every rerun and we rolled back: incident closed.''}%
+  {\val{cleanruns} of \val{cleanruns} clean runs from one prefix allow failure rates up to \val{wilsonup}\% (\val{conf}\% Wilson bound). Rollback
+   recalls no request already sent.}{}
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} retrieve \val{qret} s, propose \val{qprop} s, then tests \val{qtests} s and lint \val{qlint} s
+  in parallel, a \val{qgap} s wait, synthesize \val{qsyn} s. (a) Span sum, critical path, unattributed time?
+  (b) Tests cut to \val{qcut} s: saving? (c) What does (b) assume?
+\item \assumed{} per hour \val{qtrials} trials of \val{qsize} MB: \val{qfailed} failed, \val{qpending} pending.
+  (a) A mode seen \val{qocc} times, \val{qhead}\% head sample: chance of no trace? (b) Hourly storage, head vs.\
+  tail with a \val{qctrl}\% control? (c) Failed share of tail-kept traces? Report which rate?
+\item A research agent cites a retracted paper. The raw search result carried the retraction notice; the
+  delivered context did not. (a) What shows the adapter drops it? (b) What shows the drop caused the
+  citation? (c) Without the notice most continuations cite it; with it, none do. What follows?
+\item \assumed{} paired lower limit $-\val{qlow}$ points, tolerance \val{qtol}; goodput up \val{qgood}\%; zero
+  violations. (a) Ship? (b) Tool-call drift crosses its alert. (c) A canary alarms; after rollback, what
+  is still open?
+\end{qs}
+\end{rightcol}
+\end{document}

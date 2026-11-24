@@ -175,6 +175,56 @@ CarbonPricedRegionPlacement = _st.CarbonPricedPlacementScenario(
 )
 
 
+# Illustrative hourly carbon intensity from a 16:00 release: evening peak,
+# overnight trough, midday solar dip. Made up for teaching; not measured data.
+_EVENING_RAMP_G_PER_KWH = (520, 560, 600, 620, 580, 520)  # 16:00-21:00
+_OVERNIGHT_G_PER_KWH = (420, 380, 350, 330, 320, 330, 360, 400)  # 22:00-05:00
+_SOLAR_DIP_G_PER_KWH = (440, 400, 320, 240, 190, 170, 180, 220, 300, 400)  # 06:00-15:00
+_EVENING_RELEASE_SIGNAL = [
+    Q_(g, "g/kWh") for g in _EVENING_RAMP_G_PER_KWH + _OVERNIGHT_G_PER_KWH + _SOLAR_DIP_G_PER_KWH
+]
+
+
+EveningReleaseTimeShift = _st.TemporalShiftScenario(
+    name="Flexible 6-hour run released into an evening carbon peak",
+    description="A 1 MW, 6-hour run released at 16:00 that may finish up to 18 hours late, "
+    "with 100 kW of standby power while it waits.",
+    intensities=_EVENING_RELEASE_SIGNAL,
+    power=Q_(1.0, "MW"),  # scenario assumption: facility power, PUE included
+    duration=Q_(6, "hour"),
+    slack=Q_(18, "hour"),  # scenario assumption: must finish within 24 h of release
+    standby_power=Q_(100, "kW"),  # scenario assumption: reserved capacity kept powered
+)
+
+
+EveningReleaseNoSlack = EveningReleaseTimeShift.variant(
+    name="The same evening-release run with no deadline slack",
+    description="Zero slack forces an immediate start, so no time shift is possible.",
+    slack=Q_(0, "hour"),
+)
+
+
+EveningReleaseShortSlack = EveningReleaseTimeShift.variant(
+    name="The same evening-release run with 3 hours of slack",
+    description="Three hours of slack only reaches the end of the evening ramp.",
+    slack=Q_(3, "hour"),
+)
+
+
+EveningReleaseCapacityLimited = EveningReleaseTimeShift.variant(
+    name="The same evening-release run when capacity is booked through the morning",
+    description="Capacity is booked from 01:00 to 11:59, so no 6-hour window reaches the clean morning hours.",
+    # scenario assumption: steps 9-19 (01:00-11:59) are booked
+    capacity_available=[not 9 <= hour <= 19 for hour in range(24)],
+)
+
+
+EveningReleaseCostlyStandby = EveningReleaseTimeShift.variant(
+    name="The same evening-release run with 400 kW of standby power",
+    description="Waiting costs more carbon than any later window saves, so starting now is best.",
+    standby_power=Q_(400, "kW"),  # scenario assumption: large reserved block kept powered
+)
+
 KaplanTenPercentLowerLoss = _st.PowerLawScenario(
     name="Ten percent lower loss under Kaplan's compute law",
     description="Compute multiple a 10 percent loss reduction costs at Kaplan et al.'s compute exponent.",

@@ -92,7 +92,7 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
  const slotNodes=SUB.map((_,k)=>{const c=html('div','rnn-slot');c.dataset.slot=String(k);const name=html('span','rnn-slot-name');name.append(hsub('h',k));c.append(name,html('span','rnn-slot-status'),html('span','rnn-slot-size'));slots.append(c);return c;});
  panel.append(mode,slots,memory,work,compare);
  const narrow=matchMedia('(max-width:600px)');let committed=0,mounted=false;
- const layout=()=>art.setAttribute('viewBox',narrow.matches?NARROW:WIDE);narrow.addEventListener?.('change',layout);layout();
+ const __syncFocusGuard=s=>{const b=(s.getAttribute('viewBox')||'').trim().split(/[\s,]+/).map(Number);if(b.length!==4||!b[2]||!b[3])return;let g=s.querySelector(':scope>[data-mlsys-focus-guard]');if(!g){g=document.createElementNS('http://www.w3.org/2000/svg','path');g.setAttribute('fill','none');g.setAttribute('stroke','none');g.setAttribute('data-mlsys-focus','');g.setAttribute('data-mlsys-focus-guard','');s.append(g);}g.setAttribute('d',`M${(b[0]+b[2]*.1).toFixed(2)},${(b[1]+b[3]*.1).toFixed(2)}h${(b[2]*.8).toFixed(2)}v${(b[3]*.8).toFixed(2)}h-${(b[2]*.8).toFixed(2)}z`);};const layout=()=>{art.setAttribute('viewBox',narrow.matches?NARROW:WIDE);__syncFocusGuard(art);};narrow.addEventListener?.('change',layout);layout();
  const steps=states.map((s,i)=>({label:s.label,get description(){return committed===i?s.description:'Pending: '+s.label+'. The retained states and counts below change only when this action completes.';}}));
 
  const veil=(cx,cy,r,opacity,dash)=>{nodeLayer.append(svg('circle',{cx,cy,r:r+.6,fill:'#fff','fill-opacity':opacity}));if(dash)nodeLayer.append(svg('circle',{cx,cy,r:r+1.6,fill:'none',stroke:dash,'stroke-width':1.1,'stroke-dasharray':'3 2'}));};
@@ -153,10 +153,11 @@ window.MLSysFigureLessons[NAME]=async(root,{outer,verifiedArtwork})=>{
  }
  function row(name,count,note){const r=html('div','rnn-compare-row');r.dataset.regime=name.toLowerCase();const bar=html('span','rnn-compare-bar');for(let k=0;k<3;k++){const cell=html('span','rnn-compare-cell');cell.dataset.filled=String(k<count);bar.append(cell);}r.append(html('strong','',name),bar,html('span','rnn-compare-note',note));return r;}
 
- const player=window.MLSysOriginalPlayer.create({root,outer,title:'Why does training keep every state that inference frees?',
+ const detailReadout=html('p','rnn-detail-readout');
+ const player=window.MLSysOriginalPlayer.create({root,outer,layout:'compact',intro:'Compare streaming inference, which keeps 1 hidden state of 128 values across 3 steps, against BPTT training, which retains all 384 values.',title:'Why does training keep every state that inference frees?',
   scope:`The figure's three drawn steps are treated as a toy complete sequence (T = ${D.steps_drawn}) entered from an initial state of zeros, with the caption's ${D.hidden_text}-wide hidden state and ${D.input_text}-wide input. Per-step MACs (${D.recurrent_text} recurrent + ${D.input_macs_text} input) come from the chapter's RNNCompute cell in MLSysIM; output projections and backward-pass work are not counted. Counts are hidden states held after each step completes, following the chapter's list h₁ … h_T; inputs and other saved tensors are not counted. During an inference update the old and new state briefly coexist. The ${D.chapter.T_text}-step comparison uses the same MLSysIM scenario. Motion is illustrative and does not encode time.`,
   steps,
-  render(i,{stage}){committed=i;if(!mounted){stage.append(source,panel);mounted=true;}motion.replaceChildren();paint(i);delete root.dataset.pending;},
+  render(i,{stage,details}){committed=i;if(!mounted){stage.append(source);if(details)details.append(detailReadout,panel);mounted=true;}motion.replaceChildren();paint(i);detailReadout.textContent=`${mode.textContent} · ${memory.textContent} · ${work.textContent}`;delete root.dataset.pending;},
   transition({from,to,onFrame}){
    root.dataset.pending=String(to);motion.replaceChildren();
    // Read traces are events of the committed step, not retained state: clear them so only the moving read shows.

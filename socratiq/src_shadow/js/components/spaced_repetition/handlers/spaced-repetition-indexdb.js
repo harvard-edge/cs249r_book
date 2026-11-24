@@ -717,7 +717,7 @@ export class SpacedRepetitionIndexDBHandler extends SpacedRepetitionStorageHandl
       this.inMemoryData.reviewHistory = reviewHistory;
 
       if (!this.inMemoryData.currentChapter) {
-        await this.initializeFromStorage();
+        await this.initializeDefaultData();
       }
 
       return {
@@ -2259,6 +2259,51 @@ This app helps you learn material by creating flashcards and tracking your progr
         reviewHistory: {},
       };
     }
+  }
+
+  async deleteChapter(chapterNum) {
+    const num = Number(chapterNum);
+    if (this.useFallback) {
+      if (typeof super.deleteChapter === "function") {
+        return super.deleteChapter(num);
+      }
+      return;
+    }
+    await this.ensureInitialized();
+    const cardsInChapter = await new Promise((resolve, reject) => {
+      const tx = this.dbManager.db.transaction("cards", "readonly");
+      const req = tx.objectStore("cards").index("chapter").getAll(IDBKeyRange.only(num));
+      req.onsuccess = (e) => resolve(e.target.result || []);
+      req.onerror = (e) => reject(e.target.error);
+    });
+    const cardIds = cardsInChapter.map((c) => c.id);
+    await this.performTransaction(
+      ["chapters", "cards", "card_tags"],
+      "readwrite",
+      (tx, resolve, reject) => {
+        try {
+          const chapterStore = tx.objectStore("chapters");
+          const cardStore = tx.objectStore("cards");
+          const tagStore = tx.objectStore("card_tags");
+          const tagIndex = tagStore.index("card_id");
+          chapterStore.delete(num);
+          cardIds.forEach((cardId) => {
+            cardStore.delete(cardId);
+            const cursorReq = tagIndex.openCursor(IDBKeyRange.only(cardId));
+            cursorReq.onsuccess = (event) => {
+              const cursor = event.target.result;
+              if (cursor) {
+                cursor.delete();
+                cursor.continue();
+              }
+            };
+          });
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      }
+    );
   }
 
   // Add this helper method to get chapter from localStorage

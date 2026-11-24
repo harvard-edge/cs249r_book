@@ -1,3 +1,8 @@
-# Testing-gap illustration
+# Data Provenance (`16_release`)
 
-`testing_gap.csv` is a constructed constant-rate comparison, not measured robot or fleet exposure. For each target rate `lambda` per hour, `Black_Box_Years = -ln(0.05)/(lambda * 24 * 365)` is the one-sided 95% zero-event exposure under a homogeneous Poisson model. `Conditional_Proposal_Years = Black_Box_Years * (1 - 0.9999)` assumes an independently evidenced 99.99% containment fraction for the relevant hazardous-proposal population. It omits detector common-cause failures, hardware hazards, distribution shift, and ODD coverage. The second column therefore illustrates a conditional evidence decomposition, not a system safety or release result.
+## `waymo_safety_impact_headline.csv`
+
+- **Source**: Waymo LLC (2026), *Waymo Safety Impact Data Hub* (`@waymo2026safetyimpact`), <https://waymo.com/safety/impact/> (through the `202606` v2 release covering 271.3 million rider-only miles).
+- **Epistemic category**: `measured` (operator-reported rider-only crash counts and incidence per million miles across seven cumulative data cuts from `202409` to `202606`, paired with Waymo's location-adjusted 2022 human crash benchmark).
+- **Schema**: `data_cut`, `ro_miles_millions`, `outcome`, `waymo_count`, `waymo_ipmm`, `benchmark_ipmm`, `pct_reduction`, `pct_reduction_ci_lo`, `pct_reduction_ci_hi`.
+- **Accounting boundary**: Filters `All Locations (mileage blended)` and `All Crashes` against the dynamic (location-adjusted) benchmark (`2022benchmark_v2.csv` for `202606`). Between `202506` and `202509`, Waymo renamed `Airbag Deployment` to `Any Airbag Deployment` when introducing `Ego Vehicle Airbag Deployment`. In `202606`, the row labeled `Any Fatal` (`pct_reduction = -0.7983`, `benchmark_ipmm = 0.03655`) transcribes `Any Fatal (Dynamic)` from `2022benchmark_v2.csv`, whereas Waymo's static non-dynamic `Any Fatal` benchmark is `-0.7305` (`benchmark_ipmm = 0.02736`, reported alongside dynamic outcomes in Volume II's static-plus-dynamic summary table).

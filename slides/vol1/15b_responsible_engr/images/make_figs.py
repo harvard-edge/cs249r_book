@@ -101,7 +101,7 @@ for k in (1, 2):
     ax1.set_xlabel('Energy per prompt (Wh)')
     a = 1.0 if k >= 2 else 0.0
     stacked(ax2, 0, [(0.023, 'network', 'Grid 0.023'), (0.01, 'neutral', '')], alpha=a)
-    ax2.text(0.0335, 0, ' + 0.010 Scope 1 and 3  = 0.03 g', va='center', fontsize=12, fontweight='bold', color=C['text'], alpha=a)
+    ax2.text(0.0335, 0, ' + 0.010 Scope 1 and 3  ≈ 0.03 g', va='center', fontsize=12, fontweight='bold', color=C['text'], alpha=a)
     ax2.set_xlim(0, 0.0473 * 0.36 / 0.34)
     ax2.set_ylim(-0.5, 0.5)
     ax2.set_yticks([])
@@ -161,7 +161,7 @@ for k in (1, 2):
     for name, v, ck in parts:
         ax1.barh(0, v, left=left, height=0.6, color=C[ck], edgecolor='white')
         left += v
-    ax1.text(0.04, 0.55, 'Training $38K (1.9%)', fontsize=11, color=C['text'], va='bottom', fontweight='bold')
+    ax1.text(0.04, 0.55, 'Training $38.4K (1.9%)', fontsize=11, color=C['text'], va='bottom', fontweight='bold')
     ax1.text(TRAIN_M + INF_M / 2, 0, 'Inference $1.52M (73.5%)', fontsize=11, color='white', ha='center', va='center', fontweight='bold')
     ax1.text(TRAIN_M + INF_M + OPS_M / 2, 0, 'Ops $510K', fontsize=11, ha='center', va='center', color=C['text'], fontweight='bold')
     ax1.set_xlim(0, 2.2)
@@ -250,7 +250,7 @@ for k in (1, 2):
     ax.grid(color=C['grid'], linewidth=0.6)
     ax.set_axisbelow(True)
     sp.save(fig, out / f'review_zone_step{k}.svg')
-bar_steps('sisa', [('Purchase', 4.63, 'data', '4.63×', 1), ('SVHN', 2.45, 'data', '2.45×', 1), ('ImageNet', 1.36, 'data', '1.36×', 1)], 1, (4.2, 1.7), 6.2, 'Unlearning speedup over retraining')
+bar_steps('sisa', [('Purchase', 4.63, 'data', '4.63×', 1), ('SVHN', 2.45, 'data', '2.45×', 1), ('ImageNet', 1.36, 'compute', '1.36× (harder task)', 2)], 2, (4.4, 1.75), 6.8, 'Unlearning speedup over retraining')
 fig, ax = plt.subplots(figsize=(3.4, 1.75))
 ax.barh(0.9, 204.8, height=0.45, color=C['memory'])
 ax.text(36, 1.17, 'KWS: 204.8 MB', fontsize=13, fontweight='bold', color=C['memory'], va='bottom')
@@ -267,7 +267,7 @@ ax.set_axisbelow(True)
 ax.tick_params(axis='x', labelsize=12)
 ax.set_xlabel('Batch of 256, MB (log)', fontsize=12)
 sp.save(fig, out / 'dpsgd_step1.svg')
-bar_steps('dp_accuracy', [('CIFAR-10, no privacy', 95.0, 'neutral', 'above 95%', 1), ('CIFAR-10, ε = 8, from scratch', 81.4, 'data', '81.4%: over 13 points lower', 1), ('ImageNet, ε = 8, public pre-training', 86.7, 'data', '86.7%', 1), ('Same model, no privacy', 88.5, 'neutral', '88.5%: 1.8 points higher', 1), ('Best non-private model', 91.0, 'neutral', '91.0%: 4.3 points higher', 1)], 1, (5.4, 2.2), 150, 'Top-1 accuracy (%)', label_size=11)
+bar_steps('dp_accuracy', [('CIFAR-10, no privacy', 95.0, 'neutral', 'above 95%', 1), ('CIFAR-10, ε = 8, from scratch', 81.4, 'danger', '81.4%: over 13 points lower', 1), ('ImageNet, ε = 8, public pre-training', 86.7, 'data', '86.7%', 2), ('Same model, no privacy', 88.5, 'neutral', '88.5%: 1.8 points higher', 2), ('Best non-private model', 91.0, 'neutral', '91.0%: 4.3 points higher', 2)], 2, (5.4, 2.2), 150, 'Top-1 accuracy (%)', label_size=11)
 bar_steps('kws_bytes', [('One hour of raw audio', 115.2, 'danger', '115.2 MB', 1), ('One model update', 0.8, 'data', '0.8 MB, 144× smaller', 1)], 1, (5.8, 1.1), 5000, 'Bytes leaving the home (MB, log scale)', log=True, xmin=0.1)
 bar_steps('audit', [('Credit: 25 months, 256 B each', 194.8, 'memory', '195 GB', 1), ('DLRM: 1 year, 256 B each', 18688.0, 'memory', '18.7 TB', 2), ('DLRM: 1 year, full input', 975572.0, 'danger', '976 TB, 52×', 2)], 2, (5.8, 1.8), 300000000.0, 'Audit log size (GB, log scale)', log=True, xmin=10, note='256 B per record is an assumption; DLRM input as in MLPerf DLRM (constructed)')
 FONT = 'font-family="Helvetica, Arial, sans-serif"'

@@ -594,7 +594,7 @@ function processStatsData(stats) {
         currentStreak,
         bestStreak,
         totalQuizzes: stats.attempts,
-        avgScore: ((stats.totalCorrect / stats.totalQuestions) * 100).toFixed(1)
+        avgScore: stats.totalQuestions > 0 ? ((stats.totalCorrect / stats.totalQuestions) * 100).toFixed(1) : '0.0'
     };
 }
 function createCharts(shadowRoot, processedStats) {
@@ -614,7 +614,7 @@ function createCharts(shadowRoot, processedStats) {
                 labels: ['Correct', 'Incorrect'],
                 datasets: [{
                     data: [processedStats.avgScore, 100 - processedStats.avgScore],
-                    backgroundColor: ['#3b82f6', '#93c5fd'],
+                    backgroundColor: ['#8e1537', '#dfaab8'],
                     borderWidth: 0
                 }]
             },
@@ -642,7 +642,7 @@ function createCharts(shadowRoot, processedStats) {
                 datasets: [{
                     label: 'Number of Quizzes',
                     data: dailyStats.map(d => d.count),
-                    backgroundColor: '#3b82f6',
+                    backgroundColor: '#8e1537',
                     borderRadius: 4
                 }]
             },
@@ -672,7 +672,7 @@ function createCharts(shadowRoot, processedStats) {
                 datasets: [{
                     label: 'Success Rate',
                     data: dailyStats.map(d => (d.correctRate * 100).toFixed(1)),
-                    borderColor: '#3b82f6',
+                    borderColor: '#8e1537',
                     tension: 0.3,
                     fill: false
                 }]
@@ -897,15 +897,15 @@ function createProgressChart(shadowRoot, chartId = 'chapterProgressChart') {
                     datasets: [{
                         label: 'Passed section results',
                         data: chartData.map(chapter => chapter.passedQuizzes),
-                        backgroundColor: '#3b82f6',
-                        borderColor: '#2563eb',
+                        backgroundColor: '#8e1537',
+                        borderColor: '#74132f',
                         borderWidth: 1,
                         order: 1
                     }, {
                         label: 'Other section results',
                         data: chartData.map(chapter => chapter.otherResults),
-                        backgroundColor: '#93c5fd',
-                        borderColor: '#60a5fa',
+                        backgroundColor: '#dfaab8',
+                        borderColor: '#c77088',
                         borderWidth: 1,
                         order: 2
                     }]
@@ -999,10 +999,10 @@ function createCustomLegend(chartContainer, chartData) {
     }
     
     const legendItems = [{
-        color: '#3b82f6', label: 'Passed section results',
+        color: '#8e1537', label: 'Passed section results',
         description: 'Passing results recorded for this page'
     }, {
-        color: '#93c5fd', label: 'Other section results',
+        color: '#dfaab8', label: 'Other section results',
         description: 'Recorded results below the passing threshold'
     }];
     if (chartData.some(chapter => chapter.completedByCumulativeQuiz)) legendItems.push({

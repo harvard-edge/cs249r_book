@@ -365,28 +365,30 @@ def chunked():
     gm, ti, n = (167.7097308, 21.57420515, 8)
     pre = 162.441074
     dec = 5.268656716
-    for k in (1, 2):
-        fig, ax = plt.subplots(figsize=(5.6, 2.1))
-        ax.barh(1, pre, left=0, height=0.45, color=C['compute'])
+    for k in (1, 2, 3):
+        fig, ax = plt.subplots(figsize=(5.6, 2.25))
+        ax.barh(1, pre, left=0, height=0.44, color=C['compute'])
         ax.text(pre / 2, 1, 'prefill 4,096 tokens', ha='center', va='center', color='white', fontsize=11, fontweight='bold')
-        ax.barh(1, dec, left=pre, height=0.45, color=C['memory'])
+        ax.barh(1, dec, left=pre, height=0.44, color=C['memory'])
         for x in (0, pre + dec):
-            ax.plot([x, x], [1.28, 1.42], color=C['text'], lw=2)
-        ax.annotate('', (0, 1.52), (pre + dec, 1.52), arrowprops=dict(arrowstyle='<->', color=C['danger'], lw=1.5))
-        ax.text((pre + dec) / 2, 1.62, 'decodes wait 168 ms', ha='center', va='bottom', fontsize=11, fontweight='bold', color=C['danger'])
+            ax.plot([x, x], [1.26, 1.40], color=C['text'], lw=2)
+        ax.annotate('', (0, 1.50), (pre + dec, 1.50), arrowprops=dict(arrowstyle='<->', color=C['danger'], lw=1.5))
+        ax.text((pre + dec) / 2, 1.60, 'decodes wait 168 ms', ha='center', va='bottom', fontsize=11, fontweight='bold', color=C['danger'])
         ax.text(-3, 1, 'One unit', ha='right', va='center', fontsize=12, fontweight='bold')
-        a = 1.0 if k == 2 else 0.0
+        a2 = 1.0 if k >= 2 else 0.0
         for i in range(n):
-            ax.barh(0, ti - 0.6, left=i * ti, height=0.45, color=C['compute'], alpha=a)
-            ax.plot([i * ti, i * ti], [0.28, 0.42], color=C['text'], lw=2, alpha=a)
-        ax.plot([n * ti, n * ti], [0.28, 0.42], color=C['text'], lw=2, alpha=a)
-        ax.text(ti / 2, 0, '1', ha='center', va='center', color='white', fontsize=10, fontweight='bold', alpha=a)
-        ax.annotate('', (0, -0.36), (ti, -0.36), arrowprops=dict(arrowstyle='<->', color=C['text'], lw=1.3, alpha=a))
-        ax.text(ti + 3, -0.36, 'gap 22 ms (512-token chunk + 32 decodes)', va='center', fontsize=11, fontweight='bold', color=C['text'], alpha=a)
-        ax.text(n * ti + 3, 0, 'prompt done 173 ms', va='center', fontsize=11, alpha=a)
-        ax.text(-3, 0, '8 chunks', ha='right', va='center', fontsize=12, fontweight='bold', alpha=a)
-        ax.set_xlim(0, 240)
-        ax.set_ylim(-0.7, 1.9)
+            ax.barh(0, ti - 0.6, left=i * ti, height=0.44, color=C['compute'], alpha=a2)
+            ax.plot([i * ti, i * ti], [0.26, 0.40], color=C['text'], lw=2, alpha=a2)
+        ax.plot([n * ti, n * ti], [0.26, 0.40], color=C['text'], lw=2, alpha=a2)
+        ax.text(ti / 2, 0, '1', ha='center', va='center', color='white', fontsize=10, fontweight='bold', alpha=a2)
+        ax.annotate('', (0, -0.35), (ti, -0.35), arrowprops=dict(arrowstyle='<->', color=C['text'], lw=1.3, alpha=a2))
+        ax.text(ti + 3, -0.35, 'gap 22 ms (512-token chunk + 32 decodes)', va='center', fontsize=11, fontweight='bold', color=C['text'], alpha=a2)
+        ax.text(n * ti + 3, 0, 'done 173 ms', va='center', fontsize=11, alpha=a2)
+        ax.text(-3, 0, '8 chunks', ha='right', va='center', fontsize=12, fontweight='bold', alpha=a2)
+        if k >= 3:
+            ax.text(118, -0.78, '8× smaller decode gap for +11 ms prefill  |  Sarathi-Serve: 2.6× to 5.6× capacity', ha='center', va='center', fontsize=10.5, fontweight='bold', color=C['data'], bbox=dict(boxstyle='round,pad=0.3', fc=C['data_l'], ec=C['data'], lw=1.2))
+        ax.set_xlim(0, 236)
+        ax.set_ylim(-1.05, 1.90)
         ax.set_yticks([])
         ax.spines['left'].set_visible(False)
         ax.set_xlabel('Time (ms); ticks mark output tokens for 32 ongoing decodes')
@@ -528,7 +530,7 @@ def gain():
     fig, ax = plt.subplots(figsize=(3.05, 1.8))
     xs = np.linspace(0, 0.9, 200)
     ax.plot(xs * 100, 1 / (1 - xs), color=C['data'], lw=2.6)
-    pts = [(0.1875, 1.25, 'repair: 1.25×', (28, 0.15)), (0.7058823529, 3.365853659, 'repair, shared\nworkspace: 3.4×', (3, 4.6)), (0.75, 4.0, 'support: 4.0×', (30, 8.3))]
+    pts = [(0.1875, 1.25, 'repair: 1.25×', (26, 1.85)), (0.7058823529, 3.365853659, 'repair, shared\nworkspace: 3.4×', (3, 4.6)), (0.75, 4.0, 'support: 4.0×', (30, 8.3))]
     for f, g, lab, xy in pts:
         ax.plot(f * 100, g, 'o', ms=8, color=C['memory'], mec='white', mew=1.5, zorder=3)
         ax.annotate(lab, (f * 100, g), xytext=xy, textcoords='data', fontsize=11, fontweight='bold', color=C['text'], arrowprops=dict(arrowstyle='-', color=C['neutral'], lw=0.8))

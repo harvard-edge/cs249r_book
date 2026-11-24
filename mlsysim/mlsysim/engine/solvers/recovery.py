@@ -5,10 +5,9 @@ stated inputs: one bounded repair priced against unwinding and rebuilding to
 the same endpoint, the expected irreversible loss of a plan whose checks run
 before or after its pivot, an append-only loop run to its turn ceiling or
 stopped early, retries multiplied through nested layers, a capped dependency
-under one burst of blocking calls, a retry cohort synchronized or jittered,
-a cleanup graph against a reverse stack, a breaker window classified two ways,
-and the incidents a published table lists as sustained by retries. None models
-a particular framework, provider, or queueing burst beyond what it states.
+under one burst of blocking calls, and a retry cohort synchronized or
+jittered. None models a particular framework, provider, or queueing burst
+beyond what it states.
 """
 
 from __future__ import annotations

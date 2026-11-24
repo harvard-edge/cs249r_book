@@ -46,7 +46,7 @@ def save_slot(fig, name):
     """Save at exactly the figure size, so the slide places it at scale 1."""
     fig.savefig(HERE / f'{name}.svg', format='svg', facecolor='white')
     plt.close(fig)
-DEFS = f'<defs>\n<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{SLATE}"/></marker>\n<marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{GREEN}"/></marker>\n<marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{RED}"/></marker>\n</defs>'
+DEFS = f'<defs>\n<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{SLATE}"/></marker>\n<marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{GREEN}"/></marker>\n<marker id="aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{AMBER}"/></marker>\n<marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{RED}"/></marker>\n</defs>'
 
 def svg(name, w, h, body):
     (HERE / f'{name}.svg').write_text(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" font-family="{FONT}">\n{DEFS}\n<rect width="{w}" height="{h}" fill="white"/>\n' + '\n'.join(body) + '\n</svg>\n')
@@ -58,12 +58,13 @@ def box(x, y, w, h, fill, stroke, dash=None, rx=6, sw=2.2):
 def esc(s):
     return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
-def text(x, y, s, size=20, fill=TXT, anchor='middle', weight='normal'):
-    return f'<text x="{x}" y="{y}" font-size="{size}" fill="{fill}" text-anchor="{anchor}" font-weight="{weight}">{esc(s)}</text>'
+def text(x, y, s, size=20, fill=TXT, anchor='middle', weight='normal', raw=False):
+    content = s if raw else esc(s)
+    return f'<text x="{x}" y="{y}" font-size="{size}" fill="{fill}" text-anchor="{anchor}" font-weight="{weight}">{content}</text>'
 
-def lines(x, y, rows, size=20, fill=TXT, anchor='middle', weight='normal', gap=None):
+def lines(x, y, rows, size=20, fill=TXT, anchor='middle', weight='normal', gap=None, raw=False):
     gap = gap or size * 1.22
-    return [text(x, y + i * gap, r, size, fill, anchor, weight) for i, r in enumerate(rows)]
+    return [text(x, y + i * gap, r, size, fill, anchor, weight, raw=raw) for i, r in enumerate(rows)]
 
 def arrow(x1, y1, x2, y2, color=SLATE, sw=2.4, dash=None, marker='ah'):
     d = f' stroke-dasharray="{dash}"' if dash else ''
@@ -111,18 +112,18 @@ def cae(k):
     b += lines(119, 60, ['payload ≤ 50 kg', 'floor μ ≥ 0.204', 'person stands still'], 18)
     b.append(box(262, 8, 400, 66, GREEN_F, GREEN, sw=2.6))
     b += lines(462, 34, ['Claim C1a: the base stops inside 1.10 m'], 20, weight='bold')
-    b += lines(462, 60, ['at 1.3 m/s, loaded (d_stop ≤ D_clear)'], 18)
+    b += lines(462, 60, ['at 1.3 m/s, loaded (d<tspan dy="4" font-size="13">stop</tspan><tspan dy="-4">&#160;&#8804; D</tspan><tspan dy="4" font-size="13">clear</tspan><tspan dy="-4">)</tspan>'], 18, raw=True)
     b.append(line(230, 41, 262, 41, SLATE, 2, dash='5,4'))
     b.append(box(262, 104, 400, 66, 'white', SLATE, sw=2.2))
     b += lines(462, 130, ['Warrant: the stopping budget bounds'], 19, weight='bold')
     b += lines(462, 156, ['travel if every term is bounded'], 18)
     b.append(arrow(462, 104, 462, 77))
-    leaves = [('Loaded stop trials', 'a_brake ≥ 2 m/s²'), ('Brake-onset trials', '≤ 20 ms'), ('End-to-end age trace', '51.6 ms'), ('Site survey', 'D_clear 1.10 m')]
+    leaves = [('Loaded stop trials', 'a<tspan dy="4" font-size="13">brake</tspan><tspan dy="-4">&#160;&#8805; 2 m/s&#178;</tspan>'), ('Brake-onset trials', '&#8804; 20 ms'), ('End-to-end age trace', '51.6 ms'), ('Site survey', 'D<tspan dy="4" font-size="13">clear</tspan><tspan dy="-4">&#160;= 1.10 m</tspan>')]
     for i, (t1, t2) in enumerate(leaves):
         x = 46 + i * 206
         b.append(box(x, 228, 200, 66, 'white', GREEN, sw=2.0))
         b += lines(x + 100, 255, [t1], 18, weight='bold')
-        b += lines(x + 100, 281, [t2], 18)
+        b += lines(x + 100, 281, [t2], 18, raw=True)
         b.append(arrow(x + 100, 228, 462 + (i - 1.5) * 50, 173, GREEN, 2, marker='ahg'))
     b.append(text(450, 320, 'Evidence: calibrated records with stated uncertainty', 18, GREEN, weight='bold'))
     if k >= 2:
@@ -186,37 +187,39 @@ def door(k):
     ax.minorticks_off()
     ax.tick_params(labelsize=10)
     save_slot(fig, f'door_step{k}')
-TREE = [('C1a  Base stop', '969.0 of 1,100 mm; a_brake 2 m/s²', 'ill'), ('C1b  Door latch', '39 N at onset; arm stops in 0.15 mm', 'unk'), ('C1c  Mug handover', '20.7 N free hand; no clamping', 'unk'), ('C2  Permission timing', 'onset ≤ 82 ms; WCET 250 of 400 µs', 'dec'), ('C3  Braking traction', 'floor μ ≥ 0.204 (screen)', 'ill'), ('C4  Observation age', 'dispatch age 51.6 ms', 'ill'), ('C5  Independence', 'placement test report', 'unk'), ('C6  Authority transfer', 'PASS records for A1 to A4', 'unk')]
+TREE = [('C1a  Base stop', '969.0 of 1,100 mm; braking 2 m/s²', 'ill'), ('C1b  Door latch', '39 N at onset; arm stops in 0.15 mm', 'unk'), ('C1c  Mug handover', '20.7 N free hand; no clamping', 'unk'), ('C2  Permission timing', 'onset ≤ 82 ms; WCET 250 of 400 µs', 'dec'), ('C3  Braking traction', 'floor μ ≥ 0.204 (screen)', 'ill'), ('C4  Observation age', 'dispatch age 51.6 ms', 'ill'), ('C5  Independence', 'placement test report', 'unk'), ('C6  Authority transfer', 'PASS records for A1 to A4', 'unk')]
 DASH = {'ill': '8,5', 'dec': '10,4,2,4', 'unk': '2,4'}
 MAT = {'ill': 'illustrative', 'dec': 'declared', 'unk': 'unknown'}
 
 def tree(k):
-    W, H = (900, 360)
+    W, H = (966, 376)
     b = []
-    b.append(box(4, 98, 150, 88, GREEN_F, GREEN, sw=2.4))
-    b += lines(79, 126, ['C0  Restricted', 'mug delivery', '(all must hold)'], 18, weight='bold', gap=22)
+    b.append(box(4, 96, 152, 92, GREEN_F, GREEN, sw=2.4))
+    b += lines(80, 125, ['C0  Restricted', 'mug delivery', '(all must hold)'], 19, weight='bold', gap=23)
     for i, (c, leaf, m) in enumerate(TREE):
-        y = 6 + i * 44
-        b.append(line(154, 141, 172, y + 18, SLATE, 1.6))
-        b.append(box(172, y, 222, 36, 'white', SLATE, sw=1.8))
-        b.append(text(180, y + 25, c, 18, TXT, 'start', 'bold'))
-        b.append(line(394, y + 18, 404, y + 18, SLATE, 1.6))
-        b.append(box(404, y, 306, 36, 'white', GRAY if k == 1 else SLATE, dash=DASH[m], sw=2.0))
-        b.append(text(411, y + 25, leaf, 17, TXT, 'start'))
+        y = 8 + i * 45
+        b.append(line(156, 142, 172, y + 19, SLATE, 1.6))
+        b.append(box(172, y, 234, 38, 'white', SLATE, sw=1.8))
+        b.append(text(181, y + 26, c, 19, TXT, 'start', 'bold'))
+        b.append(line(406, y + 19, 416, y + 19, SLATE, 1.6))
+        b.append(box(416, y, 326, 38, 'white', GRAY if k == 1 else SLATE, dash=DASH[m], sw=2.1))
+        b.append(text(425, y + 26, leaf, 18, TXT, 'start'))
         if k >= 3:
-            b.append(box(716, y + 2, 86, 32, RED_F, RED, rx=4, sw=1.8))
-            b.append(text(759, y + 24, 'REFUSE', 17, RED, weight='bold'))
+            b.append(line(742, y + 19, 758, y + 19, RED, 1.8))
+    if k >= 3:
+        b.append(box(758, 8, 80, 353, RED_F, RED, rx=6, sw=2.2))
+        b += lines(798, 156, ['every', 'branch', 'REFUSE'], 19, RED, weight='bold', gap=26)
     if k >= 2:
-        y3 = 6 + 4 * 44
-        b.append(box(808, y3 - 6, 90, 48, RED_F, RED, sw=2.2))
-        b += lines(853, y3 + 13, ['clear oil', 'film'], 17, RED, weight='bold', gap=19)
-        b.append(arrow(808, y3 + 18, 802 if k >= 3 else 712, y3 + 18, RED, 2.2, marker='ahr'))
-        b.append(text(853, y3 - 13, 'defeater', 17, RED, weight='bold'))
+        y3 = 8 + 4 * 45
+        b.append(box(868, y3 - 7, 94, 52, RED_F, RED, sw=2.2))
+        b += lines(915, y3 + 14, ['clear oil', 'film'], 18, RED, weight='bold', gap=21)
+        b.append(arrow(868, y3 + 19, 842 if k >= 3 else 746, y3 + 19, RED, 2.4, marker='ahr'))
+        b.append(text(915, y3 - 15, 'defeater', 18, RED, weight='bold'))
         for j, mm in enumerate(('ill', 'dec', 'unk')):
-            yy = 212 + j * 32
-            b.append(box(6, yy, 34, 22, 'white', SLATE, dash=DASH[mm], sw=2.0, rx=3))
-            b.append(text(46, yy + 18, MAT[mm], 17, TXT, 'start'))
-        b.append(text(6, 332, 'none measured', 17, RED, 'start', 'bold'))
+            yy = 216 + j * 34
+            b.append(box(6, yy, 36, 24, 'white', SLATE, dash=DASH[mm], sw=2.1, rx=3))
+            b.append(text(48, yy + 19, MAT[mm], 18.5, TXT, 'start'))
+        b.append(text(6, 344, 'none measured', 18.5, RED, 'start', 'bold'))
     svg(f'tree_step{k}', W, H, b)
 LABELS = {'Police-reported': 'Police-reported crash', 'Any-injury-reported': 'Any injury reported', 'Any Airbag Deployment': 'Any airbag deployment', 'Ego Vehicle Airbag Deployment': 'Airbag in the robotaxi', 'Suspected Serious Injury+': 'Serious injury or worse', 'Any Fatal': 'Fatal'}
 
@@ -249,14 +252,15 @@ def waymo(k):
     save_slot(fig, f'waymo_step{k}')
 
 def silent(k):
-    fig = plt.figure(figsize=cm(14.6, 3.7))
-    ax = fig.add_axes([0.3, 0.27, 0.48, 0.71])
+    fig = plt.figure(figsize=cm(14.6, 3.60))
+    ax = fig.add_axes([0.3, 0.33, 0.48, 0.64])
     rows = [(2, 'Proposer falls silent', 0, 60.0, 'lease runs out: 60 ms', BLUE_F, BLUE, 1), (1, 'Premise flags at once', 0, 0, '', AMBER_F, AMBER, 1), (0, 'Premise flags at 60 ms', 0, 82.0 - 22.0, 'flag latency: 60 ms', AMBER_F, AMBER, 2)]
     for y, lab, x0, pre, pre_lab, fc, ec, step in rows:
         a = 1.0 if k >= step else 0.0
         if pre:
             ax.barh(y, pre, left=x0, color=fc, edgecolor=ec, lw=1.3, height=0.6, alpha=a, hatch='///' if ec == AMBER else None)
-            ax.text(pre / 2, y, pre_lab, ha='center', va='center', fontsize=10, color=NAVY if ec == BLUE else '#92400E', fontweight='bold', alpha=a)
+            bb = dict(boxstyle='round,pad=0.18', fc='#FEF3C7', ec='none', alpha=a) if ec == AMBER else None
+            ax.text(pre / 2, y, pre_lab, ha='center', va='center', fontsize=10, color=NAVY if ec == BLUE else '#92400E', fontweight='bold', alpha=a, bbox=bb)
         ax.barh(y, 1.0 + 1.0, left=pre, color=SLATE, height=0.6, alpha=a)
         ax.barh(y, 20.0, left=pre + 1.0 + 1.0, color=RED, height=0.6, alpha=a)
         ax.text(pre + 1.0 + 1.0 + 20.0 / 2, y, 'onset', ha='center', va='center', fontsize=10, color='white', fontweight='bold', alpha=a)
@@ -329,13 +333,16 @@ def manifest(k):
     if k >= 3:
         b.append(arrow(568, 185, 592, 185, SLATE, 2.4))
         b.append(box(596, 116, 132, 138, 'white', SLATE, sw=2.2))
-        b += lines(662, 146, ['Gate:', 'authenticate,', 'then check', 'standing'], 18, gap=26)
-        b.append(arrow(728, 160, 750, 112, GREEN, 2.2, marker='ahg'))
-        b.append(arrow(728, 210, 750, 258, RED, 2.2, marker='ahr'))
-        b.append(box(752, 50, 144, 90, GREEN_F, GREEN, sw=2.2))
-        b += lines(824, 78, ['UNCOND or', 'COND:', 'permit on'], 18, GREEN, weight='bold', gap=22)
-        b.append(box(752, 230, 144, 90, RED_F, RED, sw=2.2))
-        b += lines(824, 258, ['REFUSE:', 'permit off;', 'stop or hold'], 18, RED, weight='bold', gap=22)
+        b += lines(662, 146, ['Check:', 'authenticate,', 'then verify', 'standing'], 18, gap=26)
+        b.append(arrow(728, 148, 750, 61, GREEN, 2.2, marker='ahg'))
+        b.append(arrow(728, 185, 750, 185, AMBER, 2.2, marker='aha'))
+        b.append(arrow(728, 222, 750, 309, RED, 2.2, marker='ahr'))
+        b.append(box(752, 20, 144, 82, GREEN_F, GREEN, sw=2.2))
+        b += lines(824, 46, ['UNCOND:', 'permit on', 'full envelope'], 17, GREEN, weight='bold', gap=21)
+        b.append(box(752, 144, 144, 82, AMBER_F, AMBER, sw=2.2))
+        b += lines(824, 170, ['COND:', 'restricted', 'signed scope'], 17, '#92400E', weight='bold', gap=21)
+        b.append(box(752, 268, 144, 82, RED_F, RED, sw=2.2))
+        b += lines(824, 294, ['REFUSE:', 'permit off;', 'stop or hold'], 17, RED, weight='bold', gap=21)
     svg(f'manifest_step{k}', W, H, b)
 REOPEN_COLS = ['Task', 'Stop', 'Contact', 'Timing', 'Age', 'Indep.']
 REOPEN_ROWS = [('Retrained policy, same backbone', [1, 0, 1, 0, 0, 0]), ('Larger backbone, same enforcer binary', [1, 0, 0, 1, 1, 1]), ('Driver or thread-priority change', [0, 0, 0, 1, 1, 1]), ('OS reflash that resets calibration', [0, 1, 1, 0, 0, 0]), ('Worn brake lining, no software change', [0, 1, 0, 0, 0, 0])]

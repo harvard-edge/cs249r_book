@@ -106,8 +106,8 @@ def ofqual_flows():
     grade lower, or two or more lower. Column slot about 7 x 5.3 cm."""
     split = [(0, 61.0, 36.0, 3.0), (1.0, 56.0, 39.0, 3.0), (1.0, 59.0, 37.0, 3.0), (2.0, 59.0, 34.0, 4.0), (5.0, 59.0, 31.0, 4.0), (12.0, 60.0, 28.0, 0), (20.0, 79.0, 0, 0)]
     grades = ['A*', 'A', 'B', 'C', 'D', 'E', 'U']
-    cols = [('higher', C['data']), ('same', C['neutral_l']), ('one lower', RED_L), ('two or more lower', RED)]
-    fig, ax = plt.subplots(figsize=(4.3, 3.3))
+    cols = [('higher', C['data']), ('same', C['neutral_l']), ('one lower', '#fca5a5'), ('two or more lower', RED)]
+    fig, ax = plt.subplots(figsize=(4.05, 3.1))
     for i, s in enumerate(split):
         y = len(split) - 1 - i
         left = 0
@@ -115,19 +115,21 @@ def ofqual_flows():
             ax.barh(y, v, left=left, height=0.7, color=col, edgecolor='white', lw=0.8)
             left += v
         lower = s[2] + s[3]
-        ax.text(101.5, y, f'{lower:.0f}%', va='center', ha='left', fontsize=12, fontweight='bold', color=RED if lower else GRAY)
-    ax.text(101.5, len(split) - 0.35, 'lower', va='bottom', ha='left', fontsize=12, color=RED)
+        ax.text(101.5, y, f'{lower:.0f}%', va='center', ha='left', fontsize=13.5, fontweight='bold', color=RED if lower else GRAY)
+    ax.text(101.5, len(split) - 0.35, 'total', va='bottom', ha='left', fontsize=13.0, color=RED, fontweight='bold')
     top = len(split) - 0.35
-    ax.text(0, top, 'higher', ha='left', va='bottom', fontsize=12, color=C['data'])
-    ax.text(36, top, 'same', ha='center', va='bottom', fontsize=12, color=GRAY)
-    ax.text(80, top, 'one lower', ha='center', va='bottom', fontsize=12, color=RED, fontweight='bold')
+    ax.text(0, top, 'higher', ha='left', va='bottom', fontsize=13.0, color=C['data'], fontweight='bold')
+    ax.text(30, top, 'same', ha='center', va='bottom', fontsize=13.0, color=GRAY, fontweight='bold')
+    ax.text(68, top, '1 lower', ha='center', va='bottom', fontsize=13.0, color='#ef4444', fontweight='bold')
+    ax.text(98, top, '2+', ha='right', va='bottom', fontsize=13.0, color=RED, fontweight='bold')
     ax.set_yticks(range(len(split)))
-    ax.set_yticklabels(list(reversed(grades)), fontsize=12)
-    ax.set_ylabel('Teacher grade', fontsize=12)
+    ax.set_yticklabels(list(reversed(grades)), fontsize=13.5)
+    ax.set_ylabel('Teacher grade', fontsize=13.5)
     ax.set_xlim(0, 100)
     ax.set_ylim(-0.6, len(split) + 0.3)
     ax.set_xticks([0, 50, 100])
-    ax.set_xlabel('Calculated grade, share of entries (%)', fontsize=12)
+    ax.tick_params(axis='x', labelsize=13.5)
+    ax.set_xlabel('Calculated grade, share of all entries (%)', fontsize=13.5)
     ax.spines['left'].set_visible(False)
     ax.tick_params(axis='y', length=0)
     sp.save(fig, out('ofqual_flows.svg'))
@@ -136,18 +138,18 @@ def ofqual_candidates():
     """Ofqual Table 2 as bars: candidates by the number of A levels lowered."""
     n = [78470.0, 95580.0, 55730.0, 16100.0, 220.0]
     pct = [100 * v / 246110.0 for v in n]
-    fig, ax = plt.subplots(figsize=(4.4, 1.8))
+    fig, ax = plt.subplots(figsize=(4.1, 1.85))
     for k, p in enumerate(pct):
         ax.bar(k, p, width=0.7, color=GRAY if k == 0 else RED)
-        ax.text(k, p + 1.5, f'{p:.0f}%' if p >= 0.5 else '<0.5%', ha='center', va='bottom', fontsize=12, color=GRAY if k == 0 else RED, fontweight='bold')
+        ax.text(k, p + 1.5, f'{p:.0f}%' if p >= 0.5 else '<0.5%', ha='center', va='bottom', fontsize=13.0, color=GRAY if k == 0 else RED, fontweight='bold')
     at_least = 68.1
     ax.plot([0.7, 4.3], [52, 52], color=RED, lw=1.5)
     for x in (0.7, 4.3):
         ax.plot([x, x], [49, 52], color=RED, lw=1.5)
-    ax.text(2.5, 54, f'{at_least:.0f}% had at least one lowered', ha='center', va='bottom', fontsize=12, fontweight='bold', color=RED)
+    ax.text(2.5, 54, f'{at_least:.0f}% of students had ≥1 lowered', ha='center', va='bottom', fontsize=13.0, fontweight='bold', color=RED)
     ax.set_xticks(range(5))
-    ax.set_xticklabels(['0', '1', '2', '3', '4'], fontsize=12)
-    ax.set_xlabel('A levels lowered per student', fontsize=12)
+    ax.set_xticklabels(['0', '1', '2', '3', '4'], fontsize=13.5)
+    ax.set_xlabel('A levels lowered per student', fontsize=13.5)
     ax.set_ylim(0, 66)
     ax.set_yticks([])
     ax.spines['left'].set_visible(False)
@@ -185,24 +187,26 @@ def assurance():
 
 def lifecycle():
     stages = ['Context', 'Risk', 'Controls', 'Evaluate', 'Launch', 'Operate', 'Change', 'Retire']
-    b = ''
     w, gap, x0, y = (100, 12, 6, 30)
-    for i, s in enumerate(stages):
-        x = x0 + i * (w + gap)
-        fill, st = (VIOLET_L, VIOLET) if i == 4 else (RED_L, RED) if i == 6 else (GREEN_L, GREEN) if i == 7 else (ETH_L, ETH)
-        b += box(x, y, w, 60, fill, st, [s], size=19, sw=3 if i in (4, 6, 7) else 2)
-        if i < 7:
-            b += path_arrow(f'M{x + w},{y + 30} L{x + w + gap - 1},{y + 30}', 'gray', w=2)
     xm = x0 + 6 * (w + gap) + w / 2
     xr = x0 + 1 * (w + gap) + w / 2
-    b += path_arrow(f'M{xm},{y + 60} C{xm},{y + 125} {xr},{y + 125} {xr},{y + 64}', 'red', dash='8,5')
-    b += text((xm + xr) / 2, y + 150, 'new model, data, corpus, region, or use: re-open the risk review', 21, RED)
     lx = x0 + 4 * (w + gap) + w / 2
-    b += text(lx, y + 195, 'Launch: who may authorize, and who may stop it?', 21, VIOLET, weight='bold')
     rx = x0 + 7 * (w + gap) + w / 2
-    b += text(rx - 26, y + 242, 'Retire: an appeal owner remains after shutdown', 21, GREEN, anchor='end', weight='bold')
-    b += path_arrow(f'M{rx - 20},{y + 236} C{rx + 4},{y + 230} {rx},{y + 150} {rx},{y + 64}', 'green', w=2)
-    write('lifecycle.svg', b, 900, 290)
+    for k in (1, 2):
+        b = ''
+        for i, s in enumerate(stages):
+            x = x0 + i * (w + gap)
+            fill, st = (VIOLET_L, VIOLET) if i == 4 else (RED_L, RED) if i == 6 else (GREEN_L, GREEN) if i == 7 else (ETH_L, ETH)
+            b += box(x, y, w, 60, fill, st, [s], size=19, sw=3 if i in (4, 6, 7) else 2)
+            if i < 7:
+                b += path_arrow(f'M{x + w},{y + 30} L{x + w + gap - 1},{y + 30}', 'gray', w=2)
+        b += text(lx, y + 195, 'Launch: who may authorize, and who may stop it?', 21, VIOLET, weight='bold')
+        if k >= 2:
+            b += path_arrow(f'M{xm},{y + 60} C{xm},{y + 125} {xr},{y + 125} {xr},{y + 64}', 'red', dash='8,5')
+            b += text((xm + xr) / 2, y + 150, 'new model, data, corpus, region, or use: re-open the risk review', 21, RED)
+            b += text(rx - 26, y + 242, 'Retire: an appeal owner remains after shutdown', 21, GREEN, anchor='end', weight='bold')
+            b += path_arrow(f'M{rx - 20},{y + 236} C{rx + 4},{y + 230} {rx},{y + 150} {rx},{y + 64}', 'green', w=2)
+        write(f'lifecycle_step{k}.svg', b, 900, 290)
 
 def loan_metrics():
     import numpy as np
@@ -232,22 +236,24 @@ def compas():
     names = ['Base rate', 'FPR', 'PPV']
     blk = [52.31496063, 42.33817701, 64.95352652]
     wht = [39.08701854, 22.01405152, 59.48275862]
-    fig, ax = plt.subplots(figsize=(4.2, 2.8))
     x = np.arange(3)
-    ax.bar(x - 0.2, blk, 0.38, color=ETH)
-    ax.bar(x + 0.2, wht, 0.38, color=C['neutral'])
-    for i in range(3):
-        ax.text(x[i] - 0.2, blk[i] + 1.5, f'{blk[i]:.1f}', ha='center', fontsize=12.5, color=ETH, fontweight='bold')
-        ax.text(x[i] + 0.2, wht[i] + 1.5, f'{wht[i]:.1f}', ha='center', fontsize=12.5, color=C['neutral'], fontweight='bold')
-    ax.set_xticks(x)
-    ax.set_xticklabels(names, fontsize=13)
-    ax.set_ylim(0, 92)
-    ax.set_ylabel('Percent')
-    ax.text(-0.45, 82, 'Black', color=ETH, fontsize=13, fontweight='bold')
-    ax.text(0.2, 82, 'White defendants', color=C['neutral'], fontsize=13, fontweight='bold')
-    ax.grid(axis='y', color=C['grid'], lw=0.6)
-    ax.set_axisbelow(True)
-    sp.save(fig, out('compas.svg'))
+    for k in (1, 2):
+        fig, ax = plt.subplots(figsize=(4.2, 2.8))
+        for i in range(3):
+            a = 1.0 if (i != 1 or k >= 2) else 0.0
+            ax.bar(x[i] - 0.2, blk[i], 0.38, color=RED if (i == 1 and k >= 2) else ETH, alpha=a)
+            ax.bar(x[i] + 0.2, wht[i], 0.38, color=C['neutral'], alpha=a)
+            ax.text(x[i] - 0.2, blk[i] + 1.5, f'{blk[i]:.1f}', ha='center', fontsize=12.5, color=RED if (i == 1 and k >= 2) else ETH, fontweight='bold', alpha=a)
+            ax.text(x[i] + 0.2, wht[i] + 1.5, f'{wht[i]:.1f}', ha='center', fontsize=12.5, color=C['neutral'], fontweight='bold', alpha=a)
+        ax.set_xticks(x)
+        ax.set_xticklabels(names, fontsize=13)
+        ax.set_ylim(0, 92)
+        ax.set_ylabel('Percent')
+        ax.text(-0.45, 82, 'Black', color=ETH, fontsize=13, fontweight='bold')
+        ax.text(0.2, 82, 'White defendants', color=C['neutral'], fontsize=13, fontweight='bold')
+        ax.grid(axis='y', color=C['grid'], lw=0.6)
+        ax.set_axisbelow(True)
+        sp.save(fig, out(f'compas_step{k}.svg'))
 
 def dual_thresholds():
 
@@ -377,7 +383,7 @@ def architecture():
             b += box(10, 320, 200, 90, VIOLET_L, VIOLET, ['Parity', 'updates now'], size=22)
             b += box(230, 320, 240, 90, VIOLET_L, VIOLET, ['Error rates', 'when labels land'], size=22)
             b += box(490, 320, 230, 90, 'white', RED, ['Thin group', 'insufficient, not 0'], size=22, color=RED, dash='6,4')
-            b += box(745, 320, 150, 90, VIOLET_L, VIOLET, ['Release', 'gate: owner'], size=22)
+            b += box(745, 320, 150, 90, VIOLET_L, VIOLET, ['Release', 'sign-off: owner'], size=19)
             b += path_arrow('M365,198 L110,318', 'purple', w=2)
             b += path_arrow('M380,240 L330,318', 'purple', w=2)
             b += path_arrow('M720,365 L743,365', 'purple', w=2)
@@ -405,23 +411,26 @@ def alerts():
 
 def overhead():
     rows = [('Fairness-aware training', 5.0, 15.0, 'train'), ('DP-SGD', 30.0, 300.0, 'train'), ('Federated learning', 200.0, 500.0, 'train'), ('Adversarial training', 100.0, 1000.0, 'train'), ('Sampled KernelSHAP', 50.0, 200.0, 'serve'), ('Exhaustive SHAP', 5000.0, 100000.0, 'serve')]
-    fig, ax = plt.subplots(figsize=(5.2, 2.6))
-    for i, (lab, lo, hi, path) in enumerate(rows):
-        y = len(rows) - 1 - i
-        ax.plot([lo, hi], [y, y], color=AMBER if path == 'train' else ETH, lw=11, solid_capstyle='butt')
-        ax.text(0.85 * lo, y, lab, ha='right', va='center', fontsize=13, fontweight='bold', color=INK)
-    ax.set_xscale('log')
-    ax.set_xlim(1, 300000.0)
-    ax.set_yticks([])
-    ax.spines['left'].set_visible(False)
-    ax.set_xticks([10, 100, 1000, 10000, 100000])
-    ax.set_xticklabels(['+10%', '+100%', '+1,000%', '+10⁴%', '+10⁵%'])
-    ax.text(300000.0, 5.3, 'training path', color=AMBER, fontsize=13, fontweight='bold', ha='right')
-    ax.text(300000.0, 1.3, 'serving path', color=ETH, fontsize=13, fontweight='bold', ha='right')
-    ax.set_xlabel('Extra work over the unprotected path (log)')
-    ax.grid(axis='x', color=C['grid'], lw=0.6)
-    ax.set_axisbelow(True)
-    sp.save(fig, out('overhead.svg'))
+    for k in (1, 2):
+        fig, ax = plt.subplots(figsize=(5.2, 2.6))
+        for i, (lab, lo, hi, path) in enumerate(rows):
+            y = len(rows) - 1 - i
+            a = 1.0 if (path == 'train' or k >= 2) else 0.0
+            ax.plot([lo, hi], [y, y], color=AMBER if path == 'train' else ETH, lw=11, solid_capstyle='butt', alpha=a)
+            ax.text(0.85 * lo, y, lab, ha='right', va='center', fontsize=13, fontweight='bold', color=INK, alpha=a)
+        ax.set_xscale('log')
+        ax.set_xlim(1, 300000.0)
+        ax.set_ylim(-0.6, 5.7)
+        ax.set_yticks([])
+        ax.spines['left'].set_visible(False)
+        ax.set_xticks([10, 100, 1000, 10000, 100000])
+        ax.set_xticklabels(['+10%', '+100%', '+1,000%', '+10⁴%', '+10⁵%'])
+        ax.text(300000.0, 5.3, 'training path', color=AMBER, fontsize=13, fontweight='bold', ha='right')
+        ax.text(300000.0, 1.3, 'serving path', color=ETH, fontsize=13, fontweight='bold', ha='right', alpha=1.0 if k >= 2 else 0.0)
+        ax.set_xlabel('Extra work over the unprotected path (log)')
+        ax.grid(axis='x', color=C['grid'], lw=0.6)
+        ax.set_axisbelow(True)
+        sp.save(fig, out(f'overhead_step{k}.svg'))
 
 def shap_ladder():
     rows = []
@@ -490,15 +499,17 @@ def unlearn():
         sp.hbars(out(f'unlearn_step{k}.svg'), rows, '$', log=True, step=step, size=(4.4, 1.6), xlabel='Cost to forget, 175B model ($, log)')
 
 def genai():
-    b = box(330, 120, 240, 110, ETH_L, ETH, ['Model weights', 'aligned by RLHF'], size=24)
     items = [(10, 10, 'System prompt', 'versioned per product'), (10, 250, 'Retrieval index', 'untrusted context'), (630, 10, 'Reward model', 'whose raters?'), (630, 250, 'Output filter', 'runtime policy check')]
-    for x, y, t1, t2 in items:
-        b += box(x, y, 260, 90, VIOLET_L, VIOLET, [t1, t2], size=23)
-    b += path_arrow('M270,70 L328,140', 'purple', w=2.5)
-    b += path_arrow('M270,290 L328,212', 'purple', w=2.5)
-    b += path_arrow('M630,70 L572,140', 'purple', w=2.5)
-    b += path_arrow('M572,212 L628,290', 'purple', w=2.5)
-    write('genai.svg', b, 900, 350)
+    for k in (1, 2):
+        b = box(330, 120, 240, 110, ETH_L, ETH, ['Model weights', 'aligned by RLHF'], size=24)
+        if k >= 2:
+            for x, y, t1, t2 in items:
+                b += box(x, y, 260, 90, VIOLET_L, VIOLET, [t1, t2], size=23)
+            b += path_arrow('M270,70 L328,140', 'purple', w=2.5)
+            b += path_arrow('M270,290 L328,212', 'purple', w=2.5)
+            b += path_arrow('M630,70 L572,140', 'purple', w=2.5)
+            b += path_arrow('M572,212 L628,290', 'purple', w=2.5)
+        write(f'genai_step{k}.svg', b, 900, 350)
 
 def contest():
 
@@ -546,7 +557,22 @@ def loop():
 def autobias():
     best = 96.5
     rows = [('Radiologist alone', 92.0, 'neutral', '92%'), ('AI alone', 95.0, 'memory', '95%'), ('Team, best case', best, 'compute', f'at most {best:.1f}%')]
-    sp.hbars(out('autobias.svg'), rows, '%', log=False, size=(4.4, 1.7), xlabel='Tumors found among patients with tumors (%)')
+    fig, ax = plt.subplots(figsize=(4.4, 1.75))
+    for i, (lab, v, ck, txt) in enumerate(rows):
+        y = len(rows) - 1 - i
+        ax.barh(y, v, color=C[ck], height=0.62)
+        ax.text(-2.2, y, lab, ha='right', va='center', fontsize=12.5, fontweight='bold', color=INK)
+        ax.text(v + 2.0, y, txt, ha='left', va='center', fontsize=12.5, fontweight='bold', color=C[ck])
+    ax.set_xlim(0, 134)
+    ax.set_ylim(-0.55, len(rows) - 0.45)
+    ax.set_xticks([0, 25, 50, 75, 100])
+    ax.set_xticklabels(['0', '25', '50', '75', '100'])
+    ax.set_yticks([])
+    ax.spines['left'].set_visible(False)
+    ax.grid(axis='x', color=C['grid'], lw=0.6)
+    ax.set_axisbelow(True)
+    ax.set_xlabel('Tumors found among patients with tumors (%)', fontsize=12.5)
+    sp.save(fig, out('autobias.svg'))
 
 def waymo():
     import datetime as dt

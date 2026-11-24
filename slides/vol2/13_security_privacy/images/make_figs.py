@@ -103,21 +103,21 @@ def threatmodel(path):
 threatmodel('threatmodel.svg')
 
 def llm_stream(path):
-    W, H = (5.8, 1.9)
+    W, H = (5.8, 1.62)
     fig, ax = canvas(W, H)
-    segs = [('System\ninstructions', V2['c3_l'], V2['c3'], 1.05), ('User\ntext', V2['frame_l'], V2['frame'], 0.75), ('Retrieved page:\n“ignore previous…”', V2['risk_l'], V2['risk'], 1.55)]
-    x = 0.05
+    segs = [('System\ninstructions', V2['c3_l'], V2['c3'], 1.10), ('User\ntext', V2['frame_l'], V2['frame'], 0.66), ('Retrieved page:\n“ignore previous…”', V2['risk_l'], V2['risk'], 1.64)]
+    x = 0.03
     for t, f, s, w in segs:
-        box(ax, x, 1.0, w, 0.75, t, f, s, fs=10.5)
+        box(ax, x, 0.82, w, 0.74, t, f, s, fs=11.2)
         x += w + 0.05
-    ax.text(0.05, 0.82, 'one token stream: control and data share it', ha='left', va='top', fontsize=10.5, color=V2['gray'])
-    box(ax, 3.62, 1.0, 0.68, 0.75, 'Model', V2['c1_l'], V2['c1'], fs=11)
-    arrow(ax, (3.52, 1.375), (3.62, 1.375), V2['gray'])
-    box(ax, 4.55, 1.0, 1.2, 0.75, 'Policy check\nprincipal,\npermissions', V2['ok_l'], V2['ok'], fs=10)
-    arrow(ax, (4.3, 1.375), (4.55, 1.375), V2['gray'])
-    box(ax, 4.55, 0.05, 1.2, 0.55, 'Tools, data', V2['frame_l'], V2['frame'], fs=10.5)
-    arrow(ax, (5.15, 1.0), (5.15, 0.6), V2['ok'])
-    ax.text(4.45, 0.33, 'output is untrusted input', ha='right', va='center', fontsize=10.5, color=V2['ok'], fontweight='bold')
+    ax.text(0.03, 0.68, 'one token stream: control and data share it', ha='left', va='top', fontsize=11.5, color=V2['gray'])
+    box(ax, 3.67, 0.82, 0.64, 0.74, 'Model', V2['c1_l'], V2['c1'], fs=11.5)
+    arrow(ax, (3.53, 1.19), (3.67, 1.19), V2['gray'])
+    box(ax, 4.53, 0.82, 1.24, 0.74, 'Policy check\nprincipal,\npermissions', V2['ok_l'], V2['ok'], fs=10.8)
+    arrow(ax, (4.31, 1.19), (4.53, 1.19), V2['gray'])
+    box(ax, 4.53, 0.04, 1.24, 0.50, 'Tools, data', V2['frame_l'], V2['frame'], fs=11.5)
+    arrow(ax, (5.15, 0.82), (5.15, 0.54), V2['ok'])
+    ax.text(4.42, 0.29, 'output is untrusted input', ha='right', va='center', fontsize=11.5, color=V2['ok'], fontweight='bold')
     save(fig, path)
 llm_stream('llm_stream.svg')
 
@@ -178,26 +178,30 @@ def bill(path, step):
 for k in (1, 2, 3):
     bill(f'bill_step{k}.svg', k)
 
-def bilevel(path):
+def bilevel(path, step):
     W, H = (5.8, 2.45)
     fig, ax = canvas(W, H)
-    box(ax, 0.05, 1.45, 2.3, 0.9, 'Attacker (outer loop)\nchoose poison P to raise\ntarget loss', V2['risk_l'], V2['risk'], fs=10.5)
+    a2 = 1.0 if step >= 2 else 0.0
+    box(ax, 0.05, 1.45, 2.3, 0.9, 'Attacker (outer loop)\nchoose poison P to raise\ntarget loss', V2['risk_l'], V2['risk'], fs=10.5, alpha=a2)
     gx, gy = (0.35, 0.15)
     for r in range(3):
         for c in range(6):
             red = (r, c) in ((0, 1), (1, 4), (2, 2))
-            ax.add_patch(Rectangle((gx + c * 0.24, gy + r * 0.24), 0.2, 0.2, fc=V2['risk'] if red else V2['ok_l'], ec=V2['risk'] if red else V2['ok'], lw=1))
-    ax.text(gx + 0.72, gy + 0.85, 'training data: clean S plus poison P', ha='center', fontsize=10.5, color=V2['text'], fontweight='bold')
-    arrow(ax, (1.2, 1.45), (1.05, 1.1), V2['risk'], lw=2)
-    ax.text(1.28, 1.27, 'inject', fontsize=10.5, color=V2['risk'], fontweight='bold')
+            use_red = red and step >= 2
+            ax.add_patch(Rectangle((gx + c * 0.24, gy + r * 0.24), 0.2, 0.2, fc=V2['risk'] if use_red else V2['ok_l'], ec=V2['risk'] if use_red else V2['ok'], lw=1))
+    lbl = 'training data: clean S plus poison P' if step >= 2 else 'training data: clean S'
+    ax.text(gx + 0.72, gy + 0.85, lbl, ha='center', fontsize=10.5, color=V2['text'], fontweight='bold')
+    arrow(ax, (1.2, 1.45), (1.05, 1.1), V2['risk'], lw=2, alpha=a2)
+    ax.text(1.28, 1.27, 'inject', fontsize=10.5, color=V2['risk'], fontweight='bold', alpha=a2)
     box(ax, 2.68, 0.15, 1.8, 0.9, 'Defender (inner loop)\ntrains: minimize\ntraining loss', V2['c1_l'], V2['c1'], fs=10.5)
     arrow(ax, (1.85, 0.5), (2.68, 0.5), V2['c1'], lw=2)
     box(ax, 4.6, 0.15, 1.15, 0.9, 'Trained model\nscored on\ntarget loss', V2['frame_l'], V2['frame'], fs=10.5)
     arrow(ax, (4.48, 0.6), (4.6, 0.6), V2['c1'], lw=2)
-    ax.add_patch(FancyArrowPatch((5.2, 1.05), (2.35, 1.95), connectionstyle='arc3,rad=0.35', arrowstyle='-|>', mutation_scale=13, color=V2['risk'], lw=2))
-    ax.text(3.75, 1.4, 'feedback: did the\nmodel learn it?', ha='center', fontsize=10.5, color=V2['risk'], fontweight='bold')
+    ax.add_patch(FancyArrowPatch((5.2, 1.05), (2.35, 1.95), connectionstyle='arc3,rad=0.35', arrowstyle='-|>', mutation_scale=13, color=V2['risk'], lw=2, alpha=a2))
+    ax.text(3.75, 1.4, 'feedback: did the\nmodel learn it?', ha='center', fontsize=10.5, color=V2['risk'], fontweight='bold', alpha=a2)
     save(fig, path)
-bilevel('bilevel.svg')
+for k in (1, 2):
+    bilevel(f'bilevel_step{k}.svg', k)
 
 def nightshade(path):
     """The paper's grid: the first four prompts, four doses, relabeled at slide size."""
@@ -241,22 +245,50 @@ honest = rng.normal(1.0, 0.1, int(63.0))
 vs = np.logspace(0, math.log10(10000.0), 200)
 means = [(honest.sum() + v) / n_workers for v in vs]
 meds = [np.median(np.append(honest, v)) for v in vs]
-fig, ax = plt.subplots(figsize=(3.6, 2.2))
-ax.plot(vs, means, color=C['danger'], lw=2.6)
-ax.plot(vs, meds, color=C['data'], lw=2.6)
-ax.text(1.3, 120, 'mean of 64\n(what AllReduce\naverages)', color=C['danger'], fontsize=11, fontweight='bold', ha='left', va='top')
-ax.text(1200.0, 0.55, 'median of 64', color=C['data'], fontsize=11, fontweight='bold', ha='center')
-ax.set_xscale('log')
-ax.set_yscale('log')
-ax.set_ylim(0.4, 300)
-ax.set_xlabel('Value one worker sends')
-ax.set_ylabel('Aggregate')
-ax.set_xticks([1, 10, 100, 1000, 10000])
-ax.set_xticklabels(['1', '10', '100', '1K', '10K'])
-ax.set_yticks([1, 10, 100])
-ax.set_yticklabels(['1', '10', '100'])
-ax.minorticks_off()
-sp.save(fig, out / 'breakdown.svg')
+
+def breakdown(path, step):
+    fig, ax = plt.subplots(figsize=(3.6, 2.2))
+    ax.plot(vs, means, color=C['danger'], lw=2.6)
+    ax.text(1.3, 120, 'mean of 64\n(what AllReduce\naverages)', color=C['danger'], fontsize=11, fontweight='bold', ha='left', va='top')
+    a2 = 1.0 if step >= 2 else 0.0
+    ax.plot(vs, meds, color=C['data'], lw=2.6, alpha=a2)
+    ax.text(1200.0, 0.55, 'median of 64', color=C['data'], fontsize=11, fontweight='bold', ha='center', alpha=a2)
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.set_ylim(0.4, 300)
+    ax.set_xlabel('Value one worker sends')
+    ax.set_ylabel('Aggregate')
+    ax.set_xticks([1, 10, 100, 1000, 10000])
+    ax.set_xticklabels(['1', '10', '100', '1K', '10K'])
+    ax.set_yticks([1, 10, 100])
+    ax.set_yticklabels(['1', '10', '100'])
+    ax.minorticks_off()
+    sp.save(fig, out / path)
+for k in (1, 2):
+    breakdown(f'breakdown_step{k}.svg', k)
+
+def attest(path, step):
+    W, H = (5.8, 2.40)
+    fig, ax = canvas(W, H)
+    box(ax, 0.04, 1.30, 1.38, 0.96, '1. Restarted node\nboots in TEE', V2['c1_l'], V2['c1'], fs=9.8)
+    arrow(ax, (1.42, 1.78), (2.24, 1.78), V2['c1'], lw=2.0)
+    ax.text(1.83, 1.88, 'quote', ha='center', va='bottom', fontsize=11.5, color=V2['c1'], fontweight='bold')
+    ax.text(1.83, 1.66, 'FW+hash', ha='center', va='top', fontsize=10.5, color=V2['gray'])
+    box(ax, 2.24, 1.30, 1.38, 0.96, '2. Verifier\npolicy check', V2['c3_l'], V2['c3'], fs=10.0)
+    a2 = 1.0 if step >= 2 else 0.0
+    arrow(ax, (3.62, 1.78), (4.36, 1.78), V2['ok'], lw=2.0, alpha=a2)
+    ax.text(3.99, 1.88, 'match', ha='center', va='bottom', fontsize=11.5, color=V2['ok'], fontweight='bold', alpha=a2)
+    box(ax, 4.36, 1.30, 1.40, 0.96, '3. Key service\n(KMS)', V2['ok_l'], V2['ok'], fs=10.0, alpha=a2)
+    arrow(ax, (2.93, 1.30), (2.93, 0.88), V2['risk'], lw=2.0, alpha=a2)
+    ax.text(3.03, 1.09, 'mismatch', ha='left', va='center', fontsize=11.0, color=V2['risk'], fontweight='bold', alpha=a2)
+    box(ax, 1.96, 0.08, 1.94, 0.80, 'Tampered node denied\nno key, out of ring', V2['risk_l'], V2['risk'], fs=10.0, alpha=a2)
+    a3 = 1.0 if step >= 3 else 0.0
+    arrow(ax, (5.06, 1.30), (5.06, 0.88), V2['ok'], lw=2.0, alpha=a3)
+    ax.text(4.95, 1.09, 'sealed key', ha='right', va='center', fontsize=11.0, color=V2['ok'], fontweight='bold', alpha=a3)
+    box(ax, 4.10, 0.08, 1.66, 0.80, 'Loads checkpoint\nadds to $T_{\\mathrm{sync}}$', V2['c2_l'], V2['c2'], fs=10.0, alpha=a3)
+    save(fig, path)
+for k in (1, 2, 3):
+    attest(f'attest_step{k}.svg', k)
 sp.hbars(out / 'gather_traffic.svg', [('Ring AllReduce (sum)', 1.96875, 'memory', '1.97 S'), ('Gather every gradient', 63.0, 'danger', '63 S  (32 times)')], '', log=False, size=(5.8, 1.0), xlabel='Bytes each worker receives per step, S = gradient size (derived)')
 fig, ax = plt.subplots(figsize=(3.0, 2.0))
 labels = ['ResNet-18\nINT8', 'ResNet-50\nINT8', 'ResNet-50\nFP32']
@@ -266,7 +298,7 @@ ax.bar(range(3), vals, color=[C['memory'], C['memory'], C['compute']], width=0.6
 for i, k in enumerate(keys):
     ax.text(i, vals[i] + 3, f"{ {'r18_int8_mb': '11.7', 'r50_int8_mb': '25.6', 'r50_fp32_mb': '102.2'}[k]} MB", ha='center', fontsize=11, fontweight='bold')
 ax.axhline(134.2, color=C['danger'], ls='--', lw=1.8)
-ax.text(2.4, 134.2 + 3.8, 'EPC 128 MiB = 134.2 MB', ha='right', va='bottom', fontsize=11, color=C['danger'], fontweight='bold')
+ax.text(2.4, 134.2 + 3.8, 'EPC limit: 134.2 MB', ha='right', va='bottom', fontsize=11, color=C['danger'], fontweight='bold')
 ax.set_xticks(range(3))
 ax.set_xticklabels(labels, fontsize=11)
 ax.set_ylim(0, 165)
@@ -292,21 +324,27 @@ fpr = np.linspace(0, 1, 301)
 ceil = np.array([0.0, 0.009060939428, 0.01812187886, 0.02718281828, 0.03624375771, 0.04530469714, 0.05436563657, 0.063426576, 0.07248751543, 0.08154845485, 0.09060939428, 0.09967033371, 0.1087312731, 0.1177922126, 0.126853152, 0.1359140914, 0.1449750309, 0.1540359703, 0.1630969097, 0.1721578491, 0.1812187886, 0.190279728, 0.1993406674, 0.2084016068, 0.2174625463, 0.2265234857, 0.2355844251, 0.2446453646, 0.253706304, 0.2627672434, 0.2718281828, 0.2808891223, 0.2899500617, 0.2990110011, 0.3080719406, 0.31713288, 0.3261938194, 0.3352547588, 0.3443156983, 0.3533766377, 0.3624375771, 0.3714985166, 0.380559456, 0.3896203954, 0.3986813348, 0.4077422743, 0.4168032137, 0.4258641531, 0.4349250926, 0.443986032, 0.4530469714, 0.4621079108, 0.4711688503, 0.4802297897, 0.4892907291, 0.4983516686, 0.507412608, 0.5164735474, 0.5255344868, 0.5345954263, 0.5436563657, 0.5527173051, 0.5617782445, 0.570839184, 0.5799001234, 0.5889610628, 0.5980220023, 0.6070829417, 0.6161438811, 0.6252048205, 0.63426576, 0.6433266994, 0.6523876388, 0.6614485783, 0.6705095177, 0.6795704571, 0.6886313965, 0.697692336, 0.7067532754, 0.7158142148, 0.7248751543, 0.7314480079, 0.7326742727, 0.7339005376, 0.7351268024, 0.7363530672, 0.737579332, 0.7388055968, 0.7400318616, 0.7412581264, 0.7424843912, 0.743710656, 0.7449369208, 0.7461631856, 0.7473894504, 0.7486157152, 0.74984198, 0.7510682448, 0.7522945096, 0.7535207744, 0.7547470392, 0.755973304, 0.7571995688, 0.7584258336, 0.7596520984, 0.7608783632, 0.762104628, 0.7633308928, 0.7645571577, 0.7657834225, 0.7670096873, 0.7682359521, 0.7694622169, 0.7706884817, 0.7719147465, 0.7731410113, 0.7743672761, 0.7755935409, 0.7768198057, 0.7780460705, 0.7792723353, 0.7804986001, 0.7817248649, 0.7829511297, 0.7841773945, 0.7854036593, 0.7866299241, 0.7878561889, 0.7890824537, 0.7903087185, 0.7915349833, 0.7927612481, 0.7939875129, 0.7952137777, 0.7964400426, 0.7976663074, 0.7988925722, 0.800118837, 0.8013451018, 0.8025713666, 0.8037976314, 0.8050238962, 0.806250161, 0.8074764258, 0.8087026906, 0.8099289554, 0.8111552202, 0.812381485, 0.8136077498, 0.8148340146, 0.8160602794, 0.8172865442, 0.818512809, 0.8197390738, 0.8209653386, 0.8221916034, 0.8234178682, 0.824644133, 0.8258703978, 0.8270966626, 0.8283229275, 0.8295491923, 0.8307754571, 0.8320017219, 0.8332279867, 0.8344542515, 0.8356805163, 0.8369067811, 0.8381330459, 0.8393593107, 0.8405855755, 0.8418118403, 0.8430381051, 0.8442643699, 0.8454906347, 0.8467168995, 0.8479431643, 0.8491694291, 0.8503956939, 0.8516219587, 0.8528482235, 0.8540744883, 0.8553007531, 0.8565270179, 0.8577532827, 0.8589795476, 0.8602058124, 0.8614320772, 0.862658342, 0.8638846068, 0.8651108716, 0.8663371364, 0.8675634012, 0.868789666, 0.8700159308, 0.8712421956, 0.8724684604, 0.8736947252, 0.87492099, 0.8761472548, 0.8773735196, 0.8785997844, 0.8798260492, 0.881052314, 0.8822785788, 0.8835048436, 0.8847311084, 0.8859573732, 0.887183638, 0.8884099028, 0.8896361676, 0.8908624325, 0.8920886973, 0.8933149621, 0.8945412269, 0.8957674917, 0.8969937565, 0.8982200213, 0.8994462861, 0.9006725509, 0.9018988157, 0.9031250805, 0.9043513453, 0.9055776101, 0.9068038749, 0.9080301397, 0.9092564045, 0.9104826693, 0.9117089341, 0.9129351989, 0.9141614637, 0.9153877285, 0.9166139933, 0.9178402581, 0.9190665229, 0.9202927877, 0.9215190526, 0.9227453174, 0.9239715822, 0.925197847, 0.9264241118, 0.9276503766, 0.9288766414, 0.9301029062, 0.931329171, 0.9325554358, 0.9337817006, 0.9350079654, 0.9362342302, 0.937460495, 0.9386867598, 0.9399130246, 0.9411392894, 0.9423655542, 0.943591819, 0.9448180838, 0.9460443486, 0.9472706134, 0.9484968782, 0.949723143, 0.9509494078, 0.9521756726, 0.9534019375, 0.9546282023, 0.9558544671, 0.9570807319, 0.9583069967, 0.9595332615, 0.9607595263, 0.9619857911, 0.9632120559, 0.9644383207, 0.9656645855, 0.9668908503, 0.9681171151, 0.9693433799, 0.9705696447, 0.9717959095, 0.9730221743, 0.9742484391, 0.9754747039, 0.9767009687, 0.9779272335, 0.9791534983, 0.9803797631, 0.9816060279, 0.9828322927, 0.9840585575, 0.9852848224, 0.9865110872, 0.987737352, 0.9889636168, 0.9901898816, 0.9914161464, 0.9926424112, 0.993868676, 0.9950949408, 0.9963212056, 0.9975474704, 0.9987737352, 1.0])
 aud = np.array([0.0, 0.005326666667, 0.01064, 0.01594, 0.02122666667, 0.0265, 0.03176, 0.03700666667, 0.04224, 0.04746, 0.05266666667, 0.05786, 0.06304, 0.06820666667, 0.07336, 0.0785, 0.08362666667, 0.08874, 0.09384, 0.09892666667, 0.104, 0.10906, 0.1141066667, 0.11914, 0.12416, 0.1291666667, 0.13416, 0.13914, 0.1441066667, 0.14906, 0.154, 0.1589266667, 0.16384, 0.16874, 0.1736266667, 0.1785, 0.18336, 0.1882066667, 0.19304, 0.19786, 0.2026666667, 0.20746, 0.21224, 0.2170066667, 0.22176, 0.2265, 0.2312266667, 0.23594, 0.24064, 0.2453266667, 0.25, 0.25466, 0.2593066667, 0.26394, 0.26856, 0.2731666667, 0.27776, 0.28234, 0.2869066667, 0.29146, 0.296, 0.3005266667, 0.30504, 0.30954, 0.3140266667, 0.3185, 0.32296, 0.3274066667, 0.33184, 0.33626, 0.3406666667, 0.34506, 0.34944, 0.3538066667, 0.35816, 0.3625, 0.3668266667, 0.37114, 0.37544, 0.3797266667, 0.384, 0.38826, 0.3925066667, 0.39674, 0.40096, 0.4051666667, 0.40936, 0.41354, 0.4177066667, 0.42186, 0.426, 0.4301266667, 0.43424, 0.43834, 0.4424266667, 0.4465, 0.45056, 0.4546066667, 0.45864, 0.46266, 0.4666666667, 0.47066, 0.47464, 0.4786066667, 0.48256, 0.4865, 0.4904266667, 0.49434, 0.49824, 0.5021266667, 0.506, 0.50986, 0.5137066667, 0.51754, 0.52136, 0.5251666667, 0.52896, 0.53274, 0.5365066667, 0.54026, 0.544, 0.5477266667, 0.55144, 0.55514, 0.5588266667, 0.5625, 0.56616, 0.5698066667, 0.57344, 0.57706, 0.5806666667, 0.58426, 0.58784, 0.5914066667, 0.59496, 0.5985, 0.6020266667, 0.60554, 0.60904, 0.6125266667, 0.616, 0.61946, 0.6229066667, 0.62634, 0.62976, 0.6331666667, 0.63656, 0.63994, 0.6433066667, 0.64666, 0.65, 0.6533266667, 0.65664, 0.65994, 0.6632266667, 0.6665, 0.66976, 0.6730066667, 0.67624, 0.67946, 0.6826666667, 0.68586, 0.68904, 0.6922066667, 0.69536, 0.6985, 0.7016266667, 0.70474, 0.70784, 0.7109266667, 0.714, 0.71706, 0.7201066667, 0.72314, 0.72616, 0.7291666667, 0.73216, 0.73514, 0.7381066667, 0.74106, 0.744, 0.7469266667, 0.74984, 0.75274, 0.7556266667, 0.7585, 0.76136, 0.7642066667, 0.76704, 0.76986, 0.7726666667, 0.77546, 0.77824, 0.7810066667, 0.78376, 0.7865, 0.7892266667, 0.79194, 0.79464, 0.7973266667, 0.8, 0.80266, 0.8053066667, 0.80794, 0.81056, 0.8131666667, 0.81576, 0.81834, 0.8209066667, 0.82346, 0.826, 0.8285266667, 0.83104, 0.83354, 0.8360266667, 0.8385, 0.84096, 0.8434066667, 0.84584, 0.84826, 0.8506666667, 0.85306, 0.85544, 0.8578066667, 0.86016, 0.8625, 0.8648266667, 0.86714, 0.86944, 0.8717266667, 0.874, 0.87626, 0.8785066667, 0.88074, 0.88296, 0.8851666667, 0.88736, 0.88954, 0.8917066667, 0.89386, 0.896, 0.8981266667, 0.90024, 0.90234, 0.9044266667, 0.9065, 0.90856, 0.9106066667, 0.91264, 0.91466, 0.9166666667, 0.91866, 0.92064, 0.9226066667, 0.92456, 0.9265, 0.9284266667, 0.93034, 0.93224, 0.9341266667, 0.936, 0.93786, 0.9397066667, 0.94154, 0.94336, 0.9451666667, 0.94696, 0.94874, 0.9505066667, 0.95226, 0.954, 0.9557266667, 0.95744, 0.95914, 0.9608266667, 0.9625, 0.96416, 0.9658066667, 0.96744, 0.96906, 0.9706666667, 0.97226, 0.97384, 0.9754066667, 0.97696, 0.9785, 0.9800266667, 0.98154, 0.98304, 0.9845266667, 0.986, 0.98746, 0.9889066667, 0.99034, 0.99176, 0.9931666667, 0.99456, 0.99594, 0.9973066667, 0.99866, 1.0])
 assert np.all(aud <= ceil + 1e-12)
-fig, ax = plt.subplots(figsize=(3.2, 2.4))
-ax.fill_between(fpr, aud, ceil, color=C['compute_l'], alpha=0.9)
-ax.plot(fpr, fpr, color=C['neutral'], ls='--', lw=1.4)
-ax.plot(fpr, ceil, color=C['text'], lw=2.6)
-ax.plot(fpr, aud, color=C['memory'], lw=2.6)
-ax.text(0.04, 1.0, 'DP ceiling, $\\epsilon$ = 1\n(upper bound)', fontsize=12, color=C['text'], fontweight='bold', va='top', ha='left')
-ax.text(0.62, 0.55, 'audit\n(lower bound)', fontsize=12, color=C['memory'], fontweight='bold', va='top')
-ax.text(0.8, 0.7, 'chance', fontsize=10.5, color=C['neutral'], ha='left', va='top')
-ax.set_xlim(0, 1)
-ax.set_ylim(0, 1.02)
-ax.set_xticks([0, 0.5, 1])
-ax.set_yticks([0, 0.5, 1])
-ax.set_xlabel('Nonmembers flagged (FPR)')
-ax.set_ylabel('Members flagged (TPR)')
-sp.save(fig, out / 'audit_roc.svg')
+
+def audit_roc(path, step):
+    fig, ax = plt.subplots(figsize=(3.2, 2.4))
+    a2 = 1.0 if step >= 2 else 0.0
+    if step >= 2:
+        ax.fill_between(fpr, aud, ceil, color=C['compute_l'], alpha=0.9)
+    ax.plot(fpr, fpr, color=C['neutral'], ls='--', lw=1.4)
+    ax.plot(fpr, ceil, color=C['text'], lw=2.6, alpha=a2)
+    ax.plot(fpr, aud, color=C['memory'], lw=2.6)
+    ax.text(0.04, 1.0, 'DP ceiling, $\\epsilon$ = 1\n(upper bound)', fontsize=12, color=C['text'], fontweight='bold', va='top', ha='left', alpha=a2)
+    ax.text(0.62, 0.55, 'audit\n(lower bound)', fontsize=12, color=C['memory'], fontweight='bold', va='top')
+    ax.text(0.8, 0.7, 'chance', fontsize=10.5, color=C['neutral'], ha='left', va='top')
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1.02)
+    ax.set_xticks([0, 0.5, 1])
+    ax.set_yticks([0, 0.5, 1])
+    ax.set_xlabel('Nonmembers flagged (FPR)')
+    ax.set_ylabel('Members flagged (TPR)')
+    sp.save(fig, out / path)
+for k in (1, 2):
+    audit_roc(f'audit_roc_step{k}.svg', k)
 
 def dens(path, step):
     fig, ax = plt.subplots(figsize=(5.8, 1.8))

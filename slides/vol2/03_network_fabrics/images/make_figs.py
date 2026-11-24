@@ -111,7 +111,7 @@ ax.text(2009.8, 2600, 'NVLink (one GPU)', color=V['coord'], fontsize=15, fontwei
 ax.text(2016.3, 6, 'InfiniBand port', color=V['comm'], fontsize=15, fontweight='bold')
 ax.text(2009.8, 140, 'Ethernet port', color=V['gray'], fontsize=15, fontweight='bold')
 ax.annotate('', xy=(2022, 50.0), xytext=(2022, 450.0), arrowprops=dict(arrowstyle='<->', color=V['bad'], lw=2.2))
-ax.text(2022.35, 150, '9×', color=V['bad'], fontsize=18, fontweight='bold', va='center')
+ax.text(2021.6, 150, '9×', color=V['bad'], fontsize=18, fontweight='bold', va='center', ha='right')
 ax.text(2021.6, 1300, 'H100: 450', color=V['coord'], fontsize=14, fontweight='bold', ha='right')
 ax.text(2022.3, 18, 'NDR: 50', color=V['comm'], fontsize=14, fontweight='bold', ha='left')
 ax.set_yscale('log')
@@ -221,54 +221,63 @@ def rdma_path(k):
     b.append(line(290, 220, 290, 260, V['ink'], 2.5, 'ink'))
     b.append(text(305, 116, 'copy 1', 17, V['bad_t'], 'start', 'bold'))
     b.append(text(305, 240, 'copy 2', 17, V['bad_t'], 'start', 'bold'))
-    b.append(text(290, 360, 'two copies via host memory', 19, V['bad_t'], weight='bold'))
-    a = 1.0 if k >= 2 else 0.0
-    r = []
-    r.append(text(690, 20, 'RDMA verbs + GPUDirect', 21, V['ink'], weight='bold'))
-    r.append(box(560, 42, 280, 54, V['comp_l'], V['comp']))
-    r.append(text(700, 69, 'NCCL + verbs API', 19, V['comp_t']))
-    r.append(text(760, 178, 'kernel not on data path', 17, V['gray'], 'end', italic=True))
-    r.append(box(480, 262, 180, 54, V['comp_l'], V['comp']))
-    r.append(text(570, 289, 'GPU memory', 19, V['comp_t']))
-    r.append(box(700, 252, 195, 74, V['comm_l'], V['comm']))
-    r.append(text(797, 276, 'RDMA NIC', 19, V['comm_t'], weight='bold'))
-    r.append(text(797, 304, 'hardware transport', 14, V['comm_t']))
-    r.append(line(800, 96, 800, 250, V['comm'], 3.5, 'comm'))
-    r.append(line(662, 289, 698, 289, V['ok'], 3.5, 'ok'))
-    r.append(text(690, 360, 'NIC reads GPU memory', 19, V['ok_t'], weight='bold'))
-    b.append(f'<g opacity="{a}">' + ''.join(r) + '</g>')
+    b.append(text(290, 360, '2×n host memory bounce', 18, V['bad_t'], weight='bold'))
+    a2 = 1.0 if k >= 2 else 0.0
+    r2 = []
+    r2.append(text(690, 20, 'RDMA verbs + GPUDirect' if k >= 3 else 'RDMA verbs (kernel bypass)', 20, V['ink'], weight='bold'))
+    r2.append(box(560, 42, 280, 54, V['comp_l'], V['comp']))
+    r2.append(text(700, 69, 'NCCL + verbs API', 19, V['comp_t']))
+    r2.append(text(760, 178, 'kernel not on data path', 17, V['gray'], 'end', italic=True))
+    r2.append(box(700, 252, 195, 74, V['comm_l'], V['comm']))
+    r2.append(text(797, 276, 'RDMA NIC', 19, V['comm_t'], weight='bold'))
+    r2.append(text(797, 304, 'hardware transport', 14, V['comm_t']))
+    r2.append(line(800, 96, 800, 250, V['comm'], 3.5, 'comm'))
+    if k == 2:
+        r2.append(text(690, 360, 'user-space control skips kernel', 18, V['comm_t'], weight='bold'))
+    b.append(f'<g opacity="{a2}">' + ''.join(r2) + '</g>')
+    a3 = 1.0 if k >= 3 else 0.0
+    r3 = []
+    r3.append(box(480, 262, 180, 54, V['ok_l'], V['ok'], 2.5))
+    r3.append(text(570, 289, 'GPU memory', 19, V['ok_t'], weight='bold'))
+    r3.append(line(662, 289, 698, 289, V['ok'], 4.0, 'ok'))
+    r3.append(text(690, 360, 'GPUDirect P2P: 0×n host bounce', 18, V['ok_t'], weight='bold'))
+    b.append(f'<g opacity="{a3}">' + ''.join(r3) + '</g>')
     write(f'rdma_path_step{k}.svg', 900, 385, ''.join(b))
-for k in (1, 2):
+for k in (1, 2, 3):
     rdma_path(k)
-b = []
-b.append(text(10, 22, 'InfiniBand: credits', 22, V['comm_t'], 'start', 'bold'))
-b.append(box(10, 70, 120, 60, V['comp_l'], V['comp']))
-b.append(text(70, 100, 'sender', 19, V['comp_t']))
-b.append(line(132, 86, 300, 86, V['comm'], 3, 'comm'))
-b.append(text(216, 66, 'data', 16, V['comm_t']))
-for i in range(4):
-    b.append(box(304 + i * 40, 70, 36, 60, V['ok_l'] if i < 3 else V['comm_l'], V['ok'] if i < 3 else V['comm'], 2, 3))
-b.append(text(382, 150, 'receiver buffer', 16, V['gray']))
-b.append(line(300, 116, 134, 116, V['ok'], 3, 'ok', dash='7 5'))
-b.append(text(216, 150, '3 credits free', 16, V['ok_t'], weight='bold'))
-b.append(text(10, 205, 'The sender waits for credits;', 18, V['ink'], 'start'))
-b.append(text(10, 240, 'no buffer overflows.', 18, V['ink'], 'start'))
-b.append(line(500, 10, 500, 300, V['light'], 1.5))
-x0 = 530
-b.append(text(x0, 22, 'RoCE: PFC pause + ECN', 22, V['comm_t'], 'start', 'bold'))
-b.append(box(x0, 70, 120, 60, V['comp_l'], V['comp']))
-b.append(text(x0 + 60, 100, 'sender', 19, V['comp_t']))
-b.append(line(x0 + 122, 86, x0 + 274, 86, V['comm'], 3, 'comm'))
-for i in range(5):
-    b.append(box(x0 + 278 + i * 34, 70, 30, 60, V['bad_l'] if i < 4 else 'white', V['bad'] if i < 4 else V['frame'], 2, 3))
-b.append(line(x0 + 398, 62, x0 + 398, 138, V['bad'], 2.5, dash='5 4'))
-b.append(text(x0 + 330, 150, 'switch queue', 16, V['gray']))
-b.append(line(x0 + 274, 116, x0 + 124, 116, V['bad'], 3, 'bad', dash='7 5'))
-b.append(text(x0 + 200, 150, 'PAUSE', 16, V['bad_t'], weight='bold'))
-b.append(text(x0 + 398, 52, 'threshold', 15, V['bad_t']))
-b.append(text(x0, 205, 'ECN marks slow senders first;', 18, V['ink'], 'start'))
-b.append(text(x0, 240, 'PAUSE stops the upstream port.', 18, V['ink'], 'start'))
-write('ib_roce.svg', 1000, 265, ''.join(b))
+for k in (1, 2):
+    b = []
+    b.append(text(10, 22, 'InfiniBand: credits', 22, V['comm_t'], 'start', 'bold'))
+    b.append(box(10, 70, 120, 60, V['comp_l'], V['comp']))
+    b.append(text(70, 100, 'sender', 19, V['comp_t']))
+    b.append(line(132, 86, 300, 86, V['comm'], 3, 'comm'))
+    b.append(text(216, 66, 'data', 16, V['comm_t']))
+    for i in range(4):
+        b.append(box(304 + i * 40, 70, 36, 60, V['ok_l'] if i < 3 else V['comm_l'], V['ok'] if i < 3 else V['comm'], 2, 3))
+    b.append(text(382, 150, 'receiver buffer', 16, V['gray']))
+    b.append(line(300, 116, 134, 116, V['ok'], 3, 'ok', dash='7 5'))
+    b.append(text(216, 150, '3 credits free', 16, V['ok_t'], weight='bold'))
+    b.append(text(10, 205, 'The sender waits for credits;', 18, V['ink'], 'start'))
+    b.append(text(10, 240, 'no buffer overflows.', 18, V['ink'], 'start'))
+    a2 = 1.0 if k >= 2 else 0.0
+    r = []
+    r.append(line(500, 10, 500, 260, V['light'], 1.5))
+    x0 = 530
+    r.append(text(x0, 22, 'RoCE: PFC pause + ECN', 22, V['comm_t'], 'start', 'bold'))
+    r.append(box(x0, 70, 120, 60, V['comp_l'], V['comp']))
+    r.append(text(x0 + 60, 100, 'sender', 19, V['comp_t']))
+    r.append(line(x0 + 122, 86, x0 + 274, 86, V['comm'], 3, 'comm'))
+    for i in range(5):
+        r.append(box(x0 + 278 + i * 34, 70, 30, 60, V['bad_l'] if i < 4 else 'white', V['bad'] if i < 4 else V['frame'], 2, 3))
+    r.append(line(x0 + 398, 62, x0 + 398, 138, V['bad'], 2.5, dash='5 4'))
+    r.append(text(x0 + 330, 150, 'switch queue', 16, V['gray']))
+    r.append(line(x0 + 274, 116, x0 + 124, 116, V['bad'], 3, 'bad', dash='7 5'))
+    r.append(text(x0 + 200, 150, 'PAUSE', 16, V['bad_t'], weight='bold'))
+    r.append(text(x0 + 398, 52, 'threshold', 15, V['bad_t']))
+    r.append(text(x0, 205, 'ECN marks packets to slow senders;', 17.5, V['ink'], 'start'))
+    r.append(text(x0, 240, 'PAUSE stops the upstream port.', 17.5, V['ink'], 'start'))
+    b.append(f'<g opacity="{a2}">' + ''.join(r) + '</g>')
+    write(f'ib_roce_step{k}.svg', 1000, 265, ''.join(b))
 sizes = np.logspace(1, 9.3, 400)
 fig, ax = plt.subplots(figsize=(4.8, 2.25))
 paths = [(1.5, 50.0, '#d97706'), (5.0, 12.5, '#64748b')]
@@ -308,9 +317,10 @@ ax.axvspan(mid_lo, mid_hi, color=V['bad_l'], alpha=0.8, lw=0)
 ax.plot(grid, [17.04002917, 17.04003135, 17.04003368, 17.04003619, 17.04003889, 17.04004179, 17.0400449, 17.04004824, 17.04005184, 17.0400557, 17.04005985, 17.04006431, 17.0400691, 17.04007425, 17.04007979, 17.04008573, 17.04009212, 17.04009898, 17.04010636, 17.04011428, 17.0401228, 17.04013195, 17.04014178, 17.04015234, 17.04016369, 17.04017589, 17.04018899, 17.04020308, 17.04021821, 17.04023447, 17.04025194, 17.04027071, 17.04029088, 17.04031255, 17.04033584, 17.04036086, 17.04038775, 17.04041664, 17.04044769, 17.04048104, 17.04051688, 17.0405554, 17.04059678, 17.04064125, 17.04068903, 17.04074037, 17.04079553, 17.0408548, 17.0409185, 17.04098693, 17.04106047, 17.04113949, 17.04122439, 17.04131562, 17.04141364, 17.04151898, 17.04163215, 17.04175377, 17.04188444, 17.04202485, 17.04217572, 17.04233783, 17.04251203, 17.0426992, 17.04290031, 17.04311642, 17.04334862, 17.04359813, 17.04386622, 17.04415429, 17.04446383, 17.04479643, 17.04515381, 17.04553782, 17.04595045, 17.04639382, 17.04687022, 17.04738212, 17.04793216, 17.04852319, 17.04915825, 17.04984063, 17.05057386, 17.05136171, 17.05220828, 17.05311791, 17.05409533, 17.05514557, 17.05627407, 17.05748665, 17.05878958, 17.06018959, 17.06169392, 17.06331034, 17.06504719, 17.06691346, 17.06891878, 17.07107352, 17.0733888, 17.0758766, 17.07854977, 17.08142211, 17.08450848, 17.0878248, 17.09138823, 17.09521717, 17.0993314, 17.10375219, 17.10850236, 17.11360647, 17.11909089, 17.12498396, 17.13131611, 17.13812008, 17.14543101, 17.15328667, 17.16172766, 17.17079759, 17.18054332, 17.19101521, 17.20226735, 17.2143579, 17.22734931, 17.24130871, 17.25630822, 17.27242535, 17.28974337, 17.30835175, 17.32834664, 17.34983136, 17.37291689, 17.39772254, 17.42437645, 17.45301634, 17.4837902, 17.51685701, 17.55238764, 17.59056565, 17.6315883, 17.67566755, 17.72303115, 17.77392381, 17.82860849, 17.88736772, 17.9505051, 18.01834685, 18.09124349, 18.16957166, 18.25373606, 18.34417155, 18.44134539, 18.54575966, 18.65795383, 18.7785076, 18.90804383, 19.0472318, 19.19679067, 19.35749318, 19.53016963, 19.71571221, 19.91507956, 20.12930179, 20.35948571, 20.60682064, 20.8725845, 21.15815043, 21.46499388, 21.79470024, 22.14897303, 22.52964269, 22.93867605, 23.37818649, 23.85044486, 24.35789121, 24.9031474, 25.48903063, 26.11856803, 26.79501227, 27.52185838, 28.30286181, 29.14205781, 30.04378233, 31.01269435, 32.05380001, 33.17247848, 34.3745097, 35.66610428, 37.05393559, 38.54517424, 40.14752509, 41.86926714, 43.71929621, 45.70717098, 47.84316232, 50.13830642, 52.60446173, 55.25437031, 58.10172363, 61.16123328, 64.44870704, 67.98113052, 71.77675493, 75.85519137, 80.23751217, 84.94635977, 90.00606367, 95.44276618, 101.2845575, 107.5616207, 114.3063881, 121.5537081, 129.3410261, 137.7085773, 146.6995948, 156.3605332, 166.7413082, 177.895555, 189.8809048, 202.7592832, 216.5972299, 231.4662421, 247.4431446, 264.6104865, 283.0569672, 302.8778954, 324.1756814, 347.0603656, 371.6501881, 398.0721986, 426.4629135, 456.969021, 489.7481391, 524.9696297, 562.8154741, 603.481213, 647.1769567, 694.1284709, 744.5783431, 798.7872361, 857.0352346, 919.6232923, 986.8747871, 1059.137192, 1136.783869, 1220.216002, 1309.864664, 1406.19305, 1509.698865, 1620.916899, 1740.421791, 1868.830995, 2006.80797, 2155.065612, 2314.369932, 2485.544021, 2669.472293, 2867.105063, 3079.463454, 3307.644672, 3552.827676, 3816.27927, 4099.360646, 4403.534419, 4730.372185, 5081.562637, 5458.920296, 5864.39488, 6300.081381, 6768.230889, 7271.262225, 7811.774433, 8392.560214, 9016.620353, 9687.179222, 10407.70144, 11181.90978, 12013.8044, 12907.6835, 13868.16554, 14900.21312, 16009.15857, 17200.73157, 18481.08869, 19856.84524, 21335.10943, 22923.5191, 24630.28121, 26464.21419, 28434.79354, 30552.20078, 32827.37608, 35272.07472, 37898.92789, 40721.50793, 43754.39846, 47013.2697, 50514.95949, 54277.56024, 58320.51242, 62664.70504], color=V['comp'], lw=2.6, zorder=2)
 ax.scatter(xs, ts, s=40, color=V['bad'], zorder=3)
 ax.text(30, 2.8, 'floor ≈ 17 μs', color=V['comp'], fontsize=15, fontweight='bold')
-ax.text(16, 40000.0, 'model: floor + n / 274 GB/s', color=V['comp'], fontsize=13, fontweight='bold', ha='left')
-ax.text(16, 250, 'shaded, 8 to 128 MB:\nup to 1.7× the model', color=V['bad_t'], fontsize=14, fontweight='bold', ha='left')
-ax.text(16, 10000.0, 'red: measured', color=V['bad'], fontsize=15, fontweight='bold')
+ax.text(10, 48000.0, 'model: floor + n/274 GB/s', color=V['comp'], fontsize=12.5, fontweight='bold', ha='left')
+ax.text(np.sqrt(mid_lo * mid_hi), 1.03, '8–128 MB gap', transform=ax.get_xaxis_transform(), color=V['bad_t'], fontsize=13, fontweight='bold', ha='center', va='bottom', clip_on=False)
+ax.text(16, 280, 'mid-range gap:\nup to 1.7× model', color=V['bad_t'], fontsize=14, fontweight='bold', ha='left')
+ax.text(10, 10000.0, 'red: measured', color=V['bad'], fontsize=15, fontweight='bold')
 ax.set_xscale('log', base=2)
 ax.set_yscale('log')
 ax.set_xticks([8, 2 ** 10, 2 ** 20, 2 ** 30])
@@ -508,26 +518,46 @@ def pfc(k):
     write(f'pfc_spread_step{k}.svg', 900, 415, ''.join(b))
 for k in (1, 2, 3):
     pfc(k)
-b = []
 pos = {1: (280, 70), 2: (470, 230), 3: (280, 390), 4: (90, 230)}
-for i in (1, 2, 3, 4):
-    x, y = pos[i]
-    b.append(box(x - 80, y - 42, 160, 84, V['comm_l'], V['comm'], 2.5, 6))
-    b.append(text(x, y - 20, f'switch {i}', 19, V['comm_t'], weight='bold'))
-    for s in range(4):
-        b.append(box(x - 60 + s * 30, y - 2, 26, 30, V['bad_l'], V['bad'], 2, 2))
-b.append(path('M370,58 Q480,70 510,182', V['ink'], 3, 'ink'))
-b.append(path('M500,280 Q480,390 370,402', V['ink'], 3, 'ink'))
-b.append(path('M190,402 Q80,390 60,280', V['ink'], 3, 'ink'))
-b.append(path('M60,182 Q80,70 190,58', V['ink'], 3, 'ink'))
-b.append(path('M400,190 Q380,135 330,118', V['bad'], 3, 'bad', dash='8 5'))
-b.append(path('M330,345 Q380,330 400,272', V['bad'], 3, 'bad', dash='8 5'))
-b.append(path('M160,272 Q180,330 230,345', V['bad'], 3, 'bad', dash='8 5'))
-b.append(path('M230,118 Q180,135 160,190', V['bad'], 3, 'bad', dash='8 5'))
-b.append(text(280, 230, 'deadlock', 24, V['bad_t'], weight='bold'))
-b.append(text(520, 460, 'solid: packets wait for the next queue', 18, V['ink'], 'end'))
-b.append(text(520, 486, 'dashed: PAUSE to the previous switch', 18, V['bad_t'], 'end'))
-write('deadlock.svg', 560, 500, ''.join(b))
+for k in (1, 2, 3):
+    b = []
+    for i in (1, 2, 3, 4):
+        x, y = pos[i]
+        b.append(box(x - 80, y - 42, 160, 84, V['comm_l'], V['comm'], 2.5, 6))
+        b.append(text(x, y - 20, f'switch {i}', 19, V['comm_t'], weight='bold'))
+        for s in range(4):
+            # Step 3: watchdog drops 1 packet from switch 1 -> frees 1 green slot
+            freed = (k == 3 and i == 1 and s == 3)
+            b.append(box(x - 60 + s * 30, y - 2, 26, 30, V['ok_l'] if freed else V['bad_l'], V['ok'] if freed else V['bad'], 2, 2))
+    # Forward paths clockwise
+    b.append(path('M370,58 Q480,70 510,182', V['ink'], 3, 'ink'))
+    b.append(path('M500,280 Q480,390 370,402', V['ink'], 3, 'ink'))
+    b.append(path('M190,402 Q80,390 60,280', V['ink'], 3, 'ink'))
+    # In step 3, switch 4 -> switch 1 drains into the freed slot!
+    b.append(path('M60,182 Q80,70 190,58', V['ok'] if k == 3 else V['ink'], 3.5 if k == 3 else 3, 'ok' if k == 3 else 'ink'))
+    if k >= 2:
+        b.append(path('M400,190 Q380,135 330,118', V['bad'], 3, 'bad', dash='8 5', opacity=0.35 if k == 3 else 1.0))
+        b.append(path('M330,345 Q380,330 400,272', V['bad'], 3, 'bad', dash='8 5', opacity=0.35 if k == 3 else 1.0))
+        b.append(path('M160,272 Q180,330 230,345', V['bad'], 3, 'bad', dash='8 5', opacity=0.35 if k == 3 else 1.0))
+        if k == 2:
+            b.append(path('M230,118 Q180,135 160,190', V['bad'], 3, 'bad', dash='8 5'))
+        else:
+            b.append(text(175, 148, 'resume', 18, V['ok_t'], weight='bold'))
+    if k == 1:
+        b.append(text(280, 218, 'all queues', 21, V['ink'], weight='bold'))
+        b.append(text(280, 246, 'full (16/16)', 21, V['bad_t'], weight='bold'))
+        b.append(text(535, 462, 'solid: packets wait for next queue', 18, V['ink'], 'end'))
+        b.append(text(535, 488, '0 free slots in all four switches', 18, V['gray'], 'end'))
+    elif k == 2:
+        b.append(text(280, 230, 'deadlock', 24, V['bad_t'], weight='bold'))
+        b.append(text(535, 462, 'solid: packets wait for next queue', 18, V['ink'], 'end'))
+        b.append(text(535, 488, 'dashed: PAUSE to previous switch', 18, V['bad_t'], 'end'))
+    else:
+        b.append(text(280, 214, 'watchdog', 21, V['ok_t'], weight='bold'))
+        b.append(text(280, 246, 'drops 1 pkt', 21, V['ok_t'], weight='bold'))
+        b.append(text(535, 462, '1 slot frees in sw 1; ring drains', 18, V['ok_t'], 'end', 'bold'))
+        b.append(text(535, 488, 'RDMA must resend dropped pkt', 18, V['bad_t'], 'end'))
+    write(f'deadlock_step{k}.svg', 560, 500, ''.join(b))
 b = []
 b.append(box(5, 120, 160, 74, V['comp_l'], V['comp'], 2.5, 6))
 b.append(text(85, 144, 'sender', 20, V['comp_t'], weight='bold'))
@@ -622,14 +652,16 @@ ax.set_xticks([0, 100, 200, 300, 400])
 ax.set_xlabel('Gb/s')
 ax.spines['left'].set_visible(False)
 sp.save(fig, out / 'sriov_slices.svg')
-levels = [('L5', 'Cluster design', '4 units of 256 GPUs = the 1,024-GPU job'), ('L4', 'Fabric behavior', "PAUSE loop froze Microsoft's lossless class"), ('L3', 'Switch, topology', '25.6 TB/s cut at 1:1; 4:1 gives 0.53'), ('L2', 'Transport', 'α 1.5 μs, β 50 GB/s, crossover 75 KB'), ('L1', 'Wire and link', 'PAM4 + FEC; copper to 3 m, then optics')]
-b = []
-for i, (tag, name, note) in enumerate(levels):
-    y = 8 + i * 74
-    hot = tag == 'L4'
-    b.append(box(10, y, 980, 62, V['bad_l'] if hot else V['comm_l'], V['bad'] if hot else V['comm'], 2.5, 6))
-    b.append(text(46, y + 31, tag, 22, V['bad_t'] if hot else V['comm_t'], weight='bold'))
-    b.append(text(88, y + 31, name, 20, V['ink'], 'start', 'bold'))
-    b.append(text(390, y + 31, note, 18, V['ink'], 'start'))
-write('five_levels.svg', 1000, 380, ''.join(b))
+levels = [('L5', 'Cluster design', '4 units of 256 GPUs = the 1,024-GPU job', 2), ('L4', 'Fabric behavior', "PAUSE loop froze Microsoft's lossless class", 2), ('L3', 'Switch, topology', '25.6 TB/s cut at 1:1; 4:1 gives 0.53', 1), ('L2', 'Transport', 'α 1.5 μs, β 50 GB/s, crossover 75 KB', 1), ('L1', 'Wire and link', 'PAM4 + FEC; copper to 3 m, then optics', 1)]
+for k in (1, 2):
+    b = []
+    for i, (tag, name, note, first) in enumerate(levels):
+        y = 8 + i * 74
+        hot = tag == 'L4'
+        op = 1.0 if k >= first else 0.0
+        b.append(box(10, y, 980, 62, V['bad_l'] if hot else V['comm_l'], V['bad'] if hot else V['comm'], 2.5, 6, op))
+        b.append(text(46, y + 31, tag, 22, V['bad_t'] if hot else V['comm_t'], weight='bold', opacity=op))
+        b.append(text(88, y + 31, name, 20, V['ink'], 'start', 'bold', opacity=op))
+        b.append(text(390, y + 31, note, 18, V['ink'], 'start', opacity=op))
+    write(f'five_levels_step{k}.svg', 1000, 380, ''.join(b))
 print('figures written to', out)

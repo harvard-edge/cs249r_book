@@ -86,7 +86,7 @@ def hook(step):
         shown = i < step
         n = -math.log10(p)
         ax.barh(y, n, color=col, height=0.6, alpha=1 if shown else 0)
-        ax.text(-0.15, y, lab, ha='right', va='center', fontsize=FS, fontweight='bold', color=V4['text'])
+        ax.text(-0.15, y, lab, ha='right', va='center', fontsize=FS, fontweight='bold', color=V4['text'], alpha=1 if shown else 0)
         ax.text(n + 0.12, y, txt, va='center', fontsize=FS, fontweight='bold', color=col, alpha=1 if shown else 0)
     ax.set_xlim(0, 10.5)
     ax.set_ylim(-0.65, 2.45)
@@ -134,37 +134,42 @@ def obligations(step):
 for s in (1, 2, 3):
     obligations(s)
 
-def jac_ellipse():
+def jac_ellipse(step):
     fig, axes = plt.subplots(1, 2, figsize=cm(9.6, 5.4))
     fig.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.02, wspace=0.05)
-    for ax, (q2d, q1d) in zip(axes, ((90, 15), (10, 30))):
+    for idx, (ax, (q2d, q1d)) in enumerate(zip(axes, ((90, 15), (10, 30)))):
+        show_panel = idx == 0 or step >= 3
+        al = 1.0 if show_panel else 0.0
         q1, q2 = (math.radians(q1d), math.radians(q2d))
         p0 = np.array([0.0, 0.0])
         p1 = p0 + 0.316 * np.array([math.cos(q1), math.sin(q1)])
         p2 = p1 + 0.384 * np.array([math.cos(q1 + q2), math.sin(q1 + q2)])
         th = np.linspace(0, math.pi / 2 + 0.6, 60)
         R = 0.316 + 0.384
-        ax.plot(R * np.cos(th - 0.3), R * np.sin(th - 0.3), color=V4['gray'], lw=1, ls='--')
-        ax.plot(*zip(p0, p1, p2), color=V4['plant'], lw=5, solid_capstyle='round')
-        ax.plot(*p0, 's', color=V4['plant'], ms=10)
-        ax.plot(*p1, 'o', color='white', mec=V4['plant'], mew=2.5, ms=9)
+        ax.plot(R * np.cos(th - 0.3), R * np.sin(th - 0.3), color=V4['gray'], lw=1, ls='--', alpha=al)
+        ax.plot(*zip(p0, p1, p2), color=V4['plant'], lw=5, solid_capstyle='round', alpha=al)
+        ax.plot(*p0, 's', color=V4['plant'], ms=10, alpha=al)
+        ax.plot(*p1, 'o', color='white', mec=V4['plant'], mew=2.5, ms=9, alpha=al)
         J = np.array([[-0.316 * math.sin(q1) - 0.384 * math.sin(q1 + q2), -0.384 * math.sin(q1 + q2)], [0.316 * math.cos(q1) + 0.384 * math.cos(q1 + q2), 0.384 * math.cos(q1 + q2)]])
         U, S, _ = np.linalg.svd(J)
         sc = 0.22
         ang = math.degrees(math.atan2(U[1, 0], U[0, 0]))
-        ax.add_patch(Ellipse(p2, 2 * sc * S[0], 2 * sc * S[1] + 0.004, angle=ang, fc=V4['proposal_l'], ec=V4['proposal'], lw=1.6))
+        ax.add_patch(Ellipse(p2, 2 * sc * S[0], 2 * sc * S[1] + 0.004, angle=ang, fc=V4['proposal_l'], ec=V4['proposal'], lw=1.6, alpha=al))
         minor = U[:, 1] * 0.13
-        ax.annotate('', xy=p2 + minor, xytext=p2 - minor, arrowprops=dict(arrowstyle='<->', color=V4['veto'], lw=1.8))
-        ax.plot(*p2, 'o', color=V4['proposal'], ms=6)
-        key = q2d
-        ax.text(0.98, 0.17, f'Elbow {q2d}°', transform=ax.transAxes, fontsize=FS, fontweight='bold', va='bottom', ha='right', color=V4['text'], bbox=dict(fc='white', ec='none', pad=1))
-        ax.text(0.98, 0.03, f"{ {15: '4.9', 30: '37.8'}[q1d]} rad/s", transform=ax.transAxes, fontsize=FS + 2, fontweight='bold', va='bottom', ha='right', color=V4['veto'], bbox=dict(fc='white', ec='none', pad=1))
+        ax.annotate('', xy=p2 + minor, xytext=p2 - minor, arrowprops=dict(arrowstyle='<->', color=V4['veto'], lw=1.8, alpha=al))
+        ax.plot(*p2, 'o', color=V4['proposal'], ms=6, alpha=al)
+        ax.text(0.98, 0.17, f'Elbow {q2d}°', transform=ax.transAxes, fontsize=FS, fontweight='bold', va='bottom', ha='right', color=V4['text'], alpha=al, bbox=dict(fc='white', ec='none', pad=1, alpha=al))
+        if idx == 0 and step == 1:
+            ax.text(0.98, 0.03, 'rate = ? rad/s', transform=ax.transAxes, fontsize=FS + 1, fontweight='bold', va='bottom', ha='right', color=V4['gray'], bbox=dict(fc='#F8FAFC', ec=V4['gray'], ls='--', pad=2))
+        else:
+            ax.text(0.98, 0.03, f"{ {15: '4.9', 30: '37.8'}[q1d]} rad/s", transform=ax.transAxes, fontsize=FS + 2, fontweight='bold', va='bottom', ha='right', color=V4['veto'], alpha=al, bbox=dict(fc='white', ec='none', pad=1, alpha=al))
         ax.set_aspect('equal')
         ax.set_xlim(-0.12, 0.85)
         ax.set_ylim(-0.3, 0.72)
         hide_axis(ax)
-    save_slot(fig, 'jac_ellipse.svg')
-jac_ellipse()
+    save_slot(fig, f'jac_ellipse_step{step}.svg')
+for s in (1, 2, 3):
+    jac_ellipse(s)
 
 def dls():
     fig, ax = plt.subplots(figsize=cm(14.2, 5.0))
@@ -179,8 +184,8 @@ def dls():
     ax.plot(el, dm, color=V4['nervous'], lw=2.5)
     ax.axhline(10.0, color=V4['nervous'], lw=1.2, ls='--')
     ax.axhline(2.175, color=V4['plant'], lw=1.2, ls=':')
-    ax.text(72, 10.0 * 1.08, 'damped ceiling 10 rad/s', color=V4['nervous'], fontsize=FS_S, ha='left')
-    ax.text(88, 2.175 * 0.8, 'joint limit 2.175 rad/s', color=V4['plant'], fontsize=FS_S, ha='left', va='top')
+    ax.text(68, 10.0 * 1.15, 'damped ceiling 10 rad/s', color=V4['nervous'], fontsize=FS_S, ha='left', va='bottom')
+    ax.text(88, 2.175 * 0.88, 'joint limit 2.175 rad/s', color=V4['plant'], fontsize=FS_S, ha='left', va='top')
     ax.text(22, 40, 'exact inverse', color=V4['veto'], fontsize=FS, fontweight='bold', ha='right')
     ax.text(62, 3.1, 'damped least squares', color=V4['nervous'], fontsize=FS, fontweight='bold', ha='left', va='center')
     g, b = (90, 10)
@@ -189,9 +194,9 @@ def dls():
         ax.plot([e], [{90: 4.619814502, 10: 8.272409621}[e]], 'o', color=V4['nervous'], ms=7)
     ax.annotate('37.8', (b, 37.76039566), xytext=(8, -2), textcoords='offset points', fontsize=FS, color=V4['veto'], fontweight='bold')
     ax.annotate('8.3', (b, 8.272409621), xytext=(-6, -16), ha='right', textcoords='offset points', fontsize=FS, color=V4['nervous'], fontweight='bold')
-    ax.annotate('4.9 / 4.6', (g, 4.896751281), xytext=(6, 9), textcoords='offset points', fontsize=FS_S, color=V4['text'], ha='left')
+    ax.text(88, 5.8, '4.9 / 4.6', fontsize=FS_S, color=V4['text'], ha='left', va='bottom', fontweight='bold')
     ax.set_yscale('log')
-    ax.set_ylim(1.5, 150)
+    ax.set_ylim(1.3, 175)
     ax.set_yticks([2, 5, 10, 20, 50, 100])
     ax.set_yticklabels(['2', '5', '10', '20', '50', '100'])
     ax.minorticks_off()
@@ -245,7 +250,7 @@ def repl(step):
     ax.text(x + 2, y0, '114.9 ms', va='center', fontsize=FS + 1, fontweight='bold', color=V4['text'], alpha=a2)
     ax.text(-3, y0, 'One replacement', ha='right', va='center', fontsize=FS, fontweight='bold')
     for xv, lab, ls, ha in ((50.0, 'renewal 50 ', '--', 'right'), (60.0, ' lease 60', ':', 'left')):
-        ax.plot([xv, xv], [2.55, 3.55], color=V4['veto'], lw=1.5, ls=ls)
+        ax.plot([xv, xv], [2.70, 3.55], color=V4['veto'], lw=1.5, ls=ls)
         ax.text(xv, 3.58, lab, color=V4['veto'], fontsize=FS_S, ha=ha, va='bottom')
     a3 = 1 if step >= 3 else 0
     for i in range(3):
@@ -304,19 +309,23 @@ def stale():
     save_slot(fig, 'stale.svg')
 stale()
 
-def overshoot():
+def overshoot(step):
     fig, ax = plt.subplots(figsize=cm(8.4, 5.0))
     fig.subplots_adjust(left=0.1, right=0.96, top=0.95, bottom=0.18)
     t = np.linspace(0, 1, 100)
     vb = 0.95
     v = np.where(t < 0.5, vb + 0.6 * t, vb + 0.6 * (1 - t))
-    ax.plot(t, v, color=V4['veto'], lw=2.5)
     ax.plot([0, 1], [vb, vb], 'o', color=V4['proposal'], ms=9, zorder=5)
     ax.axhline(1.0, color=V4['plant'], lw=1.4, ls='--')
-    ax.axhline(0.7, color=V4['nervous'], lw=1.4, ls=':')
-    ax.text(0.5, 0.97, 'limit', fontsize=FS_S, color=V4['plant'], va='top', ha='center')
-    ax.text(0.5, 0.66, 'contracted limit', fontsize=FS_S, color=V4['nervous'], va='top', ha='center')
-    ax.text(0.5, 1.3, 'overspeed between\ntwo legal samples', fontsize=FS_S, color=V4['veto'], ha='center', va='bottom')
+    ax.text(0.5, 0.96, 'limit', fontsize=FS_S, color=V4['plant'], va='top', ha='center')
+    if step == 1:
+        ax.text(0.5, 1.25, 'both samples fit the limit', fontsize=FS_S, color=V4['proposal'], ha='center', va='center', fontweight='bold')
+    if step >= 2:
+        ax.plot(t, v, color=V4['veto'], lw=2.5)
+        ax.text(0.5, 1.30, 'overspeed between\ntwo legal samples', fontsize=FS_S, color=V4['veto'], ha='center', va='bottom', fontweight='bold')
+    if step >= 3:
+        ax.axhline(0.7, color=V4['nervous'], lw=1.6, ls=':')
+        ax.text(0.5, 0.66, 'contracted limit', fontsize=FS_S, color=V4['nervous'], va='top', ha='center', fontweight='bold')
     ax.set_xticks([0, 1])
     ax.set_xticklabels(['sample k', 'sample k + 1'])
     ax.set_xlim(-0.12, 1.12)
@@ -324,8 +333,9 @@ def overshoot():
     ax.set_ylim(0.45, 1.6)
     ax.set_ylabel('Joint speed', fontsize=FS)
     ax.tick_params(labelsize=FS_S)
-    save_slot(fig, 'overshoot.svg')
-overshoot()
+    save_slot(fig, f'overshoot_step{step}.svg')
+for s in (1, 2, 3):
+    overshoot(s)
 
 def seam(step):
     fig, axes = plt.subplots(2, 2, figsize=cm(14.6, 5.9), sharex='col', gridspec_kw=dict(height_ratios=[1, 1.2]))
@@ -398,7 +408,7 @@ def phase():
     up, dn = (40.16089205, 65.07043544)
     ax.plot(s, np.sqrt(2 * up * s), color=V4['gray'], lw=1.3, ls='--')
     ax.plot(s, np.sqrt(2 * dn * (0.5 - s)), color=V4['gray'], lw=1.3, ls='--')
-    ax.text(0.03, 3.3, 'torque limit alone', fontsize=FS_S, color=V4['gray'])
+    ax.text(0.25, 3.38, 'torque limit alone (dashed)', fontsize=FS_S, color=V4['gray'], ha='center', va='center')
     a = 7.5
     bang = np.minimum(np.sqrt(2 * a * s), np.sqrt(2 * a * (0.5 - s)))
     ax.plot(s, bang, color=V4['veto'], lw=4.5)
@@ -480,7 +490,7 @@ def timeline(step):
     seg(y1, 60.0, 82.0, V4['lag'])
     seg(y1, 82.0, 82.0 + 1000 * 0.275, V4['veto'], 'S-curve stop')
     ax.text(82.0 + 1000 * 0.275 + 6, y1, '219.5 of 300 mm', va='center', fontsize=FS, color=V4['text'])
-    ax.text(60.0, y1 + 0.26, 'lease lapses 60', ha='center', fontsize=FS_S, color=V4['lag'])
+    ax.text(60.0, y1 + 0.31, 'lease lapses 60', ha='center', va='bottom', fontsize=FS_S, color=V4['lag'])
     ax.text(-8, y1, 'Running lease', ha='right', va='center', fontsize=FS, fontweight='bold')
     a = 1 if step >= 2 else 0
     seg(y2, 0, 300.0, V4['nervous'], 'track', a=a)
@@ -495,7 +505,7 @@ def timeline(step):
     ax.text(575.0 + 6, y2, '197.5 of 300 mm', va='center', fontsize=FS, color=V4['text'], alpha=a)
     ax.text(-8, y2, 'Longer lease', ha='right', va='center', fontsize=FS, fontweight='bold', alpha=a)
     ax.set_xlim(0, 760)
-    ax.set_ylim(-0.75, 1.5)
+    ax.set_ylim(-0.75, 1.62)
     ax.set_yticks([])
     ax.spines['left'].set_visible(False)
     ax.set_xlabel('Milliseconds after tracking starts', fontsize=FS)
@@ -546,9 +556,9 @@ def gen_timing():
     save_slot(fig, 'gen_timing.svg')
 gen_timing()
 
-def base_view():
+def base_view(step):
     fig, axes = plt.subplots(1, 2, figsize=cm(9.6, 4.6))
-    fig.subplots_adjust(0.02, 0.02, 0.98, 0.98, wspace=0.08)
+    fig.subplots_adjust(0.02, 0.14, 0.98, 0.98, wspace=0.08)
 
     def body(ax, x, y, th, a=1.0):
         c, s = (math.cos(th), math.sin(th))
@@ -572,15 +582,19 @@ def base_view():
     ax.set_aspect('equal')
     hide_axis(ax)
     ax = axes[1]
-    body(ax, 0, 0, 0, a=0.4)
-    body(ax, 0, 0.9, 0)
-    ax.plot([0, 0], [0.25, 0.65], color=V4['nervous'], lw=2.5)
+    a2 = 1.0 if step >= 2 else 0.0
+    body(ax, 0, 0, 0, a=0.4 * a2)
+    body(ax, 0, 0.9, 0, a=a2)
+    ax.plot([0, 0], [0.25, 0.65], color=V4['nervous'], lw=2.5, alpha=a2)
     for xy, n in (((0.38, 0.05), '1 turn'), ((0.12, 0.45), '2 drive'), ((0.38, 0.95), '3 turn')):
-        ax.text(*xy, n, fontsize=FS_S, color=V4['nervous'], fontweight='bold', ha='left')
+        ax.text(*xy, n, fontsize=FS_S, color=V4['nervous'], fontweight='bold', ha='left', alpha=a2)
     ax.set_xlim(-0.6, 1.1)
     ax.set_ylim(-0.45, 1.3)
     ax.set_aspect('equal')
     hide_axis(ax)
-    save_slot(fig, 'base_view.svg')
-base_view()
+    a3 = 1.0 if step >= 3 else 0.0
+    fig.text(0.5, 0.04, 'DWA: 2.10 m/s  |  full jerk budget: fails at 1.5 m/s', ha='center', va='bottom', fontsize=FS_S - 0.5, fontweight='bold', color=V4['veto'], alpha=a3, bbox=dict(boxstyle='round,pad=0.22', fc='#FEE2E2', ec=V4['veto'], lw=1.0, alpha=a3))
+    save_slot(fig, f'base_view_step{step}.svg')
+for s in (1, 2, 3):
+    base_view(s)
 print('figures written')

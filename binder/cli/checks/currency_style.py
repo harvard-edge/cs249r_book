@@ -66,7 +66,11 @@ class Violation:
 
 # 2026-09-12: a local render leaves .quarto/idx/*.json caches under books/;
 # scanning them reported 264 false USD literals. Skip generated trees.
+# 2026-11-13: books/datapackage.json is a machine-readable Frictionless Tabular
+# Data Package manifest (not reader-facing quiz JSON) where ISO 4217 USD is the
+# canonical unit token in column schemas.
 GENERATED_DIRS = frozenset({".quarto", "_build", "__pycache__", ".venv", "venv", "node_modules"})
+NON_READER_JSON_FILES = frozenset({"datapackage.json"})
 
 
 def _is_generated(rel: Path) -> bool:
@@ -83,10 +87,16 @@ def iter_target_files(paths: Iterable[Path]) -> list[Path]:
             files.extend(
                 p
                 for p in path.rglob("*")
-                if p.is_file() and p.suffix.lower() in TARGET_SUFFIXES
+                if p.is_file()
+                and p.suffix.lower() in TARGET_SUFFIXES
+                and p.name not in NON_READER_JSON_FILES
                 and not _is_generated(p.relative_to(path))
             )
-        elif path.is_file() and path.suffix.lower() in TARGET_SUFFIXES:
+        elif (
+            path.is_file()
+            and path.suffix.lower() in TARGET_SUFFIXES
+            and path.name not in NON_READER_JSON_FILES
+        ):
             files.append(path)
     return sorted(dict.fromkeys(files))
 

@@ -788,45 +788,44 @@ class TestCompressionModel:
         assert fp32.inference_speedup == pytest.approx(8.0)
 
     @pytest.mark.parametrize("bitwidth", [8, 4, 2])
-    def test_accuracy_delta_is_negative(self, bitwidth):
-        """Quantization should always degrade accuracy (negative delta)."""
+    def test_accuracy_delta_defaults_to_zero_without_empirical_input(self, bitwidth):
+        """CompressionModel must not fabricate task-blind accuracy drops when accuracy_delta is omitted."""
         solver = CompressionModel()
         result = solver.solve(Models.Vision.ResNet50, Hardware.Cloud.A100, method="quantization", target_bitwidth=bitwidth)
-        assert result.estimated_accuracy_delta < 0
+        assert result.estimated_accuracy_delta == pytest.approx(0.0)
 
-    def test_int8_accuracy_drop_small(self):
-        """INT8 should have a small accuracy drop (~0.5%)."""
+    def test_explicit_accuracy_delta_passthrough_for_quantization(self):
+        """Caller-supplied empirical accuracy_delta is preserved verbatim."""
         resnet = Models.Vision.ResNet50
         a100 = Hardware.Cloud.A100
         solver = CompressionModel()
-        result = solver.solve(resnet, a100, method="quantization", target_bitwidth=8)
-        assert abs(result.estimated_accuracy_delta) < 0.01
-
-    def test_int4_accuracy_drop_larger_than_int8(self):
-        """INT4 should have larger accuracy drop than INT8."""
-        resnet = Models.Vision.ResNet50
-        a100 = Hardware.Cloud.A100
-        solver = CompressionModel()
-        result_8 = solver.solve(resnet, a100, method="quantization", target_bitwidth=8)
-        result_4 = solver.solve(resnet, a100, method="quantization", target_bitwidth=4)
+        result_8 = solver.solve(resnet, a100, method="quantization", target_bitwidth=8, accuracy_delta=-0.004)
+        result_4 = solver.solve(resnet, a100, method="quantization", target_bitwidth=4, accuracy_delta=-0.018)
+        assert result_8.estimated_accuracy_delta == pytest.approx(-0.004)
+        assert result_4.estimated_accuracy_delta == pytest.approx(-0.018)
         assert abs(result_4.estimated_accuracy_delta) > abs(result_8.estimated_accuracy_delta)
 
-    def test_pruning_zero_sparsity_minimal_loss(self):
-        """Pruning at 0% sparsity should have minimal accuracy loss."""
-        resnet = Models.Vision.ResNet50
-        a100 = Hardware.Cloud.A100
+    def test_group_quantization_metadata_overhead(self):
+        """4-bit group-128 quantization with FP16 scales uses 4.125 bits/weight (3.8788x from FP16)."""
+        llama = Models.Language.Llama3_8B
+        h100 = Hardware.Cloud.H100
         solver = CompressionModel()
-        result = solver.solve(resnet, a100, method="pruning", sparsity=0.0)
-        assert abs(result.estimated_accuracy_delta) < 0.01
+        grouped = solver.solve(
+            llama, h100, method="quantization", target_bitwidth=4,
+            baseline_precision="fp16", group_size=128, scale_bits=16,
+        )
+        assert grouped.compression_ratio == pytest.approx(16.0 / 4.125)
+        assert grouped.inference_speedup == pytest.approx(16.0 / 4.125)
 
-    def test_pruning_high_sparsity_larger_loss(self):
-        """Pruning at 90% sparsity should have larger accuracy loss than 10%."""
+    def test_pruning_explicit_accuracy_delta_passthrough(self):
+        """Pruning preserves caller-supplied empirical accuracy_delta and defaults to 0.0."""
         resnet = Models.Vision.ResNet50
         a100 = Hardware.Cloud.A100
         solver = CompressionModel()
-        result_low = solver.solve(resnet, a100, method="pruning", sparsity=0.1)
-        result_high = solver.solve(resnet, a100, method="pruning", sparsity=0.9)
-        assert abs(result_high.estimated_accuracy_delta) > abs(result_low.estimated_accuracy_delta)
+        zero = solver.solve(resnet, a100, method="pruning", sparsity=0.0)
+        high = solver.solve(resnet, a100, method="pruning", sparsity=0.9, accuracy_delta=-0.035)
+        assert zero.estimated_accuracy_delta == pytest.approx(0.0)
+        assert high.estimated_accuracy_delta == pytest.approx(-0.035)
 
     def test_compressed_size_less_than_original(self):
         """Compressed model should always be smaller than original."""
@@ -1531,25 +1530,27 @@ class TestResponsibleEngineeringModel:
     """Tests for DP-SGD and fairness overhead modeling."""
 
     @pytest.mark.smoke
-    def test_dp_slowdown_greater_than_one(self):
-        """DP-SGD should always slow down training (factor > 1)."""
+    def test_dp_slowdown_reflects_clipping_overhead(self):
+        """DP-SGD step slowdown equals 1 + clipping_step_overhead (independent of epsilon)."""
         solver = ResponsibleEngineeringModel()
-        result = solver.solve(base_training_time=Q_("10 day"), epsilon=1.0)
-        assert result.dp_slowdown_factor > 1.0
+        default_res = solver.solve(base_training_time=Q_("10 day"), epsilon=1.0)
+        assert default_res.dp_slowdown_factor == pytest.approx(1.0)
+        clipped = solver.solve(base_training_time=Q_("10 day"), epsilon=1.0, clipping_step_overhead=0.35)
+        assert clipped.dp_slowdown_factor == pytest.approx(1.35)
 
-    def test_lower_epsilon_higher_slowdown(self):
-        """Lower epsilon (stronger privacy) should cause a larger slowdown."""
+    def test_lower_epsilon_higher_noise_multiplier(self):
+        """Lower epsilon (stronger privacy) scales Gaussian noise multiplier sigma inversely."""
         solver = ResponsibleEngineeringModel()
         result_loose = solver.solve(base_training_time=Q_("10 day"), epsilon=10.0)
         result_strict = solver.solve(base_training_time=Q_("10 day"), epsilon=0.1)
-        assert result_strict.dp_slowdown_factor > result_loose.dp_slowdown_factor
+        assert result_strict.noise_multiplier == pytest.approx(100.0 * result_loose.noise_multiplier)
 
-    def test_effective_time_exceeds_base(self):
-        """Effective training time should exceed baseline training time."""
+    def test_effective_time_scales_with_clipping_overhead(self):
+        """Effective training time equals base_training_time * (1 + clipping_step_overhead)."""
         solver = ResponsibleEngineeringModel()
         base = Q_("10 day")
-        result = solver.solve(base_training_time=base, epsilon=1.0)
-        assert result.effective_training_time.magnitude > base.magnitude
+        result = solver.solve(base_training_time=base, epsilon=1.0, clipping_step_overhead=0.25)
+        assert result.effective_training_time.m_as("day") == pytest.approx(12.5)
 
     def test_fairness_data_ratio_scales_with_prevalence(self):
         """Rarer subgroups should require more additional data."""

@@ -63,7 +63,11 @@ export function menu_slide(shadowEle) {
     // Slide out (show)
     slideMenuOpen(menu, menuToggleCheckbox, toggleButton);
     if (isPushEnabled) {
-      document.body.style.marginRight = '400px'; // Match menu width
+      if (window.innerWidth >= 1180) {
+        document.body.style.marginRight = '400px'; // Match menu width
+      } else {
+        document.body.style.marginRight = '0';
+      }
       document.body.style.transition = 'margin-right 0.3s ease-in-out';
     }
   }
@@ -118,6 +122,10 @@ function slideMenuOpen(menu, checkbox, button) {
   checkbox.checked = true;
   menu.classList.remove('translate-x-full');
   menu.classList.add('translate-x-0');
+  if (window.innerWidth < 1180 && document.body.style.marginRight === '400px') {
+    document.body.style.marginRight = '0';
+  }
+  window.dispatchEvent(new CustomEvent('socratiq:study-open'));
   
   // Dispatch custom event for other components that might need to know
   menu.dispatchEvent(new CustomEvent('menuOpened'));

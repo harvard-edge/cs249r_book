@@ -177,6 +177,7 @@ class MemoryHierarchy(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     capacity: Quantity           # Primary memory (HBM for GPUs, SRAM for MCUs)
     bandwidth: Quantity          # Primary memory bandwidth
+    latency: Optional[Quantity] = None
     # On-chip SRAM (optional — for modeling FlashAttention tiling on GPUs,
     # or the fast scratchpad on microcontrollers)
     sram_capacity: Optional[Quantity] = None
@@ -197,6 +198,36 @@ class MemoryHierarchy(BaseModel):
     # bandwidth/capacity = bandwidth / hbm_stacks, capacity / hbm_stacks.
     hbm_stacks: Optional[int] = None
 
+    @property
+    def labeled_capacity(self) -> Quantity:
+        """Return the primary capacity as the vendor label prints it.
+
+        Returns
+        -------
+        Quantity
+            The label's number in the decimal unit: 80 GB for an 80 GiB HBM capacity.
+
+        Notes
+        -----
+        Equation: labeled = magnitude of capacity in its largest binary unit at least one, in the matching decimal unit.
+
+        Assumptions: the vendor label uses the binary magnitude with a decimal-looking unit.
+
+        Excludes: usable capacity after ECC, firmware reservations, or runtime overhead.
+
+        References
+        ----------
+        Derivation: delegates to ``mlsysim.core.units.labeled_capacity``; a share shown against the label divides by this value.
+
+        Examples
+        --------
+        >>> from mlsysim import Hardware
+        >>> str(Hardware.Cloud.H100.memory.labeled_capacity)
+        '80 GB'
+        """
+        from mlsysim.core.units import labeled_capacity
+        return labeled_capacity(self.capacity)
+
     @field_validator("capacity", "sram_capacity", "flash_capacity", "l2_cache", "register_file_per_sm", "shared_memory_per_sm", mode="after")
     @classmethod
     def _validate_capacity_fields(cls, v, info):
@@ -213,6 +244,11 @@ class MemoryHierarchy(BaseModel):
     @classmethod
     def _validate_bandwidth_fields(cls, v, info):
         return require_unit_family(v, ureg.byte / ureg.second, info.field_name, "data")
+
+    @field_validator("latency", mode="after")
+    @classmethod
+    def _validate_latency(cls, v):
+        return require_dimensionality(v, ureg.second, "latency")
 
 class StorageHierarchy(BaseModel):
     """
@@ -477,15 +513,29 @@ class HardwareNode(BaseModel):
         """
         flops = self.compute.peak_flops
         if precision:
-            if precision.lower() in self.compute.precision_flops:
-                flops = self.compute.precision_flops[precision.lower()]
+            key = precision.lower()
+            pf = self.compute.precision_flops
+            if key in pf:
+                flops = pf[key]
+            elif key in ("fp16", "float16", "bf16", "bfloat16"):
+                if "fp16_dense" in pf:
+                    flops = pf["fp16_dense"]
+                elif "fp16" in pf:
+                    flops = pf["fp16"]
+                elif "bf16" in pf:
+                    flops = pf["bf16"]
             else:
-                import warnings
-                warnings.warn(
-                    f"Precision '{precision}' not found in hardware '{self.name}'; "
-                    f"using default peak_flops.",
-                    stacklevel=2
-                )
+                from ..core.units import PRECISION_MAP
+                canonical = PRECISION_MAP.get(key, (None, None))[0]
+                if canonical and canonical in pf:
+                    flops = pf[canonical]
+                else:
+                    import warnings
+                    warnings.warn(
+                        f"Precision '{precision}' not found in hardware '{self.name}'; "
+                        f"using default peak_flops.",
+                        stacklevel=2
+                    )
         return (flops / self.memory.bandwidth).to('flop/byte')
 
     def __repr__(self):

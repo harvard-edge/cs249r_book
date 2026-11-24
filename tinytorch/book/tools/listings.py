@@ -13,7 +13,7 @@ declares every listing:
       elide: [__repr__]             # optional: methods whose bodies become `...`
       keep_scaffold: false          # optional: keep TODO/APPROACH/HINT text
 
-A `path:` ending in .c, .cc, .cpp, or .h quotes a C or C++ function by name
+A `path:` ending in .c, .cc, .cpp, .cu, or .h quotes a C or C++ function by name
 instead: from its signature line to the matching closing brace, fenced as cpp.
 
 Running the script regenerates every target as a fenced ```python block that a
@@ -177,7 +177,7 @@ def collapse_blank_runs(code: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", code).strip("\n") + "\n"
 
 
-C_SUFFIXES = (".c", ".cc", ".cpp", ".h")
+C_SUFFIXES = (".c", ".cc", ".cpp", ".cu", ".h")
 
 
 def extract_c(path: str, symbol: str) -> str:

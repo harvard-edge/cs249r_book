@@ -321,8 +321,17 @@ export class SpacedRepetitionInteractionHandler {
             dialog.appendChild(style);
             this.modal.shadowRoot.appendChild(dialog);
 
+            // Close on escape key
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    closeDialog();
+                    resolve(null);
+                }
+            };
+
             // Function to cleanup and close dialog
             const closeDialog = () => {
+                document.removeEventListener('keydown', handleEscape);
                 if (dialog && dialog.parentNode === this.modal.shadowRoot) {
                     this.modal.shadowRoot.removeChild(dialog);
                 }
@@ -351,14 +360,6 @@ export class SpacedRepetitionInteractionHandler {
                 resolve(null);
             });
 
-            // Close on escape key
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    closeDialog();
-                    document.removeEventListener('keydown', handleEscape);
-                    resolve(null);
-                }
-            };
             document.addEventListener('keydown', handleEscape);
         });
     }

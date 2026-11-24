@@ -291,7 +291,7 @@ export class SpacedRepetitionUIHandler {
             const count = await this.getTagCount(tag);
             return `
             <button class="w-full text-left px-3 py-2 text-sm rounded-md transition-colors flex items-center gap-2
-                ${currentTag?.tag === tag.tag ? 
+                ${(currentTag?.tag ?? currentTag) === (tag?.tag ?? tag) ? 
                 themeClasses.buttonActive : 
                 themeClasses.buttonHover}"
                 data-tag="${escapeSidebarText(tag)}">

@@ -3,7 +3,7 @@
 Technology-CLASS properties — access latency, per-operation/per-byte energy, and generic
 component bandwidth — that are ~constant across parts of a generation. This is the
 counterpart to the per-instance specs on the Hardware.Cloud/Edge/Mobile/Tiny nodes
-(capacity, bandwidth, TDP, price), which genuinely vary part-to-part.
+(capacity, bandwidth, TDP, price), which materially vary part-to-part.
 See the project MLSysIM rules -> Canonical organization (the instance-vs-tech-class split).
 
 The tier *data* lives as YAML under ``hardware/data/tech/<category>.yaml`` (loaded +
@@ -28,7 +28,7 @@ from ..core.loader import load_collection
 class MemoryTier(BaseModel):
     """Memory technology tier: access latency, access energy, and generic bandwidth."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     latency: Optional[Quantity] = None            # access latency
     # Measured access latency in core clock cycles, when the source reports
@@ -102,7 +102,7 @@ class MemoryTier(BaseModel):
 class StorageTier(BaseModel):
     """Generic storage/memory bandwidth tier (sequential bandwidth + optional latency)."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     bandwidth: Quantity
     latency: Optional[Quantity] = None
@@ -126,7 +126,7 @@ class InterconnectTier(BaseModel):
     part-to-part); the access *latency* floor is a property of the interconnect
     generation, ~constant across parts, so it lives here."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     latency: Optional[Quantity] = None
     metadata: Metadata = Field(default_factory=Metadata)
@@ -141,7 +141,7 @@ class ReticleField(BaseModel):
     """Lithography exposure-field limit (technology-class): the largest die a
     stepper/scanner can pattern in one exposure without stitching."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     width: Quantity
     height: Quantity
@@ -186,7 +186,7 @@ class ReticleField(BaseModel):
 class OpEnergy(BaseModel):
     """Per-operation energy for an arithmetic op (technology/process-class)."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     energy: Quantity
     metadata: Metadata = Field(default_factory=Metadata)
@@ -200,19 +200,29 @@ class OpEnergy(BaseModel):
 class EffectiveComputeEnergy(BaseModel):
     """Architecture-class effective energy per FLOP."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     energy_per_flop: Quantity
     metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("energy_per_flop", mode="after")
+    @classmethod
+    def _validate_energy_per_flop(cls, v):
+        return require_unit_family(v, ureg.joule / ureg.flop, "energy_per_flop", "operation")
 
 
 class MovementEnergy(BaseModel):
     """Technology-class effective data-movement energy per byte."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     energy_per_byte: Quantity
     metadata: Metadata = Field(default_factory=Metadata)
+
+    @field_validator("energy_per_byte", mode="after")
+    @classmethod
+    def _validate_energy_per_byte(cls, v):
+        return require_unit_family(v, ureg.joule / ureg.byte, "energy_per_byte", "data")
 
 
 class BatteryCell(BaseModel):
@@ -223,7 +233,7 @@ class BatteryCell(BaseModel):
     and voltage are ~constant across parts of that format; the cited datasheet pins
     one manufacturer's rating. ``energy`` is derived (capacity x voltage)."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     capacity: Quantity           # nominal charge capacity (mAh)
     voltage: Quantity            # nominal voltage (V)

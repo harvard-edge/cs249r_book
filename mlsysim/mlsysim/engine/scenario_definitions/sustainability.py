@@ -1266,6 +1266,68 @@ class CarbonPricedPlacementScenario(BaseScenario):
         )
 
 
+class TemporalShiftScenario(BaseScenario):
+    """A flexible run of ``duration`` at ``power`` that may wait up to ``slack`` for a cleaner
+    hour on a time-varying ``intensities`` signal.
+
+    Notes
+    -----
+    Equation: ``result`` evaluates ``mlsysim.solvers.TemporalShiftModel.solve``; its contract
+    owns the governing equations.
+
+    Assumptions: The intensity signal starts at the run's release time and has one value per
+    ``step``; the named scenario supplies a fixed configuration rather than a measured grid
+    trace unless its description says otherwise.
+
+    Excludes: Forecast error, capacity limits, and any signal-boundary choice beyond what the
+    supplied intensities encode.
+
+    References
+    ----------
+    Derivation: The scenario binds declared inputs to ``TemporalShiftModel``. That
+    implementation documents its derivation and sources.
+
+    Examples
+    --------
+    Execute the registered worked inputs; this is a modeled calculation.
+
+    >>> from mlsysim import Scenarios
+    >>> case = Scenarios.EveningReleaseTimeShift
+    >>> case.result.shifted
+    True"""
+
+    # Retain the public class identity used by Pydantic schemas and pickle.
+    __module__ = "mlsysim.engine.scenario_types"
+    intensities: List[Quantity]
+    power: Quantity
+    duration: Quantity
+    slack: Quantity
+    step: Optional[Quantity] = None
+    deferral_energy: Optional[Quantity] = None
+    standby_power: Optional[Quantity] = None
+    capacity_available: Optional[List[bool]] = None
+
+    @property
+    def result(self):
+        """Evaluate the configured inputs with ``mlsysim.solvers.TemporalShiftModel.solve``.
+
+        The returned typed result retains the solver's documented units, assumptions,
+        and feasibility semantics; this property adds no measurement or safety claim.
+        Equation: ``result = TemporalShiftModel().solve(...)`` using the fields shown below."""
+        from ..solvers import TemporalShiftModel
+
+        return TemporalShiftModel().solve(
+            self.intensities,
+            self.power,
+            self.duration,
+            self.slack,
+            step=self.step,
+            deferral_energy=self.deferral_energy,
+            standby_power=self.standby_power,
+            capacity_available=self.capacity_available,
+        )
+
+
 class PeriodicInferencePowerScenario(BaseScenario):
     """``workload`` run once per ``period`` on ``hardware`` at its peak ``precision`` rate, idling between runs.
 

@@ -123,6 +123,20 @@ function _onKeyEscape(e) {
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
 
+function _resolveCanvasColor(cssVarExpr, fallback) {
+  if (typeof document !== 'undefined' && typeof getComputedStyle === 'function') {
+    const host = document.querySelector('#widget-chat-container, socratiq-widget') || document.documentElement;
+    if (host) {
+      const varMatch = cssVarExpr.match(/--[a-zA-Z0-9-]+/);
+      if (varMatch) {
+        const val = getComputedStyle(host).getPropertyValue(varMatch[0]).trim();
+        if (val) return val;
+      }
+    }
+  }
+  return fallback;
+}
+
 function _renderPath() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (path.length < 2) return;
@@ -132,15 +146,15 @@ function _renderPath() {
   for (let i = 1; i < path.length; i++) {
     ctx.lineTo(path[i].x, path[i].y);
   }
-  ctx.strokeStyle = 'rgba(99, 102, 241, 0.9)';
+  ctx.strokeStyle = _resolveCanvasColor('var(--socratiq-accent, #8e1537)', '#8e1537');
   ctx.lineWidth = 2.5;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.setLineDash([]);
   ctx.stroke();
 
-  // Fill with semi-transparent purple
-  ctx.fillStyle = 'rgba(99, 102, 241, 0.08)';
+  // Fill with semi-transparent accent
+  ctx.fillStyle = _resolveCanvasColor('var(--socratiq-accent-soft, rgba(142, 21, 55, 0.15))', 'rgba(142, 21, 55, 0.08)');
   ctx.fill();
 }
 
@@ -150,10 +164,10 @@ function _closePath() {
   ctx.moveTo(path[0].x, path[0].y);
   for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y);
   ctx.closePath();
-  ctx.strokeStyle = 'rgba(99, 102, 241, 1)';
+  ctx.strokeStyle = _resolveCanvasColor('var(--socratiq-accent, #8e1537)', '#8e1537');
   ctx.lineWidth = 2.5;
   ctx.stroke();
-  ctx.fillStyle = 'rgba(99, 102, 241, 0.15)';
+  ctx.fillStyle = _resolveCanvasColor('var(--socratiq-accent-soft, rgba(142, 21, 55, 0.15))', 'rgba(142, 21, 55, 0.15)');
   ctx.fill();
 }
 
@@ -211,7 +225,7 @@ function _extractTextInPath(polygon) {
         // Skip scripts, styles, hidden elements and widget internals
         if (['script', 'style', 'noscript', 'svg'].includes(tag)) return NodeFilter.FILTER_REJECT;
         // Skip anything inside the socratiq widget shadow host
-        if (p.closest?.('socratiq-widget, #socratiq-more-dropdown, #socratiq-meditation-nudge')) return NodeFilter.FILTER_REJECT;
+        if (p.closest?.('socratiq-widget, #socratiq-reader, #widget-chat-container, #socratiq-more-dropdown, #socratiq-meditation-nudge')) return NodeFilter.FILTER_REJECT;
         const cs = getComputedStyle(p);
         if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;

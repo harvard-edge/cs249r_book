@@ -13,7 +13,10 @@ export function createParagraphPicker({shell, host, captureParagraph, onPick, on
   banner.append(message, cancel);
   shell.appendChild(banner);
 
-  function stop() { banner.hidden = true; }
+  function stop() {
+    banner.hidden = true;
+    delete document.documentElement.dataset.socratiqPicking;
+  }
   function cancelPicking() {
     if (banner.hidden) return;
     stop();
@@ -54,6 +57,7 @@ export function createParagraphPicker({shell, host, captureParagraph, onPick, on
     start() {
       message.textContent = 'Tap or click a paragraph in the book to preview it. Nothing is sent yet.';
       banner.hidden = false;
+      document.documentElement.dataset.socratiqPicking = 'true';
       cancel.focus({preventScroll: true});
     },
     stop,

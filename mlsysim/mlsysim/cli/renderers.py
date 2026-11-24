@@ -218,20 +218,33 @@ def render_scorecard(eval_obj, output_format: str):
 
 
 def render_optimization(opt_name: str, opt_result, output_format: str):
-    """Renders the output of any OptimizerResult."""
+    """Renders the output of any OptimizationResult (engine or core protocol)."""
     if output_format == "json":
-        print_json(opt_result.model_dump(mode="python"))
+        if hasattr(opt_result, "model_dump"):
+            print_json(opt_result.model_dump(mode="python"))
+        else:
+            from dataclasses import asdict, is_dataclass
+            print_json(asdict(opt_result) if is_dataclass(opt_result) else dict(opt_result))
         return
-    elif output_format == "markdown":
+
+    objective_val = float(
+        getattr(opt_result, "objective_value", getattr(opt_result, "optimal_objective", 0.0))
+    )
+    best_cfg = getattr(opt_result, "best_config", getattr(opt_result, "optimal_point", {}))
+    searched = int(
+        getattr(opt_result, "total_searched", getattr(opt_result, "evaluations", 0))
+    )
+
+    if output_format == "markdown":
         print(f"## MLSys·im Optimize: {opt_name}")
-        print(f"\n### Objective Value: {opt_result.objective_value:,.2f}")
+        print(f"\n### Objective Value: {objective_val:,.2f}")
         print("\n### Best Configuration")
-        for k, v in opt_result.best_config.items():
+        for k, v in best_cfg.items():
             print(f"- **{k.replace('_', ' ').title()}**: {v}")
-        print(f"\n*Searched {opt_result.total_searched} configurations.*")
+        print(f"\n*Searched {searched} configurations.*")
         return
     elif output_format == "html":
-        config_html = "".join([f"<tr><td style='padding:8px; border-bottom:1px solid #eee;'><b>{k.replace('_', ' ').title()}</b></td><td style='padding:8px; border-bottom:1px solid #eee; text-align:right;'>{v}</td></tr>" for k, v in opt_result.best_config.items()])
+        config_html = "".join([f"<tr><td style='padding:8px; border-bottom:1px solid #eee;'><b>{k.replace('_', ' ').title()}</b></td><td style='padding:8px; border-bottom:1px solid #eee; text-align:right;'>{v}</td></tr>" for k, v in best_cfg.items()])
 
         html_content = f"""<!DOCTYPE html>
 <html>
@@ -252,7 +265,7 @@ def render_optimization(opt_name: str, opt_result, output_format: str):
 
         <div class="card" style="border-left: 4px solid #06b6d4; text-align: center;">
             <h3 style="color:#06b6d4; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Objective Value</h3>
-            <div style="font-size: 32px; font-weight: bold; color: #111827;">{opt_result.objective_value:,.2f}</div>
+            <div style="font-size: 32px; font-weight: bold; color: #111827;">{objective_val:,.2f}</div>
         </div>
 
         <div class="card" style="border-left: 4px solid #10b981;">
@@ -261,7 +274,7 @@ def render_optimization(opt_name: str, opt_result, output_format: str):
                 {config_html}
             </table>
             <p style="color: #6b7280; font-size: 12px; margin-bottom: 0; text-align: center;">
-                <i>Searched {opt_result.total_searched} configurations.</i>
+                <i>Searched {searched} configurations.</i>
             </p>
         </div>
     </div>
@@ -272,15 +285,15 @@ def render_optimization(opt_name: str, opt_result, output_format: str):
 
     table = Table(show_header=False, box=None, padding=(0, 2))
 
-    table.add_row("[bold cyan]Objective Value[/bold cyan]", f"{opt_result.objective_value:,.2f}")
+    table.add_row("[bold cyan]Objective Value[/bold cyan]", f"{objective_val:,.2f}")
     table.add_row("", "")
 
     table.add_row("[bold green]Best Configuration[/bold green]", "")
-    for k, v in opt_result.best_config.items():
+    for k, v in best_cfg.items():
         table.add_row(f"  • {k.replace('_', ' ').title()}", f"{v}")
 
     table.add_row("", "")
-    table.add_row(f"[italic gray]Searched {opt_result.total_searched} configurations.[/italic gray]", "")
+    table.add_row(f"[italic gray]Searched {searched} configurations.[/italic gray]", "")
 
     panel = Panel(
         table,

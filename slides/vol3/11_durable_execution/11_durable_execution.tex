@@ -23,6 +23,7 @@
   layer=runtime,
   logo={../../assets/img/logo-mlsysbook.png},
   instlogo={../../assets/img/logo-harvard.png},
+  dividerstack,
 }
 \usepackage[T1]{fontenc}
 \usepackage[scaled=0.9]{helvet}
@@ -63,7 +64,14 @@
 % =============================================================================
 % TITLE AND HOOK
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lecture 10 kept the trajectory record in one worker's memory. Today that worker dies in the middle of a test, and the question is what a replacement may conclude and do. The notes total about 70.5 minutes; the core lecture is about 59. FLEX: cutting every [OPTIONAL] frame (the horizon plot, group commit, the Gray frame, snapshot bytes, the prefill measurement, retention, open questions) leaves a complete lecture. Cut first the Gray frame and the snapshot bytes.}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Lecture 10 built an agent harness that kept the trajectory record inside one worker's memory. That design breaks the moment the worker crashes mid-task. To survive a crash without repeating an external effect, durable execution requires the runtime to record what it is about to do before doing it, then rebuild control state from the log without asking the model again. This lecture follows one mid-test worker crash to see what a replacement worker may rebuild, prove, reconcile, and replay.
+
+  \notecue{Teach}{Read the thesis aloud once. The full deck runs 70 minutes; skipping the four Optional slides (group commit, snapshot bytes, retention, and open questions) yields a 63.5-minute Core path that trims to a 50-minute class.}
+
+  \notecue{Next}{Slide 2 tests the simplest fallback when that worker dies, restarting a replacement from the original prompt.}
+}
 \mlsystitle{Durable Execution}{To survive a crash without repeating an effect, the runtime records what it is about to do before doing it and rebuilds control state from the log without asking the model again.}{cover_checkpointing_blueprint.png}
 
 \begin{frame}{Predict: what does a restart from the prompt do?}
@@ -83,7 +91,18 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Measured 2026-10-19 for this lecture (images/data/resample.py): qwen2.5 7B Q4\_K\_M on Ollama, one laptop. Scenario: Durable Execution, \S11.1.}
-  \note{[3.5 min] [CORE] The chapter's running worksheet: the repair agent from Lecture 1 has dispatched an integration test of candidate r18, and its worker crashes before the result arrives. ENGAGE: one minute, vote with fingers. Step 2: C. We ran the restart. The same task prompt, sent 30 times to a 7-billion-parameter model at temperature 0.8, produced 8 distinct first tool calls: 16 restarts read a file, 9 searched the code, 5 ran the tests. A restart is a new sample, so it takes a new path; and when it runs the tests again, a second job launches while the first may still be running and billing. A assumes the new worker knows what the old one did; nothing it can read says so. B assumes it knows a test is pending; only the dead worker's memory held that. WARN: students who answer ``set temperature to zero'' are half right on one laptop; segment 4 shows a serving system where it fails. FLEX: [CORE]; the synthesis returns here.}
+  \note{%
+    \mlsysnotemeta{3.5 min}{Core}%
+    What happens when a fresh worker tries that fallback after a crash? Here Lecture 1's repair agent dispatches an integration test of candidate patch r18, crashes before the result returns, and a replacement reruns the prompt. Predict whether A, B, or C happens.
+
+    \notecue{Check}{The answer is C. Across 30 measured restarts on a local model, qwen2.5 7B Q4\_K\_M, at temperature 0.8, the model chose 8 distinct first tool calls, with 16 reading a file, 9 searching code, and 5 running tests again. Each restart draws a new stochastic sample and can launch a duplicate test while the first still runs and bills. A tempting answer is A, assuming progress persisted, yet nothing outside the dead process kept it. Option B fails because only dead host DRAM knew a test was pending.}
+
+    \notecue{Watch for}{Setting temperature to zero does not reproduce a trajectory on a batched serving system, as Segment 4 demonstrates.}
+
+    \notecue{Teach}{Give one minute for a finger vote among A, B, and C before revealing C.}
+
+    \notecue{Next}{To design storage that survives the crash, Slide 3 recalls what control state the harness holds.}
+  }
 \end{frame}
 
 \begin{frame}{Recall: what does the harness keep?}
@@ -96,10 +115,22 @@
       Only \textbf{\textcolor{mlsysaccent}{evidence}} settles an operation; a timeout or a pause does not.}
     \end{column}
     \begin{column}{0.40\textwidth}
-      \uncover<3->{\begin{mlsyscard}{mlsysaccent}\small\textbf{Today:} the record lives in one worker's memory. What survives when that worker dies?\end{mlsyscard}}
+      \centering\mlsysphoto[width=0.90\textwidth,height=1.9cm,keepaspectratio]{google-datacenter-dalles-substation.jpg}\\[0.03cm]
+      {\scriptsize\textcolor{midgray}{Power or worker loss wipes host DRAM.}\par}\vspace{0.18cm}
+      \raggedright\uncover<3->{\begin{mlsyscard}{mlsysaccent}\small\textbf{Today:} the record lives in one worker's memory. What survives when that worker dies?\end{mlsyscard}}
     \end{column}
   \end{columns}
-  \note{[1.5 min] [CORE] Retrieval, 45 seconds. Step 2: Lecture 10 put the trajectory record in the harness: control state, budget reservations, held approvals, and the operation table of work that was sent. Its settlement rule says that only evidence closes an operation; a timeout, a pause, or a terminal state does not. Lecture 7 added settlement before retry: an uncertain outcome is settled before any repeat. Step 3: all of that lives in process memory. ENGAGE: in the hook, which of these did the new worker lose? (Expected: all of it: the pending test, the reservation, the operation identity.) FLEX: a student who missed Lectures 7 and 10 needs only this slide.}
+  \mlsyscredit{Photo: Visitor7, CC BY-SA 3.0, Wikimedia Commons.}
+  \note{%
+    \mlsysnotemeta{1.5 min}{Core}%
+    The opening crash forced a blind restart because harness state vanished with the worker. Before making it durable, recall from Lectures 7 and 10 where the trajectory record lives and what closes a sent operation. Lecture 10's runtime harness holds that trajectory record in memory, storing control state, budget reservations, held approvals, and the operation table. Under Lecture 7's settlement-before-retry rule and Lecture 10's settlement rule, only evidence closes an operation, never a timeout, a pause, or a trajectory's terminal state. Because this state sits in volatile host DRAM, worker or power loss wipes it clean.
+
+    \notecue{Check}{Which trajectory-record items did the opening crash erase? It erased all of them, including the pending test entry, its budget reservation, and the operation identity. A tempting assumption is that reservations or identities survived separately, yet the entire record lived inside the dead worker's memory.}
+
+    \notecue{Teach}{Give 45 seconds of silent recall before revealing the summary. This slide supplies the full prerequisite for anyone who missed Lectures 7 and 10.}
+
+    \notecue{Next}{Slide 4 situates durable execution on the runtime stack and the course's H·S·A exposure axes.}
+  }
 \end{frame}
 
 \begin{frame}{Durable execution closes the horizon and state exposures}
@@ -115,7 +146,14 @@
       {\large\bfseries Why must an agent write down what it is about to do before it does it?}
     \end{column}
   \end{columns}
-  \note{[1 min] [CORE] Part IV, the runtime, continues. On the H·S·A locator from Lecture 1, two axes are lit: horizon, because a long run outlives any one worker, and state, because what the run carries must survive the worker. Lecture 10 closed the horizon inside one live process; today closes it across process deaths. Read the driving question aloud. Every segment answers part of it.}
+  \note{%
+    \mlsysnotemeta{1 min}{Core}%
+    Protecting that trajectory record across crashes places durable execution second in Part IV, the runtime layer. On Lecture 1's H·S·A locator (Horizon, State, and Authority), two axes are lit. Horizon (H) is lit because multi-hour trajectories outlive individual workers, and State (S) is lit because carried control state must survive process death. Lecture 10's harness closed the horizon exposure across turns while keeping its record in one live worker's memory, whereas this lecture closes both exposures across worker crashes. Every segment answers one part of today's driving question, why an agent must write down what it is about to do before doing it.
+
+    \notecue{Teach}{Read the driving question aloud before moving to the learning goals.}
+
+    \notecue{Next}{Slide 5 maps that driving question onto four learning goals and the real measurements built for this lecture.}
+  }
 \end{frame}
 
 \begin{frame}{By the end of today you can}
@@ -124,13 +162,23 @@
   \thumbline{thumb_cadence.pdf}{Choose a checkpoint stride, and resume under a new owner.}\\[0.2cm]
   \thumbline{thumb_replay.pdf}{Replay a recorded run and locate the first point where two runs differ.}\\[0.25cm]
   \hsathread{closes the horizon and state exposures}
-  \note{[1 min] [CORE] Four goals, one per segment. Running case: the chapter's crash worksheet. The repair agent holds candidate patch r18 and a fixed workspace snapshot, ws\_r18; it has dispatched the test, operation test\_r18; the worker crashes before the result. Each segment asks what the surviving record says about that test. Three measurements were run for this lecture: a real workflow engine whose worker we killed, storage acknowledgments on a laptop, and a model reloaded after a resume.}
+  \note{%
+    \mlsysnotemeta{1 min}{Core}%
+    Each of these four goals corresponds to one segment answering today's driving question, anchored on the chapter's crash worksheet. The repair agent holds candidate patch r18 and fixed workspace snapshot ws\_r18, dispatches operation test\_r18, and loses its worker before the result arrives. Each segment asks what surviving records prove about that test. Beyond the opening prompt restarts, three further empirical runs built for this lecture test these claims directly. The first runs the harness on Temporal, a production durable-execution workflow engine that logs activity histories so crashed workflows can replay, and kills its live worker with SIGKILL (the operating-system signal that terminates a process immediately without cleanup). The others time storage acknowledgments on a laptop SSD and measure cold-resume prefill latency (the cost to recompute attention state across the recovered prompt context when no cached prefix survives).
+
+    \notecue{Next}{Slide 6 opens Segment 1 to examine what a crash erases and how the trajectory log rebuilds state.}
+  }
 \end{frame}
 
 % =============================================================================
 % SECTION: THE LOG
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] First segment: what a crash erases, and the record a replacement rebuilds from.}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Segment 1 answers what a replacement worker can rebuild after the worksheet crash. It first separates what process death erases from what the model's context window holds, then defines the durable record that rebuilds control state deterministically without calling the model again.
+
+  \notecue{Next}{Slide 7 contrasts the erased trajectory record with the model's context window.}
+}
 \mlsysdivider{What can a replacement worker rebuild after a crash?}{Durable Execution, \S11.1 and \S11.2}
 \section{The Log}
 
@@ -138,15 +186,29 @@
   \centering
   \mlsyssteps[width=0.95\textwidth,height=5.6cm,keepaspectratio]{lost_step}{2}
   \mlsyscredit{After Durable Execution, \S11.1 (the worksheet crash).}
-  \note{[3.5 min] [CORE] LINK: Lecture 1's METR data put the frontier task length at about 17 hours of expert time by 2026, so process restarts, spot preemptions, and rolling updates are ordinary events inside one trajectory. ENGAGE first: if a worker restarts once a day on average, how often does a 17-hour run see a restart? (Expected: most of the time.) Step 1: the worker's memory holds the trajectory record from Lecture 10: the dispatched test with no result, the 0.50 dollar reservation for it, the grants and control epoch, an approval still pending. Beside it, the model's context window holds a curated transcript: the prompt, compacted turns, the last observation. Step 2: the crash erases the record. The context window was never a substitute. It holds no in-flight operations, no reservations, no meters, and compaction (Lecture 4) has already summarized parts of it away. Only what reached durable storage survives, and the rest of the lecture designs that storage. ENGAGE: which item on the left is most dangerous to lose? (Expected: the dispatched test; it may still be running and charging.) WARN: students treat the chat transcript as the agent's state. It is an input the runtime assembles, and the runtime's record lives elsewhere. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{3.5 min}{Core}%
+    Mid-trajectory crashes are not rare anomalies. Recall from Lecture 1 that the METR trend places frontier task horizons near 17 hours of expert time by 2026, so daily worker restarts, cloud spot preemptions (when a provider reclaims an interruptible machine), and rolling software updates occur routinely during a run. In host memory, Lecture 10's trajectory record sits separate from the model's curated context window. That record holds dispatched test\_r18, its \$0.50 reservation, capability grants, Lecture 10's control epoch, and a pending approval. When the worker dies, all of that state vanishes, and losing the dispatched test is the gravest loss because the remote job may still run and bill. Because the context window holds no reservations, meters, or in-flight entries, and Lecture 4's compaction summarizes earlier turns away, only durable storage can rebuild the record.
+
+    \notecue{Watch for}{Do not treat the chat transcript as agent state. It is a lossy input assembled for the model, whereas the runtime's record lives separately.}
+
+    \notecue{Next}{Slide 8 defines the append-only trajectory log and shows how folding rebuilds the record without calling the model.}
+  }
 \end{frame}
 
 \begin{frame}{The log is folded into the record, without calling the model}
   \centering
-  \mlsyssteps[width=0.95\textwidth,height=5.3cm,keepaspectratio]{fold_step}{3}\\[0.05cm]
-  \uncover<2->{\small $R_j = \mathrm{fold}(R_0,\ e_1, \dots, e_j)$:\enspace $R$ is the record, $e$ the logged events}
-  \mlsyscredit{After Durable Execution, \S11.2.1, definition 11.1 and figure 1 (redrawn).}
-  \note{[3 min] [CORE] Definition 11.1: the trajectory log is the append-only, ordered sequence of typed events from which a deterministic reducer rebuilds control state. Step 1: five events reached durable storage: the task started, the context was built, the model replied, the call was authorized with its budget reserved, and the intent for test\_r18 was recorded. No result was logged. Step 2: a reducer applies each event in log order to the base record. It calls no model and no tool, so a late crash costs a fold and draws no new samples. Step 3: the rebuilt record holds the admission and the 0.50 dollar reservation, and it marks test\_r18 unresolved. The fold invents no outcome. ENGAGE: why must the log hold the model's reply as well as the tool results? (Expected: a sampled reply cannot be regenerated; without it the fold would need the model again.) WARN: the log is history; the record is a projection of it; the context window is a third thing, assembled for the model. FLEX: [CORE].}
+  \mlsyssteps[width=0.95\textwidth,height=4.98cm,keepaspectratio]{fold_step}{3}\\[0.03cm]
+  \uncover<2->{\footnotesize $R_j = \mathrm{fold}(R_0,\ e_1, \dots, e_j)$:\enspace $R$ is the record, $e$ the logged events}
+  \mlsyscredit{After Durable Execution, \S11.2.1, def.~11.1 and fig.~1 (Explore: Trajectory Log Fold on mlsysbook.ai).}
+  \note{%
+    \mlsysnotemeta{3 min}{Core}%
+    If durable storage must rebuild the erased record without re-prompting a stochastic model, it must record every decision and observation as it happens. Definition 11.1 defines that store as the trajectory log, an ordered sequence of typed events that is append-only, meaning entries are added only at the end. A deterministic reducer function rebuilds control state according to $R_j = \mathrm{fold}(R_0, e_1, \dots, e_j)$. Starting from initial state $R_0$, the reducer folds five durable events running from task start through the intent for test\_r18, with no result logged. It calls neither the model nor any tool, reusing the logged model reply because sampled outputs cannot be regenerated reliably. The rebuilt record preserves the admission and \$0.50 reservation while marking test\_r18 unresolved rather than inventing an outcome.
+
+    \notecue{Watch for}{Keep three artifacts separate. The log is append-only history, the record is its folded projection, and the context window is a lossy prompt view assembled from it.}
+
+    \notecue{Next}{Slide 9 tests this log-folding recovery on a live Temporal workflow whose worker is killed mid-test.}
+  }
 \end{frame}
 
 \begin{frame}{A real engine replayed the logged reply after the crash}
@@ -174,7 +236,14 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Run 2026-10-19 for this lecture (images/data/crash\_run.py): Temporal Python SDK 1.34.0, local dev server 1.32.0; worker killed with SIGKILL during the test. History lightly shortened.}
-  \note{[2.5 min] [CORE] A real durable execution engine, Temporal, run on a laptop for this lecture. Left: the harness written as a workflow; each call to the model or a tool is an activity whose input and result the engine logs. We killed the worker with SIGKILL one second into the test and started a new worker. Right: the engine's event history, its trajectory log. Event 7 holds the model's reply. The new worker rebuilt the workflow by replaying the history, and the model was called once in the whole run: the logged reply was reused without resampling (Lecture 2: recorded calls replay, served calls do not). Step 2: event 12. The test activity was in flight when the worker died. The engine saw the heartbeat stop and retried it as attempt 2, and the executor launched a second job. ENGAGE: was retrying the test safe? (Expected: only if the executor recognizes the repeat; the next segment shows both outcomes.) WARN: event 15 records a normal rebuild, since the new worker had to rebuild the workflow from history after the old worker's cache vanished. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    Does log folding avoid calling the model again in production software? To test the worksheet crash, the harness runs as a workflow on Temporal (Python SDK 1.34.0, a software development kit, and dev server 1.32.0), where both model and test calls are logged activities. One second into the test, the run kills the worker with SIGKILL and starts a replacement. Because event 7 already holds the logged model reply, the replacement replays history and calls the model only once, matching Lecture 2's rule that recorded calls replay while served calls do not. At event 12, Temporal detects a heartbeat timeout (a missed liveness signal from the dead worker) and retries the in-flight test as attempt 2. Because the naive executor cannot recognize the repeat, it launches a second job.
+
+    \notecue{Watch for}{Event 15 (WorkflowTaskTimedOut) records a normal history rebuild after the dead worker's cache vanished, not a failure. Retrying the test is safe only when the executor deduplicates repeated requests.}
+
+    \notecue{Next}{Slide 10 tests the distinction between the complete event log, transcripts, and partial records.}
+  }
 \end{frame}
 
 \begin{frame}{Vote: which record can rebuild the trajectory?}
@@ -188,24 +257,54 @@
       \choice{D}{the model, asked to summarize the run}
     \end{column}
     \begin{column}{0.35\textwidth}
+      \centering
+      \begin{tikzpicture}[>=Stealth, font=\scriptsize]
+        \node[draw=mlsysaccent,fill=mlsysaccent!10,rounded corners=3pt,minimum width=4.2cm,minimum height=0.55cm,align=center] (l) {\textbf{Event log + payloads}};
+        \node[draw=GreenLine,fill=GreenLine!10,rounded corners=3pt,minimum width=4.2cm,minimum height=0.55cm,align=center,below=0.22cm of l] (r) {\textbf{Fold} $\rightarrow$ control record};
+        \node[draw=midgray,dashed,fill=midgray!6,rounded corners=3pt,minimum width=4.2cm,minimum height=0.5cm,align=center,below=0.22cm of r] (c) {Context window (lossy view)};
+        \draw[->,thick,mlsysaccent] (l) -- (r);
+        \draw[->,dashed,midgray] (r) -- (c);
+      \end{tikzpicture}\\[0.22cm]
+      \raggedright
       \uncover<2->{\begin{mlsyscard}{mlsysaccent}\small Only C. A log can rebuild every past context window; no context window can rebuild the log.\end{mlsyscard}}
     \end{column}
   \end{columns}
-  \note{[2 min] [CORE] Peer instruction: vote, one minute with a neighbor, vote again. Step 2: C. A is the chapter's first fallacy. The final context omits which proposals were admitted and which intents became durable. If a tool exposed a credential at turn 7 and compaction summarized it away at turn 12, the final context keeps no trace of the leak. B is the common pitfall of definition 11.1: without the dispatch record, a call that crashed mid-flight looks as if it never happened. D asks a stochastic model to invent history. ENGAGE: what does the log need besides event types? (Expected: the exact delivered inputs and payloads; a hash proves bytes changed only while the bytes survive.) Land the segment aloud: recovery state comes from an append-only log that outlives the worker, folded without the model. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2 min}{Core}%
+    The Temporal trace showed that log folding avoids resampling the model. Decide which of A through D can rebuild a trajectory after a crash, noting that payloads are the delivered input and output bytes carried by each event.
+
+    \notecue{Check}{The answer is C. Only the typed event log with its delivered payloads folds into the control record, which then projects into lossy context views; hashes alone verify integrity only while those bytes survive. A tempting answer is A, because the final context looks complete, yet compaction drops admissions, intents, or a turn-7 credential leak summarized away by turn 12. Option B omits mid-flight dispatches, and D asks a stochastic model to invent history. Segment 1 thus establishes that recovery comes from an append-only log with payloads outliving the worker, folded without the model.}
+
+    \notecue{Teach}{Run peer instruction with an individual vote, one minute of neighbor discussion, and a revote before revealing C. State Segment 1's takeaway aloud.}
+
+    \notecue{Next}{Knowing what to log still leaves an ordering gap, so Slide 11 opens Segment 2 on when an intent must reach storage.}
+  }
 \end{frame}
 
 % =============================================================================
 % SECTION: INTENT
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] The log must also be ordered against the outside world. When must the intent reach storage, and which storage counts?}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Even a durable log misses an external action if the worker crashes after sending a request and before recording it. Segment 2 answers when an intent must reach storage before dispatch and which storage tier guarantees durability under a named failure model.
+
+  \notecue{Next}{Slide 12 places the write-ahead barrier between durable intent and external dispatch.}
+}
 \mlsysdivider{When must the intent reach storage, and which storage counts?}{Durable Execution, \S11.3}
 \section{Intent}
 
 \begin{frame}{Intent before dispatch makes every escaped effect visible}
   \centering
-  \mlsyssteps[width=0.95\textwidth,height=5.5cm,keepaspectratio]{intent_step}{2}
-  \mlsyscredit{After Durable Execution, \S11.3.2, equation 1 and figure 2 (redrawn).}
-  \note{[3 min] [CORE] Definition 11.2, durable intent: the operation's identity, arguments, grant reference, and reservation, acknowledged by storage that survives the declared failure domain before the request leaves. Step 1: the order of equation 1: propose, admit, intent acknowledged, dispatch, evidence. Left of the barrier the runtime can still withhold the call; right of it the request may have left. Step 2: where a crash falls decides what recovery may conclude. Before the acknowledgment: not dispatched, but only if the log is complete (the completeness rule, three slides on). Between the acknowledgment and evidence: in doubt. After evidence: established, to the extent the endpoint's contract allows. ENGAGE: a crash leaves an intent with no result; which zone? (Expected: in doubt, even if the crash came before dispatch, because recovery cannot tell.) WARN: the intent records that work may have escaped. It neither proves the endpoint ran it nor obliges anyone to run it again. FLEX: [CORE].}
+  \mlsyssteps[width=0.95\textwidth,height=5.5cm,keepaspectratio]{intent_step}{3}
+  \mlsyscredit{After Durable Execution, \S11.3.2, eq.~1 and fig.~2 (Explore: Durable Intent Zones on mlsysbook.ai).}
+  \note{%
+    \mlsysnotemeta{3 min}{Core}%
+    To keep an external effect from escaping unrecorded before a crash, the runtime places a write-ahead barrier before every network send. Definition 11.2 defines durable intent as the operation identity, arguments, grant reference, and reservation acknowledged before dispatch on storage surviving the declared failure domain (the set of faults across which a persistence guarantee holds). Equation 1 enforces the strict order of propose, admit, intent acknowledged, dispatch, and evidence. A crash before acknowledgment proves non-dispatch in a complete log, whereas a crash after correlated evidence establishes the outcome under the endpoint contract (Lecture 7's service promise on repeats and confirmation). Between acknowledgment and evidence lies the in-doubt window, where any crash, even immediately before dispatch, forces recovery to reconcile before dependent work proceeds.
+
+    \notecue{Watch for}{A durable intent proves that work may have escaped. It neither proves the endpoint ran the operation nor authorizes a blind retry.}
+
+    \notecue{Next}{Slide 13 compares unkeyed and keyed executors on the Temporal crash run when test\_r18 lands in doubt.}
+  }
 \end{frame}
 
 \begin{frame}{Predict: the new worker finds test\_r18 in doubt}
@@ -215,7 +314,18 @@
   \only<1|handout:0>{\small The engine retries the test. One executor is keyed by operation id. What runs?}%
   \only<2-|handout:1>{\small Only the keyed executor settles the retry. The operation id came from the logged intent.}
   \mlsyscredit{Measured 2026-10-19 (images/data/summary\_RepairNaive.json and summary\_RepairKeyed.json): the same Temporal run, two executors.}
-  \note{[3 min] [CORE] Two runs of the same workflow, both killed one second into the test. The only difference is the executor. ENGAGE: one minute; predict each lane. Step 2: the unkeyed executor launched job\_tests\_2 about 3.9 seconds after the first launch, while job\_tests\_1 had no recorded outcome. Two jobs ran. The keyed executor received the retry with operation\_id test\_r18, found job\_tests\_1 under that id, and returned it. This is the in-doubt action: an admitted operation whose effect the surviving evidence cannot prove present or absent. Recovery applies settlement before retry from Lecture 7 unchanged: probe by the logged operation identity (Lecture 7's reconciliation probe), and repeat only when the endpoint's contract makes a repeat safe. WARN: a durable intent does not make the operation safe to repeat; it only names what must be settled. The engine's retry was safe here only because the endpoint deduplicated. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{3 min}{Core}%
+    What happens when an engine retries an in-doubt operation? Here two runs of the same Temporal workflow are killed one second into the test, leaving test\_r18 in doubt, differing only in whether the executor keys work by operation ID. Predict what runs in each lane.
+
+    \notecue{Check}{The unkeyed executor launches job\_tests\_2 about 3.9 seconds after job\_tests\_1, leaving two jobs running. The keyed executor matches operation\_id test\_r18 and returns job\_tests\_1, settling without duplication because the logged intent supplied the operation identity. A tempting mistake is assuming durable intent alone prevents duplicate work on an unkeyed endpoint. Recovery applies Lecture 7's settlement-before-retry rule unchanged, probing by logged operation identity and repeating only when the endpoint contract makes repeats safe.}
+
+    \notecue{Watch for}{Durable intent names what must be settled. It never makes a non-idempotent endpoint (one where repeating a request repeats its effect) safe to retry.}
+
+    \notecue{Teach}{Give one minute to predict both lanes before revealing the outcomes.}
+
+    \notecue{Next}{Slide 14 inspects SSD hardware to show which faults an acknowledgment survives.}
+  }
 \end{frame}
 
 \begin{frame}{An acknowledgment covers only the failures its storage survives}
@@ -243,7 +353,14 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Photo: Samsung SSD 860 Pro board, Michael Bemmerl, CC BY 3.0 de, Wikimedia Commons (labels added from the chip markings). Text: macOS 26.4 fsync(2) manual page, excerpt.}
-  \note{[2 min] [CORE] Failure-domain durability: an acknowledgment is durable only against the faults its storage survives, so each write names its failure domain. The photo is a real drive. The controller accepts writes into the DRAM chip, a volatile cache, before they reach the NAND flash that keeps data without power. The manual page on the right is Apple's own: a returned fsync means only that the host handed the data to the drive; the drive may not have stored it yet. The chapter's three tiers: a process crash, survived by bytes in the kernel's page cache; power loss or a host crash, survived only after a flush that the drive honors; loss of the whole volume, survived only by copies outside it, for example two replicas acknowledged by a quorum. ENGAGE: the worksheet promises survival of host and disk together. Which tier must the intent's acknowledgment reach? (Expected: the third.) WARN: remoteness alone is not enough; an asynchronous replica can lag. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2 min}{Core}%
+    Keyed recovery works only if the logged intent survived the crash, so failure-domain durability requires naming which faults an acknowledgment covers. A Samsung SSD 860 Pro circuit board shows why software calls mislead, because the controller buffers writes in volatile DRAM cache before committing them to persistent NAND flash (nonvolatile memory chips). The macOS fsync(2) manual page confirms that a returned fsync only hands bytes to the drive, whereas the F\_FULLFSYNC file-control call (fcntl) forces the drive to flush its buffers to permanent storage. Three tiers follow. The kernel page cache (host memory holding buffered writes) covers a process crash, an honored drive flush covers power or host loss with the volume intact, and a quorum (a majority confirming each write) across off-volume replicas covers volume loss, which the worksheet requires when a replacement worker starts on another machine after host and disk loss together.
+
+    \notecue{Watch for}{Remoteness alone is not enough. An asynchronous replica (one updated in the background after the write returns) can lag behind the acknowledgment and lose committed intents.}
+
+    \notecue{Next}{Slide 15 asks how much latency each acknowledgment tier adds to every dispatch.}
+  }
 \end{frame}
 
 \begin{frame}{Predict: how long does each acknowledgment take?}
@@ -265,7 +382,18 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Measured 2026-10-19 (images/data/ack\_latency.py): Apple M5 Max, macOS 26.4, internal SSD, APFS. Tiers: Durable Execution, \S11.3.1, table 2.}
-  \note{[2.5 min] [CORE] ENGAGE: before step 2, ask for orders of magnitude: microseconds, a millisecond, ten? Step 2: measured on a laptop for this lecture, 300 appends each. write() returned in 0.024 ms, because it only copied the bytes into the kernel. fsync() returned in 0.043 ms. F\_FULLFSYNC, which makes the drive flush its cache, took 3.0 ms, 70 times longer. The fast fsync is the manual page in action: it did not wait for stable media. The table maps the three tiers to the acknowledgment each needs. A replicated store adds a network round trip; the chapter's exercise uses 6.5 ms for the slower of two off-volume replicas (illustrative). Against a turn that spends seconds on the model and tools, a few milliseconds per dispatch is small. WARN: never weaken the declared domain to save milliseconds; a fast acknowledgment from the wrong tier is a durability claim that is false. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    Moving down those three durability tiers puts a stronger persistence wait on every dispatch. To price that wait, this experiment timed 300 appends of a 512-byte intent on an Apple M5 Max internal SSD under APFS (macOS's file system). Predict whether write(), fsync(), and F\_FULLFSYNC take microseconds, 1 ms, or 10 ms.
+
+    \notecue{Check}{The measured medians are 0.024 ms for write(), which copies into the kernel page cache, and 0.043 ms for fsync(), which stops short of flushing drive DRAM. Waiting for stable media with F\_FULLFSYNC takes 3.0 ms, 70 times longer. A tempting choice is fsync() to save milliseconds, yet that 70-fold gap shows the manual page in action and breaks power-loss durability. Off-volume quorum replication adds a network round trip (6.5 ms illustrative in the chapter), still small against multi-second model and tool turns.}
+
+    \notecue{Watch for}{Never weaken the declared failure domain to shave milliseconds. A fast acknowledgment from the wrong tier is a false durability claim.}
+
+    \notecue{Teach}{Ask for order-of-magnitude estimates before revealing the measured bars.}
+
+    \notecue{Next}{Slide 16 shows why reading a lagging or incomplete replica breaks non-dispatch proofs.}
+  }
 \end{frame}
 
 \begin{frame}{A missing intent proves non-dispatch only in a complete log}
@@ -273,7 +401,14 @@
   \mlsyssteps[width=0.95\textwidth,height=5.0cm,keepaspectratio]{replica_step}{2}\\[0.05cm]
   \uncover<2->{\small Completeness rule: read absence only from a log whose prefix is proven complete.}
   \mlsyscredit{After Durable Execution, \S11.3.3 (completeness rule, table 3) and \S11.9 (pitfall).}
-  \note{[2 min] [CORE] The completeness rule: the absence of a logged intent proves that no dispatch occurred only in a complete authoritative prefix of the log. Step 1: the authoritative log holds the intent for test\_r18, and the test was sent. An asynchronous replica has not yet received that entry. Step 2: a recovery routine that reads the replica sees no intent, concludes the call was never sent, and dispatches it again: a second test, or with the remediation agent a second production change. The chapter's exercise 8 prices exactly this for the remediation fleet. ENGAGE: when may recovery read a replica? (Expected: for inspection, never to decide that something did not happen.) WARN: the same holds for a diagnostic log or a cache; only the source the failure domain declares authoritative can prove absence, and only up to its first gap. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2 min}{Core}%
+    Why does settling for a lagging replica break recovery even when the primary log recorded the intent? The completeness rule states that an absent intent proves non-dispatch only in a complete, authoritative prefix of the log. Suppose the authoritative log holds the intent for dispatched test\_r18 while an asynchronous replica has not yet received that entry. If recovery reads the stale replica, finds no intent, and concludes that the call never left, it dispatches a duplicate test. In Exercise 8's remediation fleet, the same mistake dispatches a second live infrastructure change. Asynchronous replicas serve read-only inspection, never decisions that an effect did not occur.
+
+    \notecue{Watch for}{The same rule governs diagnostic logs and caches. Only the failure domain's authoritative source can prove absence, and only up to its first gap.}
+
+    \notecue{Next}{Slide 17 examines how group commit shares that authoritative flush overhead across concurrent trajectories.}
+  }
 \end{frame}
 
 \begin{frame}{Group commit shares one flush; each intent still waits for all of it}
@@ -282,7 +417,16 @@
   {\small Measured: one F\_FULLFSYNC for $k$ queued intents. Chapter: 2 ms timer, 4 ms flush, 16 intents.}\\[0.05cm]
   {\small 0.25 ms of storage work each; the first waits 6 ms, the last 4 ms.}
   \mlsyscredit{Measured 2026-10-19 (images/data/ack\_latency.json). Durable Execution, \S11.3.4, equation 2 (illustrative inputs). DeWitt et al., SIGMOD 1984.}
-  \note{[2 min] [OPTIONAL] A runtime with many trajectories pays one acknowledgment per dispatch, and every dispatch queues at the same store. Group commit (DeWitt et al. 1984) writes several queued records with one flush. The plot is our laptop measurement: one F\_FULLFSYNC carrying 1 to 64 intents. The flush stays near 3 to 3.6 ms, so storage work per intent falls from 3.1 ms to 0.057 ms. The red line is what each intent waits: the whole flush. Equation 2: an intent waits its time in the queue plus the shared flush. The chapter's numbers: a 2 ms batch timer and a 4 ms quorum flush give 0.25 ms of work per intent among 16, but the first arrival waits 6 ms and the last still waits 4 ms. ENGAGE: double the timer; which term grows? (Expected: the queueing term; work per intent is unchanged if the batch size is fixed.) WARN: amortization raises throughput; it never shortens one dispatch's wait. FLEX: [OPTIONAL].}
+  \note{%
+    \mlsysnotemeta{2 min}{Optional}%
+    Requiring an authoritative flush on every dispatch raises a throughput problem when many trajectories queue at one durable store. In 1984, DeWitt and colleagues introduced group commit for main-memory databases, where fast transactions made physical log flushes the bottleneck, coalescing queued records into one shared flush. On the laptop SSD, one F\_FULLFSYNC carrying 1 to 64 intents stays near 3.0 to 3.6 ms, cutting storage work per intent from 3.1 ms to 0.057 ms, yet each intent still waits for the whole flush. Under equation 2, wait equals queue time plus the shared flush. In the chapter's illustrative example (2 ms timer, 4 ms quorum flush, 16 intents), storage work is 0.25 ms per intent, while the first arrival waits 6 ms and the last waits 4 ms.
+
+    \notecue{Watch for}{Amortization (spreading one fixed cost across many items) raises throughput without shortening one dispatch's latency. Doubling the batch timer increases queueing delay directly.}
+
+    \notecue{Teach}{For a 50-minute class, skip this slide and move straight to the database comparison on Slide 18.}
+
+    \notecue{Next}{Slide 18 contrasts database write-ahead logging with agent runtimes that cannot undo remote endpoints.}
+  }
 \end{frame}
 
 \begin{frame}{Databases log before they write; agents cannot undo the world}
@@ -303,53 +447,89 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Photo: Microsoft Research, CC BY-SA 3.0 us, Wikimedia Commons. Gray 1978; Mohan et al., ACM TODS 1992; Helland, CIDR 2007. Durable Execution, Systems Perspective 11.1.}
-  \note{[1.5 min] [OPTIONAL] Jim Gray's 1978 notes made the write-ahead log the record from which a database recovers, and ARIES (Mohan et al. 1992) turned it into a full recovery method: force the log record to stable storage before the changed page, then on restart repeat history and undo what did not commit. That works because the database owns its pages. An agent runtime logs intent for effects at endpoints it does not own. Its log can rebuild its own state, but it holds no undo for a deployment, and tools rarely offer the prepare phase of two-phase commit. Helland (2007) reached the same answer for large web systems: idempotent messages with unique identities across administrative boundaries. ENGAGE: which row explains why the hook needed an operation identity? (Expected: owns the state.) LINK: undoing an established effect is compensation, which Lecture 12 owns. Land the segment aloud. FLEX: [OPTIONAL].}
+  \note{%
+    \mlsysnotemeta{1.5 min}{Core}%
+    Transaction processing confronted this crash-ordering problem decades before agents. In his 1978 notes on database operating systems, Jim Gray established write-ahead logging for crash recovery and introduced two-phase commit (a protocol that prepares changes before committing them across participants). Mohan et al. (1992) turned that discipline into the ARIES recovery protocol, forcing log records to stable storage before modifying disk pages so restart can redo committed work and undo uncommitted changes because the database owns its pages. An agent runtime borrows the write-ahead ordering, not page ownership. Because remote endpoints rarely support two-phase commit, the runtime cannot undo an escaped call from its log; it must settle in-doubt calls and issue compensating actions (follow-up operations that offset unwanted effects, developed in Lecture 12). Helland (2007) reached the same conclusion for large services, using identified idempotent messages across ownership boundaries. Segment 2 thus establishes durable intent before dispatch under a named failure domain and explains why test\_r18 needed an operation ID.
+
+    \notecue{Next}{Because a growing log becomes slow to fold and omits modified workspace files, Slide 19 opens Segment 3 on checkpoints and safe resume.}
+  }
 \end{frame}
 
 % =============================================================================
 % SECTION: CHECKPOINTS AND RESUME
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] The log protects decisions and leaves the files the agent changed unprotected, and an unbounded log grows slow to fold. Checkpoints bind both; resume turns them into authority to act.}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Segment 3 answers how the control record and modified workspace files restart together at bounded cost, and how a replacement worker proves exclusive ownership before acting.
+
+  \notecue{Next}{Slide 20 shows how a checkpoint binds the control record and workspace files to one log position.}
+}
 \mlsysdivider{How do record and files restart together, and who may act?}{Durable Execution, \S11.4 and \S11.5}
 \section{Checkpoints}
 
 \begin{frame}{A checkpoint binds record and files to one log position}
   \centering
   \mlsyssteps[width=\textwidth,height=5.85cm,keepaspectratio]{ckpt_step}{3}
-  \mlsyscredit{After Durable Execution, \S11.4.1 (consistent recovery boundaries; Chandy and Lamport 1985).}
-  \note{[3 min] [CORE] Checkpoint binding. Step 1: a log entry saying an edit succeeded cannot restore the edited bytes. A checkpoint binds the record snapshot, record\_R\_ckpt, and the workspace snapshot, ws\_r18 (Lecture 8's copy-on-write workspace makes it cheap), to one committed log position c. Restore unpacks both and folds the suffix after c, again with no model call. Step 2: a manifest names position c, integrity hashes, and the reducer version. Publication order matters: the bytes become durable first, and only then is the manifest published; a crash mid-capture leaves the previous checkpoint in force. Step 3: the failure. Snapshot the record, then copy files a few seconds later while a tool writes: the pair describes a state that never existed, the inconsistency Chandy and Lamport's snapshot rule forbids. ENGAGE: the log points to a workspace delta whose bytes are missing. Resume? (Expected: no; fail and mark unrecoverable. Recomputing it is new execution.) FLEX: [CORE].}
+  \mlsyscredit{After Durable Execution, \S11.4.1 (Explore: Checkpoint Binding on mlsysbook.ai; Chandy and Lamport 1985).}
+  \note{%
+    \mlsysnotemeta{3 min}{Core}%
+    A log entry stating that an edit succeeded cannot restore modified files unless the control record and workspace bytes share one recovery boundary. Checkpoint binding ties a record snapshot (record\_R\_ckpt) and workspace snapshot (ws\_r18, made cheap by Lecture 8's copy-on-write workspace sharing unchanged blocks) to one committed log position $c$, so restore unpacks both and folds only the suffix after $c$ without calling the model. The runtime publishes a manifest (an index naming position $c$, integrity hashes, and reducer version) only after all artifact bytes are durable, keeping the prior checkpoint valid if capture crashes midway. In 1985, Chandy and Lamport defined a consistent distributed snapshot as a global state where every recorded receipt matches a recorded send. Copying files seconds after snapshotting the record while a tool still writes violates that rule, producing a torn state that never existed.
+
+    \notecue{Watch for}{If the log references a workspace delta (an incremental file change) whose bytes are missing, fail and mark the run unrecoverable. Recomputing that change is new execution, not restoration.}
+
+    \notecue{Next}{Slide 21 compares storage write volume for full snapshots against incremental deltas.}
+  }
 \end{frame}
 
 \begin{frame}{Full snapshots rewrite old state; deltas write it once}
   \centering
   \safeimg[width=0.88\textwidth,height=4.6cm,keepaspectratio]{snapshots.pdf}\\[0.05cm]
   {\small 500 turns, 128 KB of new state per turn: 50.5 times the bytes written}
-  \mlsyscredit{Durable Execution, \S11.4.2, equation 3 and its worked numbers (illustrative). Derived values: images/calcs.py.}
-  \note{[1.5 min] [OPTIONAL] Equation 3. State grows by 128 KB per turn; a checkpoint every 5 turns gives 100 checkpoints over 500 turns. A full snapshot rewrites everything accumulated so far, so total bytes grow with the square of the checkpoint count: 3.2 GB. Deltas write only what changed: 64 MB. The ratio is (n + 1)/2 = 50.5 for n = 100. The saving moves cost to recovery: restoring a delta chain means fetching, validating, and applying every delta since the base. Periodic consolidation writes a new base, and old deltas may be deleted only after that base is durably published. ENGAGE: which representation suits a trajectory that rarely crashes? (Expected: deltas, with consolidation bounding the chain.) WARN: the quadratic term comes from the snapshots; the log already appends each event once. FLEX: [OPTIONAL].}
+  \mlsyscredit{Durable Execution, \S11.4.2, equation 3 and its worked numbers (illustrative). Derived.}
+  \note{%
+    \mlsysnotemeta{1.5 min}{Optional}%
+    As a trajectory edits files and accumulates state across turns, copying everything at each checkpoint rewrites old bytes repeatedly. Equation 3 prices full snapshots against incremental deltas in an illustrative run of 500 turns adding 128 KB of state per turn. Taking a checkpoint every 5 turns produces $n = 100$ checkpoints. Full snapshots rewrite all accumulated state each time, scaling quadratically to 3.2 GB, whereas incremental deltas write each change once for 64 MB, a ratio of $(n+1)/2 = 50.5$. Deltas shift work onto recovery, which must fetch, verify, and apply the chain since the base snapshot, so periodic consolidation publishes a fresh durable base before deleting old deltas.
+
+    \notecue{Watch for}{The quadratic growth comes from full snapshots. The append-only trajectory log already writes every event once.}
+
+    \notecue{Teach}{For a 50-minute class, skip this slide and state orally that incremental deltas avoid quadratic snapshot rewrites before moving to the stride estimate.}
+
+    \notecue{Next}{Choosing a representation leaves cadence open, so Slide 22 estimates the winning checkpoint stride on a 100-turn trace.}
+  }
 \end{frame}
 
 \begin{frame}{Estimate: which checkpoint stride wins on this trace?}
   \mlsysactivity{Estimate}{3 min}
   \begin{columns}[c]
-    \begin{column}{0.42\textwidth}
-      \begin{mlsyscard}{mlsysaccent}
-        \small\textbf{Given (illustrative)}\\[0.05cm]
-        100 turns; crashes after 37 and 83\\
-        0.5 s pause per checkpoint\\
-        1 s restore, 0.1 s per logged turn\\
+    \begin{column}{0.43\textwidth}
+      \begin{mlsyscard}[top=0.10em,bottom=0.10em]{mlsysaccent}
+        \footnotesize\textbf{Given (illustrative)}\\[0.02cm]
+        100 turns; crashes at 37, 83 ($\lambda{=}0.02$/turn)\\
+        0.5 s pause; 1 s restore, 0.1 s/logged turn\\
         Strides: 10, 25, or 50 turns
-      \end{mlsyscard}
-      \small
-      \uncover<2->{Totals: \textbf{8 s}, \textbf{\textcolor{mlsysaccent}{6 s}}, \textbf{10 s}\\[0.1cm]
-      $k^* = \sqrt{2\delta/(\lambda r)} \approx 22$ turns\\[0.05cm]
-      {\footnotesize $\delta$ pause, $\lambda$ crash rate, $r$ cost per turn}}
+      \end{mlsyscard}\par\vspace{0.04cm}
+      \footnotesize
+      \uncover<2->{Stride 25: $4{\times}0.5 + 2{\times}1 + 20{\times}0.1 = \mathbf{\textcolor{mlsysaccent}{6\text{ s}}}$\\
+      Totals (10 / 25 / 50): \textbf{8 s}, \textbf{\textcolor{mlsysaccent}{6 s}}, \textbf{10 s}\\[0.03cm]
+      $k^* = \sqrt{2\delta/(\lambda r)} \approx \mathbf{22}$ turns ($\delta$ pause, $r$/turn)}
     \end{column}
-    \begin{column}{0.55\textwidth}
-      \centering\uncover<2->{\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{cadence.pdf}}
+    \begin{column}{0.54\textwidth}
+      \centering\uncover<2->{\safeimg[width=\textwidth,height=4.55cm,keepaspectratio]{cadence.pdf}}
     \end{column}
   \end{columns}
-  \mlsyscredit{Durable Execution, NM 11.1, equations 5 and 6 and theorem 11.1 (Young 1974). Derived values: images/calcs.py.}
-  \note{[3.5 min] [CORE] Checkpoint stride. ENGAGE: two minutes in pairs; compute each total. Step 2: stride 10 takes 10 checkpoints (5 s) and rebuilds 7 and 3 turns (1 s) plus two restores (2 s): 8 s. Stride 25: 2 s of checkpoints, 12 and 8 turns (2 s), restores 2 s: 6 s. Stride 50: 1 s, 37 and 33 turns (7 s), 2 s: 10 s. Checkpointing every turn would spend 52 s, the chapter's pitfall. The plot is equation 5, from Young's 1974 balance of pause against lost work. With a crash rate of 0.02 per turn and 0.1 s to rebuild a logged turn, the optimal stride is about 22. If each lost turn had to be re-executed at 20 s, the optimal stride is 1.6. Logging lengthens it by the square root of 20 / 0.1, 14.1 times, because a crash costs reconstruction instead of new model calls. WARN: the minimum is flat; a stride within a factor of 2 costs at most 25 percent extra overhead, so measure before tuning. FLEX: [CORE].}
+  \mlsyscredit{Durable Execution, NM 11.1, equations 5 and 6 and theorem 11.1 (Young 1974). Derived.}
+  \note{%
+    \mlsysnotemeta{3.5 min}{Core}%
+    Choosing a stride applies Young's 1974 tradeoff balancing snapshot pauses against lost work in batch jobs (equations 5 and 6, theorem 11.1, illustrative). On a 100-turn trace crashing at turns 37 and 83 ($\lambda = 0.02$/turn), with a 0.5 s pause, 1 s restore, and 0.1 s per logged turn, compute totals for strides 10, 25, and 50.
+
+    \notecue{Check}{Stride 25 wins at 6 s (2 s checkpoints, 2 s restores, 2 s folding 12 and 8 turns); stride 10 takes 8 s (5 s, 2 s, 1 s) and stride 50 takes 10 s (1 s, 2 s, 7 s). A tempting extreme, every-turn checkpointing, wastes 52 s. Optimal stride $k^* = \sqrt{2\delta/(\lambda r)} \approx 22$ turns drops to 1.6 turns under 20 s of model re-execution versus 0.1 s of folding, so logging stretches it $\sqrt{20/0.1} = 14.1$ times.}
+
+    \notecue{Watch for}{The optimum is flat. Any stride within a factor of 2 adds at most 25 percent overhead, so measure before tuning.}
+
+    \notecue{Teach}{Give pairs two minutes to compute all three totals before revealing the chart.}
+
+    \notecue{Next}{Fast state rebuild still leaves who may act next, so Slide 23 examines a zombie-worker outage.}
+  }
 \end{frame}
 
 \begin{frame}{A delayed worker applied an old plan and emptied a DNS record}
@@ -366,7 +546,14 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Quotes: AWS, Summary of the Amazon DynamoDB Service Disruption, October 2025, aws.amazon.com/message/101925. Photo: Theodore Christopher, CC0, Wikimedia Commons.}
-  \note{[1.5 min] [CORE] A real incident with the zombie worker of this segment. AWS runs a DNS Planner that writes plans and three independent DNS Enactors that apply them. One Enactor checked that its plan was newer than the applied one, then stalled. Meanwhile a second Enactor applied a newer plan and began cleaning up old ones. The delayed Enactor then applied its much older plan over the newer one, and the cleanup deleted that old plan, leaving the regional endpoint with an empty DNS record. Systems that reached DynamoDB through that name failed from 11:48 PM Pacific time on 19 October until 2:40 AM the next morning. ENGAGE: where should the newer-than check have run? (Expected: at the resource, at the moment of the write.) WARN: the photo shows the region, and no building in it is identified as AWS. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{1.5 min}{Core}%
+    Rebuilding state is unsafe if a previous worker merely stalled, waking later as a zombie worker after losing ownership. On 19 to 20 October 2025 (11:48 PM to 2:40 AM Pacific Daylight Time, PDT), cloud provider Amazon Web Services (AWS) suffered an outage in its managed cloud database service, Amazon DynamoDB, in region us-east-1. One DNS Enactor (a control-plane worker publishing DNS routing records for the service endpoint) checked once that its plan was newer than the active plan, then stalled. Meanwhile a second Enactor applied a newer plan and started cleaning up older ones. When the delayed Enactor woke, it overwrote the newer plan with its stale one, cleanup deleted it, and the regional endpoint was left with an empty DNS record. The newer-than check belonged at the resource during the write, not once before an arbitrary delay.
+
+    \notecue{Watch for}{The Ashburn aerial photo illustrates the regional concentration of data centers. No individual building is identified as AWS.}
+
+    \notecue{Next}{Slide 24 puts an ordered resume protocol in place so a replacement worker cannot collide with a stalled predecessor or retry prematurely.}
+  }
 \end{frame}
 
 \begin{frame}{Resume proves, owns, restores, reconciles, then admits}
@@ -374,7 +561,14 @@
   \mlsyssteps[width=0.95\textwidth,height=4.6cm,keepaspectratio]{resume_step}{3}\\[0.05cm]
   \uncover<3->{\small Resume protocol time $=$ ownership $+$ read $+$ fold $+$ restore $+$ reconcile $+$ prefill}
   \mlsyscredit{After Durable Execution, \S11.5 and equation 7.}
-  \note{[2.5 min] [CORE] The resume protocol: an authorized continuation in ordered stages; it is never a restart. Step 1: prove that the authoritative log prefix and the checkpoint artifacts are available; a gap is reported as unavailable, never read as an empty history. Then take ownership from a strongly consistent lease service, which issues a new owner epoch, 8 after 7. Step 2: restore by fold, with ws\_r18 untouched. Then reconcile: test\_r18 is in doubt, so probe the executor by its logged operation identity; budget reservations stay locked until usage evidence arrives. Step 3: only now admit new work, under current limits: a PAUSED trajectory stays paused, an approval granted before the crash still passes the dispatch-time recheck (Lecture 10's approval escrow), and bounded-liability admission (Lecture 10) runs again. Equation 7 sums the stages. ENGAGE: which stage may take longest? (Expected: reconcile or prefill; the fold is cheap.) WARN: passing the ownership check does not license re-sending test\_r18. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    The resume protocol builds an authorized continuation in five ordered stages priced by equation 7 (ownership + read + fold + restore + reconcile + prefill), preventing split-brain writes (two workers acting as owner at once) and premature retries. Stage one proves that the authoritative log prefix and checkpoint artifacts are complete, reporting any gap as unavailable rather than empty. Stage two acquires a new owner epoch (a monotonically increasing ownership number, moving from 7 to 8) from a strongly consistent lease service (a replicated coordinator issuing a time-limited ownership grant to one agreed worker at a time). Stages three and four restore ws\_r18, fold the log suffix, and reconcile in-doubt test\_r18 by probing its logged operation ID while keeping reservations locked. Stage five admits new work under current limits, keeping a PAUSED run paused, checking prior approvals through Lecture 10's approval escrow, and re-running bounded-liability admission.
+
+    \notecue{Watch for}{Acquiring epoch 8 does not license re-sending test\_r18. Reconciliation and prefill usually dominate resume latency, whereas log folding is cheap.}
+
+    \notecue{Next}{Slide 25 explains how fencing tokens enforce epoch 8 at every write boundary.}
+  }
 \end{frame}
 
 \begin{frame}{A fencing token is checked at the resource on every write}
@@ -382,7 +576,14 @@
   \mlsyssteps[width=\textwidth,height=5.0cm,keepaspectratio]{fence_step}{3}\\[0.05cm]
   \uncover<3->{\small A lease bounds how long a lost worker blocks recovery; only the epoch check excludes it.}
   \mlsyscredit{After Durable Execution, \S11.5.1 (fencing tokens; Kleppmann 2016; Burrows 2006).}
-  \note{[2 min] [CORE] Fencing tokens. Step 1: worker A owns the trajectory under epoch 7, then stalls in a long pause, a network partition, or a slow disk. Its lease expires, but A does not know. Step 2: the ownership service grants epoch 8 to worker B, and B's writes to the log and dispatch gateway carry 8 and are accepted. Step 3: A wakes and writes with epoch 7. The log rejects it, because it has already seen 8. That is the check the DNS Enactor lacked: a monotonically increasing owner epoch, compared by the resource itself on every write. Burrows built the same idea into Chubby's lock sequencers. ENGAGE: A's earlier test request already reached the executor. Does epoch 8 cancel it? (Expected: no; fencing stops new writes, and test\_r18 remains in doubt until reconciled.) WARN: the fence holds only at boundaries that check it: the log, the dispatch gate, and each resource that verifies the epoch. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2 min}{Core}%
+    A lease's expiration timeout bounds how long a dead or stalled worker blocks takeover, yet expiry alone never excludes it; every write boundary must check epoch 8. In 2006, Burrows introduced generation-stamped lock sequencers in the Chubby lock service so resources could reject stale holders, which Kleppmann (2016) framed as fencing tokens, monotonically increasing epoch numbers checked at the resource. Suppose worker A holds epoch 7 and stalls during a pause, a network partition (loss of connectivity), or a slow disk while its time-limited lease expires unnoticed. The lease service grants epoch 8 to worker B, whose writes to the log and dispatch gateway (the component sending tool calls) succeed. When worker A wakes with a write tagged with epoch 7, the log rejects it after seeing 8, supplying the check the DynamoDB DNS Enactor lacked.
+
+    \notecue{Watch for}{Fencing stops new writes only at boundaries verifying the epoch (log, gateway, and checking resources). It does not cancel an earlier test\_r18 call already sent, which still requires reconciliation.}
+
+    \notecue{Next}{Slide 26 measures the final term of equation 7, prefill latency on the first call after resume.}
+  }
 \end{frame}
 
 \begin{frame}{The next call after a resume prefilled 10,202 tokens in 8.7 s}
@@ -391,13 +592,23 @@
   {\small Same context; the warm server kept its cached prefix. Median of 3 runs, 7B model.}\\[0.05cm]
   {\small Chapter: 32,768 tokens need about 2.3 s at an accelerator's 8-bit peak.}
   \mlsyscredit{Measured 2026-10-19 (images/data/resume\_prefill.py): qwen2.5 7B Q4\_K\_M on Ollama, Apple M5 Max; cold run includes 0.78 s model load. Durable Execution, \S11.5.4 and \S11.9.}
-  \note{[1.5 min] [OPTIONAL] The last term of equation 7. Folding the log is cheap, but the next model call needs serving state. We measured it on a laptop: a 15-turn repair transcript of 10,202 tokens. When the same server still held the prefix from the previous turn, the next call's first token came after 0.12 s. After the model was reloaded, as on a different server, the same call took 8.7 s, about 72 times longer, almost all of it prefill. The chapter's figure for its reference model and accelerator is about 2.3 s for 32,768 tokens, as a compute floor. LINK: the radix prefix cache of Lecture 5 is what the warm server kept. The chapter's pitfall is resuming on whichever server is free. ENGAGE: when is a cold, idle server still the right choice? (Expected: when queueing at the warm one costs more than the prefill.) FLEX: [OPTIONAL].}
+  \note{%
+    \mlsysnotemeta{1.5 min}{Core}%
+    With ownership fenced and state folded in milliseconds, the final term of equation 7 is rebuilding serving state for the next model call. This measurement runs a 15-turn, 10,202-token repair transcript on qwen2.5 7B Q4\_K\_M using Ollama on an Apple M5 Max, taking the median of 3 runs. When a warm server holds the cached prefix in Lecture 5's radix prefix cache, time to first token is 0.12 s. On a cold server that must reload the model (including 0.78 s of load time), the same call takes 8.7 s, about 72 times longer, spent mostly on prefill. For comparison, the chapter's compute floor for 32,768 tokens at an accelerator's peak 8-bit compute throughput is roughly 2.3 s. Resuming blindly on any idle server wastes warm state unless warm-server queueing exceeds cold prefill time. Segment 3 thus binds record and files into log-paced checkpoints and enforces fenced, reconciled, prefix-aware resume.
+
+    \notecue{Next}{Slide 27 opens Segment 4 to show how the same durable log reproduces and debugs runs that already finished.}
+  }
 \end{frame}
 
 % =============================================================================
 % SECTION: REPLAY
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] The same records serve a second purpose that admits no new work: inspecting and testing what the trajectory already did.}
+\mlsysnote{%
+  \mlsysnotemeta{0.5 min}{Core}%
+  Recovery uses the durable log to continue forward. Segment 4 puts the same log to a second use that admits no production effects, answering how engineers reproduce, regression-test, and debug a trajectory that already ran.
+
+  \notecue{Next}{Slide 28 tests whether rerunning every call at temperature 0 can reproduce a 30-turn trajectory.}
+}
 \mlsysdivider{How do we reproduce and debug a run that already happened?}{Durable Execution, \S11.6 to \S11.8}
 \section{Replay}
 
@@ -418,7 +629,18 @@
     \end{column}
   \end{columns}
   \mlsyscredit{He and Thinking Machines Lab, ``Defeating Nondeterminism in LLM Inference,'' 2025 (Qwen3-235B-A22B-Instruct-2507). Laptop: images/data/resample.json. Durable Execution, \S11.9.}
-  \note{[2.5 min] [CORE] The chapter's third fallacy. ENGAGE: vote first. Step 2: false. On our laptop, one request at a time, 30 runs at temperature 0 gave one reply, the most favorable case. A serving system batches requests, and the batch changes the order of floating-point sums. Thinking Machines sampled 1,000 completions of one prompt from a 235-billion-parameter model at temperature 0: 80 were distinct. All agreed for 102 tokens, then 992 continued ``Queens, New York'' and 8 ``New York City''. One flipped token changes every later token. Across a trajectory the chances multiply, Lecture 1's horizon compounding: even if each call reproduced 99 percent of the time, all 30 would match only 74 percent of the time, before clocks, IDs, and the world change. WARN: their batch-invariant kernels made all 1,000 identical, but a hosted model can also change underneath the run. Reproduction needs the recorded replies. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    Recall Slide 2's caution about greedy decoding (temperature 0) on shared servers. Before checking the data, decide whether that setting reproduces a recorded run across 30 turns.
+
+    \notecue{Check}{False, exposing the fallacy that greedy reruns reproduce trajectories. A tempting answer is true, because on an isolated laptop serving one request at a time, 30 runs at temperature 0 gave one reply. In their 2025 inference-nondeterminism study, He and Thinking Machines Lab tested the 235B model Qwen3-235B-A22B-Instruct-2507 on a shared batched server, finding 80 distinct replies in 1,000 temperature-0 completions. Recalling Lecture 2, batching changes floating-point reduction order; after 102 identical tokens, 992 runs wrote ``Queens, New York'' and 8 wrote ``New York City.'' By Lecture 1's horizon compounding, even an optimistic 99 percent per-call repeatability yields $0.99^{30} = 74\%$ over 30 turns before clocks, IDs, or external state shift.}
+
+    \notecue{Watch for}{Batch-invariant kernels (arithmetic order fixed across batch sizes) made all 1,000 runs match there, yet hosted providers can still change models underneath, so reproduction needs recorded replies.}
+
+    \notecue{Teach}{Take a true-or-false vote before revealing the answer and plot.}
+
+    \notecue{Next}{Slide 29 shows how replay substitutes recorded inputs across three operational modes.}
+  }
 \end{frame}
 
 \begin{frame}{Replay substitutes recorded inputs; three modes, three answers}
@@ -426,7 +648,14 @@
   \mlsyssteps[width=0.95\textwidth,height=5.0cm,keepaspectratio]{replay_step}{2}\\[0.1cm]
   \uncover<2->{\footnotesize\textbf{Time travel:} past state.\enspace \textbf{Regression:} new harness, old inputs.\enspace \textbf{Branch:} one change, new run.}
   \mlsyscredit{After Durable Execution, \S11.6, figure 3 and table 5 (redrawn).}
-  \note{[2.5 min] [CORE] Record and replay: a sampled reply cannot be regenerated, so reproduction substitutes recorded inputs at nondeterministic boundaries. Step 1: live, every step appends to the log. Step 2: in replay the model is stubbed and tools are disconnected; recorded replies and observations stream into the harness in order. A request that matches nothing in the log stops the replay; it never falls back to a live call. Three modes use one recording. Time-travel replay folds the log to show the state at any boundary, for example what bytes reached the model at turn 18. Harness regression replay runs new harness code on the recorded inputs, with clocks and IDs captured too. A counterfactual branch restores state at a checkpoint, changes one thing, and gathers new observations in a sandbox, with production effects off and no inherited approvals. ENGAGE: a branch shows a fixed prompt succeeding once. What does that prove? (Expected: one experiment; reliability claims need task sampling, Lecture 13.) FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    Because live reruns cannot regenerate replies reliably, record-and-replay substitutes logged inputs at every nondeterministic boundary. Where live execution appends each model call, tool result, clock read, and ID to the log, replay replaces the live model with a stub (a stand-in returning recorded replies), disconnects tools, and feeds those recorded inputs in order. Any unmatched command halts replay rather than issuing a live call. One recording serves three distinct modes. Time travel folds state at any past boundary, such as the exact prompt bytes at turn 18. Harness regression tests revised harness code against recorded inputs. Counterfactual branching forks from a checkpoint with one controlled change inside a sandbox with production effects off and no inherited approvals.
+
+    \notecue{Watch for}{A counterfactual branch succeeding once is a single experiment. Reliability claims require evaluating repeated runs across a sample of tasks, developed in Lecture 13.}
+
+    \notecue{Next}{Slide 30 demonstrates harness regression replay catching an unmatched call in Temporal.}
+  }
 \end{frame}
 
 \begin{frame}{Replay rejected a revised harness at its first unmatched call}
@@ -447,7 +676,14 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Run 2026-10-19 for this lecture (images/data/crash\_run.py and replay.json): Temporal Python SDK 1.34.0 Replayer, history of the keyed run.}
-  \note{[2 min] [CORE] Harness regression replay with a real tool. We saved the keyed run's event history and replayed it twice, with no model, no worker, and no executor. The original harness replayed cleanly. Then a revised harness that runs the test before asking the model: the first command it issued did not match the first event recorded, and the replayer stopped with the error on the right. This is the matching-request rule: every outgoing request is matched against the recording, and a mismatch fails the comparison instead of falling back to a live call. ENGAGE: is this failure a bug? (Expected: it depends on intent. A deliberate change of order is an expected divergence, and the test must declare it; an accidental one is a regression.) WARN: a passing replay proves only that the harness handles this recorded scenario; it says nothing about the agent's competence. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2 min}{Core}%
+    To see that halt rule in action, the saved event history of the keyed Temporal run was replayed twice using Temporal Python SDK 1.34.0 Replayer, with no model, worker, or executor running. The original harness replayed cleanly. Reordering the harness so run\_tests\_keyed executes before call\_model immediately halts with NondeterminismError [TMPRL1100]. That halt enforces the matching-request rule, under which every outgoing command must match the recording and any mismatch fails comparison rather than falling back to a live call. Whether a mismatch is a bug depends on intent. An intentional order change must be declared in the test, whereas an accidental one is a regression.
+
+    \notecue{Watch for}{A clean regression replay proves only harness compatibility on one recorded history, never task competence.}
+
+    \notecue{Next}{When two runs do disagree, Slide 31 shows how to pinpoint their earliest divergence.}
+  }
 \end{frame}
 
 \begin{frame}{Diagnose: where did the two runs first differ?}
@@ -456,7 +692,18 @@
   \mlsyssteps[width=\textwidth,height=4.95cm,keepaspectratio]{diverge_step}{2}\\[0.05cm]
   \small Compare boundary by boundary from a verified checkpoint; stop at the first mismatch.
   \mlsyscredit{After Durable Execution, \S11.7, table 6 and the r18 example.}
-  \note{[2.5 min] [CORE] First-divergence localization. The setup: a replay with a new harness ends with a different patch. ENGAGE: one minute; which boundary would you inspect first, the final patch or something earlier? Step 1: compare every boundary of every turn, in order, under a declared equivalence: the context assembled, the model reply, the harness decision, the tool observation. Turn 18 matches everywhere. At turn 19 the first boundary already differs, before any model call. Step 2: the recorded test result for r18 is identical, but a changed compaction rule (Lecture 4) dropped the note that the regression suite was omitted, while keeping the word ``passed''. Every later difference may be a consequence of that one change. WARN: the localization is a bounded claim. Whether the missing note misled the model is a separate question for a controlled branch; and equal context hashes do not prove equal requests, since decoding settings and the served model may still differ. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{2.5 min}{Core}%
+    After a harness update, two runs of patch r18 yield different final patches, while each turn logs four boundaries (assembled context, model reply, harness decision, tool observation). Where should diagnosis start, and what does the earliest mismatch show?
+
+    \notecue{Check}{Compare boundaries in order from a verified checkpoint under a declared equivalence and stop at the first mismatch (first-divergence localization). Turn 18 matches everywhere, whereas turn 19 differs at context assembly before any model call. The recorded r18 test result matches, yet a changed Lecture 4 compaction rule dropped that the regression suite was omitted while keeping ``passed.'' Later differences can stem from that change; starting at the final patch is tempting yet hides root cause under downstream drift. Segment 4 thus establishes that reproduction replays recorded replies and debugging starts at the first mismatched boundary.}
+
+    \notecue{Watch for}{Localization is a bounded claim. Confirming whether the missing note misled the model requires a controlled branch, and equal context hashes do not verify identical decoding settings or served weights.}
+
+    \notecue{Teach}{Give one minute before revealing the defect.}
+
+    \notecue{Next}{Replay works only while recorded bytes survive, so Slide 32 prices keeping them for a year.}
+  }
 \end{frame}
 
 \begin{frame}{A year of recovery data costs 0.7\% of one attempt}
@@ -464,8 +711,17 @@
   \safeimg[width=0.88\textwidth,height=3.3cm,keepaspectratio]{retention.pdf}\\[0.15cm]
   {\small 12 months at \$23 per TB-month: about 1.5 cents, against a \$2.10 attempt}\\[0.05cm]
   {\small Recovery, replay, and diagnostics each keep their own bytes for their own time.}
-  \mlsyscredit{Durable Execution, NM 11.2 (illustrative). Derived values: images/calcs.py.}
-  \note{[2 min] [OPTIONAL] Recovery retention: what to keep is set by the recovery and replay promise; storage convenience does not decide it. NM 11.2: 30 turns of 4 KB event envelopes and 128 KB of delivered inputs and results make a 3.96 MB log; one 50 MB workspace snapshot brings it to about 54 MB. A year at 23 dollars per terabyte-month costs about 1.5 cents, 0.7 percent of a 2.10 dollar attempt; the log alone is 0.05 percent. The snapshot is 93 percent of the bytes, so the lever is sharing workspace bases by content hash across runs of the same repository. Three lifetimes: current recovery (latest checkpoint, suffix, operation table), historical replay (older checkpoints, delivered inputs), and diagnostics (raw output, profiler traces), which Lecture 14's trace retention governs. ENGAGE: ws\_r18 is deleted but its hash survives in the manifest; can we restore? (Expected: no; a digest identifies bytes, it does not store them.) FLEX: [OPTIONAL].}
+  \mlsyscredit{Durable Execution, NM 11.2 (illustrative). Derived.}
+  \note{%
+    \mlsysnotemeta{2 min}{Optional}%
+    Replay and localization hold only while recorded artifacts remain intact, so pricing a year of storage tests whether cost limits retention. In Napkin Math 11.2 (illustrative), 30 turns with 4 KB event envelopes and 128 KB of delivered inputs and results create a 3.96 MB log; one 50 MB workspace snapshot brings the total to about 54 MB. Keeping 54 MB for 12 months at \$23 per TB-month costs roughly 1.5 cents, or 0.7 percent of a \$2.10 attempt and 0.05 percent for the log alone. Because snapshots are 93 percent of the bytes, sharing repository bases by content hash (a cryptographic fingerprint of the bytes) is the main lever across three lifetimes for active recovery, historical replay, and diagnostic traces (whose retention Lecture 14 develops). Retention therefore follows the recovery and replay promise rather than storage convenience.
+
+    \notecue{Watch for}{Deleting ws\_r18 while keeping its hash in the manifest makes restoration impossible. A digest identifies bytes without storing them.}
+
+    \notecue{Teach}{For a 50-minute class, skip this slide and move to the synthesis retrieval on Slide 33.}
+
+    \notecue{Next}{With logging, intent, checkpoints, and replay in place, Slide 33 returns to the opening test\_r18 crash.}
+  }
 \end{frame}
 
 % =============================================================================
@@ -491,7 +747,18 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Measured runs: images/data/resample.json and summary\_RepairKeyed.json. Durable Execution, \S11.5 and \S11.10.}
-  \note{[3 min] [CORE] Back to the hook. Step 1: retrieval, 60 seconds; students list the steps. Step 2: the resume protocol applied to the worksheet. The restart from the prompt sampled a new path and ran the test again. The durable runtime instead proves the log complete, takes ownership under a new epoch, restores the workspace and folds the log, which shows test\_r18 as dispatched with no result, and probes the executor by operation id; in our keyed run that found job\_tests\_1. Only then does it admit new work. Step 3: read the line. ENGAGE: what does the log still not know? (Expected: whether an in-doubt call took effect when the endpoint offers no probe, and whether a recorded action was right.) Those are the questions Lecture 12, Failure Recovery, takes up. FLEX: [CORE].}
+  \note{%
+    \mlsysnotemeta{3 min}{Core}%
+    Return to the opening hook, where 30 prompt restarts chose 8 distinct first steps and launched 5 duplicate tests. Using everything the four segments built, list in order the five stages the replacement worker must run on test\_r18 before executing any new action.
+
+    \notecue{Check}{The five ordered stages are proving the authoritative log complete, taking fenced ownership under epoch 8, restoring ws\_r18 and folding the suffix without calling the model, probing test\_r18 by operation ID to recover job\_tests\_1, and admitting new work under live limits. A tempting shortcut is retrying or admitting immediately after restoring state, risking split-brain writes or duplicate jobs. That answers today's driving question, because writing durable intent before dispatch kept the test visible and its identity let one job settle the retry.}
+
+    \notecue{Watch for}{Even a complete log cannot tell whether an in-doubt call ran on an endpoint with no probe, nor whether a recorded action was right.}
+
+    \notecue{Teach}{Give 60 seconds of retrieval to list the five stages in order before revealing the table, then ask what the log still cannot answer.}
+
+    \notecue{Next}{Slide 34 distills those mechanisms into four lecture takeaways.}
+  }
 \end{frame}
 
 \begin{frame}{Takeaways}
@@ -499,7 +766,14 @@
   \thumbline{thumb_intent.pdf}{The intent is durable before dispatch, under a named failure domain; absence proves nothing in an incomplete log.}\\[0.12cm]
   \thumbline{thumb_cadence.pdf}{Logging each turn lengthens the optimal checkpoint stride about 14 times; resume reconciles before it admits.}\\[0.12cm]
   \thumbline{thumb_replay.pdf}{Reproduction replays recorded replies; debugging starts at the first mismatched boundary.}
-  \note{[1 min] [CORE] One line per segment. Ask students which slide taught each line. If short on time, read the first two.}
+  \note{%
+    \mlsysnotemeta{1 min}{Core}%
+    Together, the four segments close both the horizon and state exposures across worker crashes. Recovery folds an append-only log rather than trusting the context window. Under the principle of intent before effect, durable intent precedes dispatch within a named failure domain, while absence proves nothing in an incomplete log. Logging stretches the optimal checkpoint stride about 14 times, and fenced resume reconciles before admitting new work. Finally, reproduction replays recorded replies rather than rerunning the model, while debugging stops at the first mismatched boundary. Test recall by naming which experiment or case proved each claim.
+
+    \notecue{Teach}{Ask which slide proved each claim. If short on time, read only the first two takeaways aloud.}
+
+    \notecue{Next}{Slide 35 closes the technical material with design choices that durable logs leave unsettled.}
+  }
 \end{frame}
 
 \begin{frame}{Open questions}
@@ -509,20 +783,33 @@
     \item A hosted model can change underneath a long run. How should a runtime record what it called, when the provider does not say?
     \item Recovery data is cheap to keep, but it holds prompts, outputs, and secrets that leaked into tools. Who decides how long it lives?
   \end{itemize}
-  \note{[1 min] [OPTIONAL] No single answer. The first follows from settlement before retry: without a probe or a key, an in-doubt call has no safe repeat. The second follows from the chapter's request to log available provider provenance and record its gaps. The third sets retention cost (about 1.5 cents a year) against privacy, which Lecture 14 takes up with trace retention.}
+  \note{%
+    \mlsysnotemeta{1 min}{Optional}%
+    Even when durable logging works as designed, three boundaries resist a single standard policy. First, when an endpoint offers neither status queries nor idempotency keys, should the runtime refuse it, wrap it, or escalate every in-doubt call under Lecture 7's settlement-before-retry rule? Second, how should a runtime record provider provenance (available model checkpoint, serving-stack, and configuration metadata, plus any gaps) when hosted models change silently during long runs? Third, cheap retention (about 1.5 cents per year) collides with privacy when logs capture prompts, outputs, and leaked credentials, a tradeoff Lecture 14 develops.
+
+    \notecue{Teach}{For a 50-minute class, skip this slide and move directly to the reading guide on Slide 36.}
+
+    \notecue{Next}{Slide 36 points to chapter sections, interactive figures, and foundational papers.}
+  }
 \end{frame}
 
 \begin{frame}{Read and explore}
-  \small
-  \begin{itemize}\setlength{\itemsep}{0.02cm}
+  \footnotesize
+  \begin{itemize}\setlength{\itemsep}{0.05cm}
     \item \textbf{Read:} Durable Execution, \S11.2 to \S11.8; Checkpoints 11.1 to 11.4; Napkin Math 11.1 and 11.2 by hand; exercises 1, 3, and 8.
+    \item \textbf{Explore:} interactive \emph{Trajectory Log Fold}, \emph{Durable Intent Zones}, and \emph{Checkpoint Binding} figures on mlsysbook.ai.
     \item Mohan et al., ``ARIES,'' ACM TODS, 1992: write-ahead logging and repeating history.
     \item Young, ``A First Order Approximation to the Optimum Checkpoint Interval,'' CACM, 1974.
     \item Elnozahy et al., ``A Survey of Rollback-Recovery Protocols,'' ACM Computing Surveys, 2002.
     \item Helland, ``Life Beyond Distributed Transactions,'' CIDR 2007: idempotent messages across boundaries.
     \item Burckhardt et al., ``Durable Functions,'' OOPSLA 2021: semantics of durable workflows.
   \end{itemize}
-  \note{[1 min] [CORE] The chapter first, with its four checkpoints; exercise 8 prices the replica pitfall for the remediation fleet. ARIES is the complete write-ahead recovery method. Young derives the checkpoint interval. Elnozahy et al. explain why logging nondeterministic inputs changes what a checkpoint must hold. Helland explains why systems across ownership boundaries use idempotent, identified messages. Burckhardt et al. give a formal semantics for durable workflows like the one we crashed. FLEX: add the lab your course uses; the scripts in images/data rerun every measurement in this lecture.}
+  \note{%
+    \mlsysnotemeta{1 min}{Core}%
+    Start with Durable Execution \S11.2 to \S11.8, Checkpoints 11.1 to 11.4, Napkin Math 11.1 and 11.2, Exercise 8 (which prices the stale-replica pitfall for the remediation fleet), and the interactive figures on mlsysbook.ai. Each paper anchors one mechanism from this lecture. ARIES (Mohan et al. 1992) covers write-ahead redo and undo, Young (1974) derives the optimal checkpoint interval behind checkpoint stride, and Elnozahy et al. (2002) surveys rollback-recovery with logged nondeterminism. Helland (2007) develops identified idempotent messages across boundaries, and Burckhardt et al. (2021) formalizes durable workflow semantics. The scripts in images/data rerun every measurement shown in this lecture.
+
+    \notecue{Next}{Slide 37 bridges to Lecture 12 on handling external state that remains half changed even with a complete log.}
+  }
 \end{frame}
 
 \begin{frame}[c]
@@ -532,10 +819,15 @@
     \end{column}
     \begin{column}{0.62\textwidth}
       {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} FAILURE RECOVERY}}\\[0.5cm]
-      {\LARGE\bfseries The log records every step. Why can a recovered run still leave the world half changed?}
+      {\LARGE\bfseries Even when the log records every step, why can a recovered run still leave external state half changed?}
     \end{column}
   \end{columns}
-  \note{[0.5 min] [CORE] Today kept the record. Lecture 12 decides what to do with what the record cannot settle: retries an endpoint permits, compensations registered before the effects they undo, and watchdogs for runs that fail without raising an error.}
+  \note{%
+    \mlsysnotemeta{0.5 min}{Core}%
+    Durable execution ensures that the trajectory's control record survives worker crashes and keeps in-doubt calls visible. Yet even when every step is logged, remote endpoints hold external effects that a local log cannot undo, leaving the outside world half changed when a multi-step run fails partway through.
+
+    \notecue{Next}{Lecture 12 (Failure Recovery) builds safe retries, pre-registered compensating actions, step ordering around irreversible points of no return, and loop watchdogs that stop runs failing without raising an error.}
+  }
 \end{frame}
 
 \end{document}

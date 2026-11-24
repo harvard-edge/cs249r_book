@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
+
 from mlsysim.core.units import ureg
-from .constants import SPEED_OF_LIGHT_FIBER_KM_S
+from .constants import EARTH_MEAN_RADIUS, SPEED_OF_LIGHT_FIBER_KM_S
 
 from ._units import _ensure_unit
 
@@ -89,9 +91,7 @@ def calc_great_circle_distance(lat1_deg, lon1_deg, lat2_deg, lon2_deg):
     >>> calc_great_circle_distance(0, 0, 0, 90) == calc_great_circle_distance(0, 90, 0, 0)
     True
     """
-    import math
-    from .constants import EARTH_MEAN_RADIUS
-
     la1, lo1, la2, lo2 = map(math.radians, (lat1_deg, lon1_deg, lat2_deg, lon2_deg))
     h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
+    h = min(1.0, max(0.0, h))
     return (2 * math.asin(math.sqrt(h)) * EARTH_MEAN_RADIUS).to(ureg.kilometer)

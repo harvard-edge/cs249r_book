@@ -6,7 +6,7 @@ Scale. Values computed here are labeled "derived" on the figure or its
 slide; constructed scenarios from the chapter are labeled "illustrative".
 
   - Hook timeline (OPS Example 12.2, illustrative scenario): 25,000 QPS
-    ranking model, latency gate < 12 ms, an upstream schema change makes a
+    ranking model, latency limit < 12 ms, an upstream schema change makes a
     user-affinity feature null for 8 percent of queries, imputed as 0.0;
     HTTP errors and latency normal; conversion down 3.2 percent for 48 h.
   - Operational load sketch (OPS Sec. 12.2, figure 1, same code shapes):
@@ -71,8 +71,8 @@ from types import SimpleNamespace
 import sys as _sys; from pathlib import Path as _Path; _sys.path.insert(0, str(_Path(__file__).resolve().parents[3] / "mlsysim"))
 from mlsysim.core.units import Q_
 import mlsysim
-_VALS = {'hook_qps': '25,000', 'hook_gate_ms': '12', 'hook_null_pct': '8', 'hook_conv_pct': '3.2', 'hook_hours': '48', 'load_cross_round': '50', 'load_conflicts_100': '5,000', 'load_alerts_100': '2,000', 'fbl_models': '1,000,000', 'fbl_runs': '500,000', 'fbl_authors': '150', 'fbl_eng_pct': '25', 'fbl_pred_m': '6', 'redef_models': '14', 'redef_models_word': 'fourteen', 'redef_teams': '5', 'redef_teams_word': 'five', 'redef_acc_pct': '12', 'redef_debug_h': '18', 'al_models': '100', 'al_metrics': '10', 'al_interval_min': '5', 'al_monitors': '1,000', 'al_checks_day': '288', 'al_p3': '0.003', 'al_daily3': '864', 'al_p2': '0.05', 'al_p2_pct': '5', 'al_daily2': '14,400', 'al_dedup_pct': '99', 'al_left': '144', 'al_any3': '0.95', 'fs_recs_b': '1', 'fs_features': '100', 'fs_lookups_b': '100', 'fs_lookups_m': '1.16', 'fs_budget_ms': '50', 'fs_store_lo_ms': '5', 'fs_store_hi_ms': '10', 'pit_before': '4', 'pit_before_word': 'four', 'pit_day': '10', 'pit_day_word': 'ten', 'pit_ratio': '2.5', 'fh_users_m': '100', 'fh_features': '1,000', 'fh_values_t': '876', 'fh_row_b': '32', 'fh_pb': '28', 'breck_pipelines': '700', 'breck_days': '30', 'breck_new_pct': '10', 'breck_missing_pct': '6', 'breck_category_pct': '6', 'breck_few_pct': '3', 'breck_gone_pct': '3', 'tfx_play_pct': '2', 'tfx_load_lo': '500', 'tfx_load_hi': '1,500', 'tfx_own_lo': '75', 'tfx_own_hi': '150', 'tfx_ratio_lo': '7', 'tfx_ratio_hi': '10', 'fc_ctr_before': '4.2', 'fc_ctr_after': '3.87', 'fc_drop_pct': '8', 'fc_drop': '0.08', 'fc_revenue_m': '15', 'fc_days': '5', 'fc_days_word': 'five', 'fc_week_days': '7', 'fc_loss_k': '857', 'fc_alert_h': '4', 'fc_undetected_h': '120', 'fc_alert_loss_k': '28.6', 'fc_window_ratio': '30', 'fc_reduction_pct': '97', 'fc_slo_h': '1', 'fc_mean_before': '0.42', 'fc_mean_after': '0.31', 'fc_band_pct': '10', 'exp_full_pct': '100', 'exp_canary_pct': '5', 'exp_ratio': '20', 'click_ctr_before': '5', 'click_ctr_after': '4.5', 'click_drop_pt': '0.5', 'click_drop': '0.005', 'click_qps': '5,000', 'click_requests_m': '432', 'click_lost_m': '2.16', 'click_loss_m': '1.08', 'click_value': '0.50', 'click_loss_hour_k': '45', 'canary_samples': '10,000', 'canary_rate_exp': '6', 'canary_rate_m': '1', 'canary_p1': '0.01', 'canary_p1_pct': '1', 'canary_t1_h': '1', 'canary_p2_pct': '5', 'canary_t2_min': '12', 'canary_d1_h': '2', 'canary_d2_min': '30', 'canary_p3_pct': '25', 'canary_p4_pct': '50', 'canary_total_h': '4', 'mde_p': '0.05', 'mde_d': '0.005', 'mde_za': '1.96', 'mde_zb': '0.84', 'mde_z2': '7.84', 'mde_var': '0.095', 'mde_d2': '0.000025', 'mde_n': '29,792', 'mde_d_pt': '0.5', 'mde_total_round': '60,000', 'mde_req_m': '1', 'mde_hours_bound': '2', 'mde2_p_pct': '1', 'mde2_d_pt': '0.05', 'mde2_n': '620,928', 'mde2_hours': '30', 'fw_tests': '20', 'fw_tests_word': 'twenty', 'fw_conf': '0.95', 'fw_pct': '64', 'netflix_mult': '100', 'psi_review': '0.25', 'slo_fresh': '1.30', 'slo_mean': '0.70', 'sre_slo_pct': '99.9', 'sre_days': '30', 'sre_hours': '720', 'sre_fast_burn': '14.4', 'sre_fast_spent_pct': '2', 'sre_slow_burn': '6', 'sre_slow_spent_pct': '5', 'sre_ticket_burn': '1', 'sre_ticket_spent_pct': '10', 'sre_fast_window_word': 'one', 'sre_fast_window_h': '1', 'sre_slow_window_h': '6', 'sre_ticket_window_d': '3', 'meta_peak_h': '15', 'meta_peak_m': '40', 'meta_start_h': '15', 'meta_start_m': '50', 'meta_end_h': '21', 'meta_end_m': '20', 'meta_return_h': '21', 'meta_return_m': '17', 'meta_hours': '5.5', 'meta_dns': '30', 'philly_jobs': '96,260', 'philly_months_word': 'two', 'philly_pass_pct': '69', 'philly_killed_pct': '14', 'philly_failed_pct': '17', 'philly_killed_time': '37.7', 'philly_failed_time': '17.8', 'philly_lost_pct': '55', 'philly_util_pct': '52', 'own_gpus': '1,024', 'own_nodes': '128', 'gpus_per_node': '8', 'own_hw_m': '44.8', 'node_price_k': '350', 'node_price': '350,000', 'own_net_m': '5', 'own_fac_m': '10', 'own_upfront_m': '59.8', 'own_opex_m': '1.5', 'rent_rate': '4', 'own_util_pct': '80', 'own_rent_month_m': '2.39', 'own_cross_months': '26.4', 'own_years_word': 'three', 'own_life_months': '36', 'half_util_pct': '50', 'half_rent_month_m': '1.50', 'be_node': '42.5', 'be_1k': '59.7', 'be_10k': '53.9', 'run_owned_m': '3.6', 'runs_per_year_word': 'six', 'run_rent_lo_m': '1.4', 'run_rent_hi_m': '2.8', 'tenk_gpus': '10,000', 'tenk_exp': '4', 'tenk_nodes': '1,250', 'tenk_hw_m': '437.5', 'tenk_net_m': '25', 'tenk_fac_m': '75', 'tenk_upfront_m': '537.5', 'tenk_power_m': '4.7', 'tenk_staff_m': '5', 'tenk_opex_m': '9.7', 'tenk_years': '3', 'tenk_years_word': 'three', 'tenk_owned_m': '566.7', 'tenk_tdp_w': '700', 'tenk_pue': '1.1', 'hours_per_year': '8,760', 'kwh_price': '0.07', 'tenk_util': '0.8', 'tenk_rent_year_m': '280.3', 'tenk_rent_total_m': '841.0', 'tenk_saving_m': '274.3', 'tenk_full_m': '1,051.2', 'tenk_hours': '26,280', 'tco_startup': '47,500', 'tco_startup_dom_pct': '84', 'tco_company': '980,000', 'tco_company_dom_pct': '41', 'int8_cost_k': '80', 'int8_bill_k': '400', 'int8_cut_pct': '40', 'int8_weeks_word': 'two', 'train_payback_months': '1.8', 'platform_models': '50', 'platform_hours': '20', 'platform_rate': '150', 'platform_cost': '120,000', 'platform_bcr': '1.25', 'platform_low_models': '20'}
-_NUMS = {'hook_qps': 25000.0, 'hook_gate_ms': 12.0, 'hook_null_pct': 8.0, 'hook_conv_pct': 3.2, 'hook_hours': 48.0, 'load_cross_round': 50.0, 'load_conflicts_100': 5000.0, 'load_alerts_100': 2000.0, 'fbl_models': 1000000.0, 'fbl_runs': 500000.0, 'fbl_authors': 150.0, 'fbl_eng_pct': 25.0, 'fbl_pred_m': 6.0, 'redef_models': 14.0, 'redef_teams': 5.0, 'redef_acc_pct': 12.0, 'redef_debug_h': 18.0, 'al_models': 100.0, 'al_metrics': 10.0, 'al_interval_min': 5.0, 'al_monitors': 1000.0, 'al_checks_day': 288.0, 'al_p3': 0.003, 'al_daily3': 864.0, 'al_p2': 0.05, 'al_p2_pct': 5.0, 'al_daily2': 14400.0, 'al_dedup_pct': 99.0, 'al_left': 144.0, 'al_any3': 0.95, 'fs_recs_b': 1.0, 'fs_features': 100.0, 'fs_lookups_b': 100.0, 'fs_lookups_m': 1.16, 'fs_budget_ms': 50.0, 'fs_store_lo_ms': 5.0, 'fs_store_hi_ms': 10.0, 'pit_before': 4.0, 'pit_day': 10.0, 'pit_ratio': 2.5, 'fh_users_m': 100.0, 'fh_features': 1000.0, 'fh_values_t': 876.0, 'fh_row_b': 32.0, 'fh_pb': 28.0, 'breck_pipelines': 700.0, 'breck_days': 30.0, 'breck_new_pct': 10.0, 'breck_missing_pct': 6.0, 'breck_category_pct': 6.0, 'breck_few_pct': 3.0, 'breck_gone_pct': 3.0, 'tfx_play_pct': 2.0, 'tfx_load_lo': 500.0, 'tfx_load_hi': 1500.0, 'tfx_own_lo': 75.0, 'tfx_own_hi': 150.0, 'tfx_ratio_lo': 7.0, 'tfx_ratio_hi': 10.0, 'fc_ctr_before': 4.2, 'fc_ctr_after': 3.87, 'fc_drop_pct': 8.0, 'fc_drop': 0.08, 'fc_revenue_m': 15.0, 'fc_days': 5.0, 'fc_week_days': 7.0, 'fc_loss_k': 857.0, 'fc_alert_h': 4.0, 'fc_undetected_h': 120.0, 'fc_alert_loss_k': 28.6, 'fc_window_ratio': 30.0, 'fc_reduction_pct': 97.0, 'fc_slo_h': 1.0, 'fc_mean_before': 0.42, 'fc_mean_after': 0.31, 'fc_band_pct': 10.0, 'exp_full_pct': 100.0, 'exp_canary_pct': 5.0, 'exp_ratio': 20.0, 'click_ctr_before': 5.0, 'click_ctr_after': 4.5, 'click_drop_pt': 0.5, 'click_drop': 0.005, 'click_qps': 5000.0, 'click_requests_m': 432.0, 'click_lost_m': 2.16, 'click_loss_m': 1.08, 'click_value': 0.5, 'click_loss_hour_k': 45.0, 'canary_samples': 10000.0, 'canary_rate_exp': 6.0, 'canary_rate_m': 1.0, 'canary_p1': 0.01, 'canary_p1_pct': 1.0, 'canary_t1_h': 1.0, 'canary_p2_pct': 5.0, 'canary_t2_min': 12.0, 'canary_d1_h': 2.0, 'canary_d2_min': 30.0, 'canary_p3_pct': 25.0, 'canary_p4_pct': 50.0, 'canary_total_h': 4.0, 'mde_p': 0.05, 'mde_d': 0.005, 'mde_za': 1.96, 'mde_zb': 0.84, 'mde_z2': 7.84, 'mde_var': 0.095, 'mde_d2': 2.5e-05, 'mde_n': 29792.0, 'mde_d_pt': 0.5, 'mde_total_round': 60000.0, 'mde_req_m': 1.0, 'mde_hours_bound': 2.0, 'mde2_p_pct': 1.0, 'mde2_d_pt': 0.05, 'mde2_n': 620928.0, 'mde2_hours': 30.0, 'fw_tests': 20.0, 'fw_conf': 0.95, 'fw_pct': 64.0, 'netflix_mult': 100.0, 'psi_review': 0.25, 'slo_fresh': 1.3, 'slo_mean': 0.7, 'sre_slo_pct': 99.9, 'sre_days': 30.0, 'sre_hours': 720.0, 'sre_fast_burn': 14.4, 'sre_fast_spent_pct': 2.0, 'sre_slow_burn': 6.0, 'sre_slow_spent_pct': 5.0, 'sre_ticket_burn': 1.0, 'sre_ticket_spent_pct': 10.0, 'sre_fast_window_h': 1.0, 'sre_slow_window_h': 6.0, 'sre_ticket_window_d': 3.0, 'meta_peak_h': 15.0, 'meta_peak_m': 40.0, 'meta_start_h': 15.0, 'meta_start_m': 50.0, 'meta_end_h': 21.0, 'meta_end_m': 20.0, 'meta_return_h': 21.0, 'meta_return_m': 17.0, 'meta_hours': 5.5, 'meta_dns': 30.0, 'philly_jobs': 96260.0, 'philly_pass_pct': 69.0, 'philly_killed_pct': 14.0, 'philly_failed_pct': 17.0, 'philly_killed_time': 37.7, 'philly_failed_time': 17.8, 'philly_lost_pct': 55.0, 'philly_util_pct': 52.0, 'own_gpus': 1024.0, 'own_nodes': 128.0, 'gpus_per_node': 8.0, 'own_hw_m': 44.8, 'node_price_k': 350.0, 'node_price': 350000.0, 'own_net_m': 5.0, 'own_fac_m': 10.0, 'own_upfront_m': 59.8, 'own_opex_m': 1.5, 'rent_rate': 4.0, 'own_util_pct': 80.0, 'own_rent_month_m': 2.39, 'own_cross_months': 26.4, 'own_life_months': 36.0, 'half_util_pct': 50.0, 'half_rent_month_m': 1.5, 'be_node': 42.5, 'be_1k': 59.7, 'be_10k': 53.9, 'run_owned_m': 3.6, 'run_rent_lo_m': 1.4, 'run_rent_hi_m': 2.8, 'tenk_gpus': 10000.0, 'tenk_exp': 4.0, 'tenk_nodes': 1250.0, 'tenk_hw_m': 437.5, 'tenk_net_m': 25.0, 'tenk_fac_m': 75.0, 'tenk_upfront_m': 537.5, 'tenk_power_m': 4.7, 'tenk_staff_m': 5.0, 'tenk_opex_m': 9.7, 'tenk_years': 3.0, 'tenk_owned_m': 566.7, 'tenk_tdp_w': 700.0, 'tenk_pue': 1.1, 'hours_per_year': 8760.0, 'kwh_price': 0.07, 'tenk_util': 0.8, 'tenk_rent_year_m': 280.3, 'tenk_rent_total_m': 841.0, 'tenk_saving_m': 274.3, 'tenk_full_m': 1051.2, 'tenk_hours': 26280.0, 'tco_startup': 47500.0, 'tco_startup_dom_pct': 84.0, 'tco_company': 980000.0, 'tco_company_dom_pct': 41.0, 'int8_cost_k': 80.0, 'int8_bill_k': 400.0, 'int8_cut_pct': 40.0, 'train_payback_months': 1.8, 'platform_models': 50.0, 'platform_hours': 20.0, 'platform_rate': 150.0, 'platform_cost': 120000.0, 'platform_bcr': 1.25, 'platform_low_models': 20.0}
+_VALS = {'hook_qps': '25,000', 'hook_gate_ms': '12', 'hook_null_pct': '8', 'hook_conv_pct': '3.2', 'hook_hours': '48', 'load_cross_round': '50', 'load_conflicts_100': '5,000', 'load_alerts_100': '2,000', 'fbl_models': '1,000,000', 'fbl_runs': '500,000', 'fbl_authors': '150', 'fbl_eng_pct': '25', 'fbl_pred_m': '6', 'redef_models': '14', 'redef_models_word': 'fourteen', 'redef_teams': '5', 'redef_teams_word': 'five', 'redef_acc_pct': '12', 'redef_debug_h': '18', 'al_models': '100', 'al_metrics': '10', 'al_interval_min': '5', 'al_monitors': '1,000', 'al_checks_day': '288', 'al_p3': '0.003', 'al_daily3': '864', 'al_p2': '0.05', 'al_p2_pct': '5', 'al_daily2': '14,400', 'al_dedup_pct': '99', 'al_left': '144', 'al_any3': '0.95', 'fs_recs_b': '1', 'fs_features': '100', 'fs_lookups_b': '100', 'fs_lookups_m': '1.16', 'fs_budget_ms': '50', 'fs_store_lo_ms': '5', 'fs_store_hi_ms': '10', 'pit_before': '4', 'pit_before_word': 'four', 'pit_day': '10', 'pit_day_word': 'ten', 'pit_ratio': '2.5', 'fh_users_m': '100', 'fh_features': '1,000', 'fh_values_t': '876', 'fh_row_b': '32', 'fh_pb': '28', 'breck_pipelines': '700', 'breck_days': '30', 'breck_new_pct': '10', 'breck_missing_pct': '6', 'breck_category_pct': '6', 'breck_few_pct': '3', 'breck_gone_pct': '3', 'tfx_play_pct': '2', 'tfx_load_lo': '500', 'tfx_load_hi': '1,500', 'tfx_own_lo': '75', 'tfx_own_hi': '150', 'tfx_ratio_lo': '7', 'tfx_ratio_hi': '10', 'fc_ctr_before': '4.2', 'fc_ctr_after': '3.87', 'fc_drop_pct': '8', 'fc_drop': '0.08', 'fc_revenue_m': '15', 'fc_days': '5', 'fc_days_word': 'five', 'fc_week_days': '7', 'fc_loss_k': '857', 'fc_alert_h': '4', 'fc_undetected_h': '120', 'fc_alert_loss_k': '28.6', 'fc_window_ratio': '30', 'fc_reduction_pct': '97', 'fc_slo_h': '1', 'fc_mean_before': '0.42', 'fc_mean_after': '0.31', 'fc_band_pct': '10', 'exp_full_pct': '100', 'exp_canary_pct': '5', 'exp_ratio': '20', 'click_ctr_before': '5', 'click_ctr_after': '4.5', 'click_drop_pt': '0.5', 'click_drop': '0.005', 'click_qps': '5,000', 'click_requests_m': '432', 'click_lost_m': '2.16', 'click_loss_m': '1.08', 'click_value': '0.50', 'click_loss_hour_k': '45', 'canary_samples': '10,000', 'canary_rate_exp': '6', 'canary_rate_m': '1', 'canary_p1': '0.01', 'canary_p1_pct': '1', 'canary_t1_h': '1', 'canary_p2_pct': '5', 'canary_t2_min': '12', 'canary_d1_h': '2', 'canary_d2_min': '30', 'canary_p3_pct': '25', 'canary_p4_pct': '50', 'canary_total_h': '4', 'mde_p': '0.05', 'mde_d': '0.005', 'mde_za': '1.96', 'mde_zb': '0.84', 'mde_z2': '7.84', 'mde_var': '0.095', 'mde_d2': '0.000025', 'mde_n': '29,792', 'mde_d_pt': '0.5', 'mde_total_round': '60,000', 'mde_req_m': '1', 'mde_hours_bound': '2', 'mde2_p_pct': '1', 'mde2_d_pt': '0.05', 'mde2_n': '620,928', 'mde2_hours': '30', 'fw_tests': '20', 'fw_tests_word': 'twenty', 'fw_conf': '0.95', 'fw_pct': '64', 'netflix_mult': '100', 'psi_review': '0.25', 'slo_fresh': '1.30', 'slo_mean': '0.70', 'sre_slo_pct': '99.9', 'sre_days': '30', 'sre_hours': '720', 'sre_fast_burn': '14.4', 'sre_fast_spent_pct': '2', 'sre_slow_burn': '6', 'sre_slow_spent_pct': '5', 'sre_ticket_burn': '1', 'sre_ticket_spent_pct': '10', 'sre_fast_window_word': 'one', 'sre_fast_window_h': '1', 'sre_slow_window_h': '6', 'sre_ticket_window_d': '3', 'meta_peak_h': '15', 'meta_peak_m': '40', 'meta_start_h': '15', 'meta_start_m': '50', 'meta_end_h': '21', 'meta_end_m': '20', 'meta_return_h': '21', 'meta_return_m': '17', 'meta_hours': '5.5', 'meta_dns': '30', 'philly_jobs': '96,260', 'philly_months_word': 'two', 'philly_pass_pct': '69', 'philly_killed_pct': '14', 'philly_failed_pct': '17', 'philly_killed_time': '37.7', 'philly_failed_time': '17.8', 'philly_lost_pct': '55', 'philly_util_pct': '52', 'own_gpus': '1,024', 'own_nodes': '128', 'gpus_per_node': '8', 'own_hw_m': '44.8', 'node_price_k': '350', 'node_price': '350,000', 'own_net_m': '5', 'own_fac_m': '10', 'own_upfront_m': '59.8', 'own_opex_m': '1.5', 'rent_rate': '4', 'own_util_pct': '80', 'own_rent_month_m': '2.39', 'own_cross_months': '26.4', 'own_years_word': 'three', 'own_life_months': '36', 'half_util_pct': '50', 'half_rent_month_m': '1.50', 'be_node': '42.4', 'be_1k': '59.7', 'be_10k': '53.9', 'run_owned_m': '3.6', 'runs_per_year_word': 'six', 'run_rent_lo_m': '1.4', 'run_rent_hi_m': '2.8', 'tenk_gpus': '10,000', 'tenk_exp': '4', 'tenk_nodes': '1,250', 'tenk_hw_m': '437.5', 'tenk_net_m': '25', 'tenk_fac_m': '75', 'tenk_upfront_m': '537.5', 'tenk_power_m': '4.7', 'tenk_staff_m': '5', 'tenk_opex_m': '9.7', 'tenk_years': '3', 'tenk_years_word': 'three', 'tenk_owned_m': '566.7', 'tenk_tdp_w': '700', 'tenk_pue': '1.1', 'hours_per_year': '8,760', 'kwh_price': '0.07', 'tenk_util': '0.8', 'tenk_rent_year_m': '280.3', 'tenk_rent_total_m': '841.0', 'tenk_saving_m': '274.3', 'tenk_full_m': '1,051.2', 'tenk_hours': '26,280', 'tco_startup': '47,500', 'tco_startup_dom_pct': '84', 'tco_company': '980,000', 'tco_company_dom_pct': '41', 'int8_cost_k': '80', 'int8_bill_k': '400', 'int8_cut_pct': '40', 'int8_weeks_word': 'two', 'train_payback_months': '1.8', 'platform_models': '50', 'platform_hours': '20', 'platform_rate': '150', 'platform_cost': '120,000', 'platform_bcr': '1.25', 'platform_low_models': '20'}
+_NUMS = {'hook_qps': 25000.0, 'hook_gate_ms': 12.0, 'hook_null_pct': 8.0, 'hook_conv_pct': 3.2, 'hook_hours': 48.0, 'load_cross_round': 50.0, 'load_conflicts_100': 5000.0, 'load_alerts_100': 2000.0, 'fbl_models': 1000000.0, 'fbl_runs': 500000.0, 'fbl_authors': 150.0, 'fbl_eng_pct': 25.0, 'fbl_pred_m': 6.0, 'redef_models': 14.0, 'redef_teams': 5.0, 'redef_acc_pct': 12.0, 'redef_debug_h': 18.0, 'al_models': 100.0, 'al_metrics': 10.0, 'al_interval_min': 5.0, 'al_monitors': 1000.0, 'al_checks_day': 288.0, 'al_p3': 0.003, 'al_daily3': 864.0, 'al_p2': 0.05, 'al_p2_pct': 5.0, 'al_daily2': 14400.0, 'al_dedup_pct': 99.0, 'al_left': 144.0, 'al_any3': 0.95, 'fs_recs_b': 1.0, 'fs_features': 100.0, 'fs_lookups_b': 100.0, 'fs_lookups_m': 1.16, 'fs_budget_ms': 50.0, 'fs_store_lo_ms': 5.0, 'fs_store_hi_ms': 10.0, 'pit_before': 4.0, 'pit_day': 10.0, 'pit_ratio': 2.5, 'fh_users_m': 100.0, 'fh_features': 1000.0, 'fh_values_t': 876.0, 'fh_row_b': 32.0, 'fh_pb': 28.0, 'breck_pipelines': 700.0, 'breck_days': 30.0, 'breck_new_pct': 10.0, 'breck_missing_pct': 6.0, 'breck_category_pct': 6.0, 'breck_few_pct': 3.0, 'breck_gone_pct': 3.0, 'tfx_play_pct': 2.0, 'tfx_load_lo': 500.0, 'tfx_load_hi': 1500.0, 'tfx_own_lo': 75.0, 'tfx_own_hi': 150.0, 'tfx_ratio_lo': 7.0, 'tfx_ratio_hi': 10.0, 'fc_ctr_before': 4.2, 'fc_ctr_after': 3.87, 'fc_drop_pct': 8.0, 'fc_drop': 0.08, 'fc_revenue_m': 15.0, 'fc_days': 5.0, 'fc_week_days': 7.0, 'fc_loss_k': 857.0, 'fc_alert_h': 4.0, 'fc_undetected_h': 120.0, 'fc_alert_loss_k': 28.6, 'fc_window_ratio': 30.0, 'fc_reduction_pct': 97.0, 'fc_slo_h': 1.0, 'fc_mean_before': 0.42, 'fc_mean_after': 0.31, 'fc_band_pct': 10.0, 'exp_full_pct': 100.0, 'exp_canary_pct': 5.0, 'exp_ratio': 20.0, 'click_ctr_before': 5.0, 'click_ctr_after': 4.5, 'click_drop_pt': 0.5, 'click_drop': 0.005, 'click_qps': 5000.0, 'click_requests_m': 432.0, 'click_lost_m': 2.16, 'click_loss_m': 1.08, 'click_value': 0.5, 'click_loss_hour_k': 45.0, 'canary_samples': 10000.0, 'canary_rate_exp': 6.0, 'canary_rate_m': 1.0, 'canary_p1': 0.01, 'canary_p1_pct': 1.0, 'canary_t1_h': 1.0, 'canary_p2_pct': 5.0, 'canary_t2_min': 12.0, 'canary_d1_h': 2.0, 'canary_d2_min': 30.0, 'canary_p3_pct': 25.0, 'canary_p4_pct': 50.0, 'canary_total_h': 4.0, 'mde_p': 0.05, 'mde_d': 0.005, 'mde_za': 1.96, 'mde_zb': 0.84, 'mde_z2': 7.84, 'mde_var': 0.095, 'mde_d2': 2.5e-05, 'mde_n': 29792.0, 'mde_d_pt': 0.5, 'mde_total_round': 60000.0, 'mde_req_m': 1.0, 'mde_hours_bound': 2.0, 'mde2_p_pct': 1.0, 'mde2_d_pt': 0.05, 'mde2_n': 620928.0, 'mde2_hours': 30.0, 'fw_tests': 20.0, 'fw_conf': 0.95, 'fw_pct': 64.0, 'netflix_mult': 100.0, 'psi_review': 0.25, 'slo_fresh': 1.3, 'slo_mean': 0.7, 'sre_slo_pct': 99.9, 'sre_days': 30.0, 'sre_hours': 720.0, 'sre_fast_burn': 14.4, 'sre_fast_spent_pct': 2.0, 'sre_slow_burn': 6.0, 'sre_slow_spent_pct': 5.0, 'sre_ticket_burn': 1.0, 'sre_ticket_spent_pct': 10.0, 'sre_fast_window_h': 1.0, 'sre_slow_window_h': 6.0, 'sre_ticket_window_d': 3.0, 'meta_peak_h': 15.0, 'meta_peak_m': 40.0, 'meta_start_h': 15.0, 'meta_start_m': 50.0, 'meta_end_h': 21.0, 'meta_end_m': 20.0, 'meta_return_h': 21.0, 'meta_return_m': 17.0, 'meta_hours': 5.5, 'meta_dns': 30.0, 'philly_jobs': 96260.0, 'philly_pass_pct': 69.0, 'philly_killed_pct': 14.0, 'philly_failed_pct': 17.0, 'philly_killed_time': 37.7, 'philly_failed_time': 17.8, 'philly_lost_pct': 55.0, 'philly_util_pct': 52.0, 'own_gpus': 1024.0, 'own_nodes': 128.0, 'gpus_per_node': 8.0, 'own_hw_m': 44.8, 'node_price_k': 350.0, 'node_price': 350000.0, 'own_net_m': 5.0, 'own_fac_m': 10.0, 'own_upfront_m': 59.8, 'own_opex_m': 1.5, 'rent_rate': 4.0, 'own_util_pct': 80.0, 'own_rent_month_m': 2.39, 'own_cross_months': 26.4, 'own_life_months': 36.0, 'half_util_pct': 50.0, 'half_rent_month_m': 1.5, 'be_node': 42.4, 'be_1k': 59.7, 'be_10k': 53.9, 'run_owned_m': 3.6, 'run_rent_lo_m': 1.4, 'run_rent_hi_m': 2.8, 'tenk_gpus': 10000.0, 'tenk_exp': 4.0, 'tenk_nodes': 1250.0, 'tenk_hw_m': 437.5, 'tenk_net_m': 25.0, 'tenk_fac_m': 75.0, 'tenk_upfront_m': 537.5, 'tenk_power_m': 4.7, 'tenk_staff_m': 5.0, 'tenk_opex_m': 9.7, 'tenk_years': 3.0, 'tenk_owned_m': 566.7, 'tenk_tdp_w': 700.0, 'tenk_pue': 1.1, 'hours_per_year': 8760.0, 'kwh_price': 0.07, 'tenk_util': 0.8, 'tenk_rent_year_m': 280.3, 'tenk_rent_total_m': 841.0, 'tenk_saving_m': 274.3, 'tenk_full_m': 1051.2, 'tenk_hours': 26280.0, 'tco_startup': 47500.0, 'tco_startup_dom_pct': 84.0, 'tco_company': 980000.0, 'tco_company_dom_pct': 41.0, 'int8_cost_k': 80.0, 'int8_bill_k': 400.0, 'int8_cut_pct': 40.0, 'train_payback_months': 1.8, 'platform_models': 50.0, 'platform_hours': 20.0, 'platform_rate': 150.0, 'platform_cost': 120000.0, 'platform_bcr': 1.25, 'platform_low_models': 20.0}
 import sys
 from pathlib import Path
 import numpy as np
@@ -118,12 +118,12 @@ def hook(k, size=(5.9, 2.8), fs=12.5, name=None):
         if i >= 2 and k == 1:
             ax.text(30, y, '???', ha='center', va='center', fontsize=15, fontweight='bold', color=C['danger'])
     ax.axvline(T_CHANGE, color=C['neutral'], lw=1.2, ls=':')
-    ax.text(6.5, 3.55, 'schema change', fontsize=13, color=C['neutral'])
+    ax.text(6.5, 3.55, 'schema change', fontsize=15.0, color=C['neutral'])
     a3 = 1.0 if k >= 3 else 0.0
     if k >= 2:
         ax.annotate('', xy=(t_end, 0.55), xytext=(T_CHANGE, 0.55), arrowprops=dict(arrowstyle='<->', color=C['danger'], lw=1.5))
-    ax.text((T_CHANGE + t_end) / 2, 0.62, '48 h unalerted', ha='center', va='bottom', fontsize=fs - 1.5, color=C['danger'], fontweight='bold', alpha=1.0 if k >= 2 else 0.0)
-    for x, lab in ((7.5, 'null-rate gate'), (10.0, 'freshness and quality SLO')):
+    ax.text((T_CHANGE + t_end) / 2, 0.62, '48 h unalerted', ha='center', va='bottom', fontsize=fs - 1.0, color=C['danger'], fontweight='bold', alpha=1.0 if k >= 2 else 0.0)
+    for x, lab in ((7.5, 'null-rate check'), (10.0, 'freshness and quality SLO')):
         ax.plot([x], [1.0 if lab.startswith('null') else 0.0], 'v', ms=11, color=V['ok'], alpha=a3, zorder=6)
     ax.text(8.5, 1.65, 'a data contract stops it here', fontsize=fs - 0.5, color=V['ok'], fontweight='bold', alpha=a3)
     ax.set_xlim(0, 60)
@@ -131,11 +131,12 @@ def hook(k, size=(5.9, 2.8), fs=12.5, name=None):
     ax.set_yticks([])
     ax.spines['left'].set_visible(False)
     ax.set_xticks([0, 12, 24, 36, 48, 60])
-    ax.set_xlabel('Hours after the upstream change (illustrative timeline)', fontsize=13.5)
+    ax.tick_params(axis='x', labelsize=14.0)
+    ax.set_xlabel('Hours after the upstream change (illustrative timeline)', fontsize=14.5)
     sp.save(fig, out / (name or f'hook_step{k}.svg'))
 for k in (1, 2):
-    hook(k, fs=14)
-hook(3, size=(4.4, 3.0), fs=14, name='hook_synth.svg')
+    hook(k, size=(5.4, 2.45), fs=15.5)
+hook(3, size=(4.4, 3.0), fs=14.5, name='hook_synth.svg')
 n = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371, 372, 373, 374, 375, 376, 377, 378, 379, 380, 381, 382, 383, 384, 385, 386, 387, 388, 389, 390, 391, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430, 431, 432, 433, 434, 435, 436, 437, 438, 439, 440, 441, 442, 443, 444, 445, 446, 447, 448, 449, 450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 460, 461, 462, 463, 464, 465, 466, 467, 468, 469, 470, 471, 472, 473, 474, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490, 491, 492, 493, 494, 495, 496, 497, 498, 499, 500])
 alerts = np.array([20.0, 40.0, 60.0, 80.0, 100.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0, 240.0, 260.0, 280.0, 300.0, 320.0, 340.0, 360.0, 380.0, 400.0, 420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 540.0, 560.0, 580.0, 600.0, 620.0, 640.0, 660.0, 680.0, 700.0, 720.0, 740.0, 760.0, 780.0, 800.0, 820.0, 840.0, 860.0, 880.0, 900.0, 920.0, 940.0, 960.0, 980.0, 1000.0, 1020.0, 1040.0, 1060.0, 1080.0, 1100.0, 1120.0, 1140.0, 1160.0, 1180.0, 1200.0, 1220.0, 1240.0, 1260.0, 1280.0, 1300.0, 1320.0, 1340.0, 1360.0, 1380.0, 1400.0, 1420.0, 1440.0, 1460.0, 1480.0, 1500.0, 1520.0, 1540.0, 1560.0, 1580.0, 1600.0, 1620.0, 1640.0, 1660.0, 1680.0, 1700.0, 1720.0, 1740.0, 1760.0, 1780.0, 1800.0, 1820.0, 1840.0, 1860.0, 1880.0, 1900.0, 1920.0, 1940.0, 1960.0, 1980.0, 2000.0, 2020.0, 2040.0, 2060.0, 2080.0, 2100.0, 2120.0, 2140.0, 2160.0, 2180.0, 2200.0, 2220.0, 2240.0, 2260.0, 2280.0, 2300.0, 2320.0, 2340.0, 2360.0, 2380.0, 2400.0, 2420.0, 2440.0, 2460.0, 2480.0, 2500.0, 2520.0, 2540.0, 2560.0, 2580.0, 2600.0, 2620.0, 2640.0, 2660.0, 2680.0, 2700.0, 2720.0, 2740.0, 2760.0, 2780.0, 2800.0, 2820.0, 2840.0, 2860.0, 2880.0, 2900.0, 2920.0, 2940.0, 2960.0, 2980.0, 3000.0, 3020.0, 3040.0, 3060.0, 3080.0, 3100.0, 3120.0, 3140.0, 3160.0, 3180.0, 3200.0, 3220.0, 3240.0, 3260.0, 3280.0, 3300.0, 3320.0, 3340.0, 3360.0, 3380.0, 3400.0, 3420.0, 3440.0, 3460.0, 3480.0, 3500.0, 3520.0, 3540.0, 3560.0, 3580.0, 3600.0, 3620.0, 3640.0, 3660.0, 3680.0, 3700.0, 3720.0, 3740.0, 3760.0, 3780.0, 3800.0, 3820.0, 3840.0, 3860.0, 3880.0, 3900.0, 3920.0, 3940.0, 3960.0, 3980.0, 4000.0, 4020.0, 4040.0, 4060.0, 4080.0, 4100.0, 4120.0, 4140.0, 4160.0, 4180.0, 4200.0, 4220.0, 4240.0, 4260.0, 4280.0, 4300.0, 4320.0, 4340.0, 4360.0, 4380.0, 4400.0, 4420.0, 4440.0, 4460.0, 4480.0, 4500.0, 4520.0, 4540.0, 4560.0, 4580.0, 4600.0, 4620.0, 4640.0, 4660.0, 4680.0, 4700.0, 4720.0, 4740.0, 4760.0, 4780.0, 4800.0, 4820.0, 4840.0, 4860.0, 4880.0, 4900.0, 4920.0, 4940.0, 4960.0, 4980.0, 5000.0, 5020.0, 5040.0, 5060.0, 5080.0, 5100.0, 5120.0, 5140.0, 5160.0, 5180.0, 5200.0, 5220.0, 5240.0, 5260.0, 5280.0, 5300.0, 5320.0, 5340.0, 5360.0, 5380.0, 5400.0, 5420.0, 5440.0, 5460.0, 5480.0, 5500.0, 5520.0, 5540.0, 5560.0, 5580.0, 5600.0, 5620.0, 5640.0, 5660.0, 5680.0, 5700.0, 5720.0, 5740.0, 5760.0, 5780.0, 5800.0, 5820.0, 5840.0, 5860.0, 5880.0, 5900.0, 5920.0, 5940.0, 5960.0, 5980.0, 6000.0, 6020.0, 6040.0, 6060.0, 6080.0, 6100.0, 6120.0, 6140.0, 6160.0, 6180.0, 6200.0, 6220.0, 6240.0, 6260.0, 6280.0, 6300.0, 6320.0, 6340.0, 6360.0, 6380.0, 6400.0, 6420.0, 6440.0, 6460.0, 6480.0, 6500.0, 6520.0, 6540.0, 6560.0, 6580.0, 6600.0, 6620.0, 6640.0, 6660.0, 6680.0, 6700.0, 6720.0, 6740.0, 6760.0, 6780.0, 6800.0, 6820.0, 6840.0, 6860.0, 6880.0, 6900.0, 6920.0, 6940.0, 6960.0, 6980.0, 7000.0, 7020.0, 7040.0, 7060.0, 7080.0, 7100.0, 7120.0, 7140.0, 7160.0, 7180.0, 7200.0, 7220.0, 7240.0, 7260.0, 7280.0, 7300.0, 7320.0, 7340.0, 7360.0, 7380.0, 7400.0, 7420.0, 7440.0, 7460.0, 7480.0, 7500.0, 7520.0, 7540.0, 7560.0, 7580.0, 7600.0, 7620.0, 7640.0, 7660.0, 7680.0, 7700.0, 7720.0, 7740.0, 7760.0, 7780.0, 7800.0, 7820.0, 7840.0, 7860.0, 7880.0, 7900.0, 7920.0, 7940.0, 7960.0, 7980.0, 8000.0, 8020.0, 8040.0, 8060.0, 8080.0, 8100.0, 8120.0, 8140.0, 8160.0, 8180.0, 8200.0, 8220.0, 8240.0, 8260.0, 8280.0, 8300.0, 8320.0, 8340.0, 8360.0, 8380.0, 8400.0, 8420.0, 8440.0, 8460.0, 8480.0, 8500.0, 8520.0, 8540.0, 8560.0, 8580.0, 8600.0, 8620.0, 8640.0, 8660.0, 8680.0, 8700.0, 8720.0, 8740.0, 8760.0, 8780.0, 8800.0, 8820.0, 8840.0, 8860.0, 8880.0, 8900.0, 8920.0, 8940.0, 8960.0, 8980.0, 9000.0, 9020.0, 9040.0, 9060.0, 9080.0, 9100.0, 9120.0, 9140.0, 9160.0, 9180.0, 9200.0, 9220.0, 9240.0, 9260.0, 9280.0, 9300.0, 9320.0, 9340.0, 9360.0, 9380.0, 9400.0, 9420.0, 9440.0, 9460.0, 9480.0, 9500.0, 9520.0, 9540.0, 9560.0, 9580.0, 9600.0, 9620.0, 9640.0, 9660.0, 9680.0, 9700.0, 9720.0, 9740.0, 9760.0, 9780.0, 9800.0, 9820.0, 9840.0, 9860.0, 9880.0, 9900.0, 9920.0, 9940.0, 9960.0, 9980.0, 10000.0])
 deploy = np.array([0.0, 1.386294361, 3.295836866, 5.545177444, 8.047189562, 10.75055682, 13.62137104, 16.63553233, 19.7750212, 23.02585093, 26.376848, 29.8188798, 33.34434165, 36.94680261, 40.62075302, 44.36141956, 48.16462685, 52.02669164, 55.9443406, 59.91464547, 63.93497119, 68.00293397, 72.11636697, 76.27329193, 80.47189562, 84.71050999, 88.98759538, 93.30172628, 97.65157907, 102.0359214, 106.4536033, 110.9035489, 115.3847495, 119.8962578, 124.4371822, 129.0066818, 133.6039628, 138.2282741, 142.8789042, 147.5551782, 152.2564547, 156.982124, 161.731605, 166.5043439, 171.299812, 176.1175042, 180.9569373, 185.8176485, 190.6991946, 195.6011503, 200.5231073, 205.4646734, 210.4254714, 215.4051385, 220.4033252, 225.4196947, 230.4539223, 235.5056946, 240.5747092, 245.6606737, 250.7633057, 255.8823319, 261.0174878, 266.1685173, 271.3351725, 276.517213, 281.7144055, 286.926524, 292.1533488, 297.3946669, 302.6502713, 307.9199606, 313.2035392, 318.5008169, 323.8116085, 329.1357339, 334.4730175, 339.8232885, 345.1863803, 350.5621308, 355.9503815, 361.3509783, 366.7637704, 372.1886111, 377.6253568, 383.0738675, 388.5340063, 394.0056397, 399.4886369, 404.9828703, 410.4882151, 416.0045491, 421.5317529, 427.0697095, 432.6183047, 438.1774264, 443.7469649, 449.3268129, 454.9168652, 460.5170186, 466.1271722, 471.747227, 477.3770858, 483.0166535, 488.6658368, 494.324544, 499.9926853, 505.6701725, 511.3569192, 517.0528402, 522.7578523, 528.4718736, 534.1948235, 539.9266231, 545.6671948, 551.4164622, 557.1743504, 562.9407857, 568.7156957, 574.4990091, 580.290656, 586.0905675, 591.8986757, 597.7149141, 603.5392172, 609.3715203, 615.21176, 621.0598738, 626.9158002, 632.7794786, 638.6508493, 644.5298538, 650.4164341, 656.3105332, 662.2120951, 668.1210645, 674.0373868, 679.9610086, 685.8918767, 691.8299392, 697.7751445, 703.7274422, 709.6867821, 715.6531151, 721.6263927, 727.6065668, 733.5935903, 739.5874165, 745.5879996, 751.5952941, 757.6092554, 763.6298392, 769.657002, 775.6907008, 781.7308931, 787.7775371, 793.8305914, 799.8900152, 805.9557682, 812.0278104, 818.1061028, 824.1906063, 830.2812827, 836.3780942, 842.4810032, 848.5899729, 854.7049667, 860.8259485, 866.9528828, 873.0857343, 879.2244682, 885.36905, 891.5194458, 897.6756221, 903.8375454, 910.0051831, 916.1785027, 922.357472, 928.5420592, 934.7322332, 940.9279627, 947.129217, 953.335966, 959.5481794, 965.7658276, 971.9888813, 978.2173114, 984.451089, 990.6901858, 996.9345737, 1003.184225, 1009.439111, 1015.699206, 1021.964483, 1028.234914, 1034.510473, 1040.791135, 1047.076872, 1053.36766, 1059.663473, 1065.964287, 1072.270075, 1078.580814, 1084.896479, 1091.217046, 1097.542491, 1103.87279, 1110.207921, 1116.547859, 1122.892581, 1129.242066, 1135.59629, 1141.955231, 1148.318867, 1154.687176, 1161.060136, 1167.437726, 1173.819924, 1180.206709, 1186.59806, 1192.993957, 1199.394379, 1205.799305, 1212.208716, 1218.62259, 1225.04091, 1231.463654, 1237.890803, 1244.322339, 1250.758241, 1257.198491, 1263.64307, 1270.09196, 1276.545141, 1283.002596, 1289.464306, 1295.930253, 1302.40042, 1308.874789, 1315.353342, 1321.836061, 1328.32293, 1334.813931, 1341.309047, 1347.808262, 1354.311558, 1360.818919, 1367.330329, 1373.845771, 1380.365229, 1386.888688, 1393.41613, 1399.947541, 1406.482904, 1413.022204, 1419.565426, 1426.112554, 1432.663573, 1439.218468, 1445.777224, 1452.339826, 1458.90626, 1465.47651, 1472.050563, 1478.628404, 1485.210018, 1491.795392, 1498.384511, 1504.977361, 1511.573929, 1518.1742, 1524.778162, 1531.3858, 1537.997101, 1544.612052, 1551.230639, 1557.852849, 1564.47867, 1571.108087, 1577.741089, 1584.377662, 1591.017794, 1597.661472, 1604.308684, 1610.959416, 1617.613658, 1624.271396, 1630.932618, 1637.597313, 1644.265468, 1650.937071, 1657.61211, 1664.290574, 1670.972452, 1677.65773, 1684.346398, 1691.038445, 1697.733859, 1704.432628, 1711.134742, 1717.84019, 1724.548959, 1731.26104, 1737.976421, 1744.695092, 1751.417041, 1758.142259, 1764.870733, 1771.602455, 1778.337412, 1785.075596, 1791.816995, 1798.561599, 1805.309398, 1812.060381, 1818.814539, 1825.571862, 1832.33234, 1839.095962, 1845.862719, 1852.632601, 1859.405598, 1866.1817, 1872.960899, 1879.743184, 1886.528546, 1893.316976, 1900.108464, 1906.903, 1913.700576, 1920.501182, 1927.30481, 1934.111449, 1940.921092, 1947.733728, 1954.54935, 1961.367948, 1968.189513, 1975.014036, 1981.84151, 1988.671925, 1995.505272, 2002.341543, 2009.18073, 2016.022824, 2022.867816, 2029.715699, 2036.566463, 2043.420101, 2050.276604, 2057.135964, 2063.998174, 2070.863224, 2077.731107, 2084.601815, 2091.47534, 2098.351674, 2105.230809, 2112.112737, 2118.997451, 2125.884943, 2132.775205, 2139.668229, 2146.564008, 2153.462534, 2160.3638, 2167.267798, 2174.174521, 2181.083962, 2187.996112, 2194.910965, 2201.828514, 2208.748751, 2215.671668, 2222.59726, 2229.525518, 2236.456436, 2243.390006, 2250.326222, 2257.265076, 2264.206562, 2271.150672, 2278.097401, 2285.04674, 2291.998684, 2298.953225, 2305.910356, 2312.870072, 2319.832365, 2326.797228, 2333.764656, 2340.734641, 2347.707177, 2354.682258, 2361.659877, 2368.640028, 2375.622703, 2382.607898, 2389.595605, 2396.585819, 2403.578532, 2410.57374, 2417.571434, 2424.571611, 2431.574262, 2438.579383, 2445.586966, 2452.597007, 2459.609499, 2466.624435, 2473.641811, 2480.66162, 2487.683856, 2494.708513, 2501.735586, 2508.765068, 2515.796954, 2522.831239, 2529.867915, 2536.906979, 2543.948423, 2550.992243, 2558.038432, 2565.086985, 2572.137897, 2579.191162, 2586.246774, 2593.304728, 2600.365018, 2607.42764, 2614.492587, 2621.559854, 2628.629436, 2635.701328, 2642.775524, 2649.852018, 2656.930806, 2664.011883, 2671.095242, 2678.18088, 2685.26879, 2692.358968, 2699.451408, 2706.546106, 2713.643056, 2720.742253, 2727.843692, 2734.947368, 2742.053277, 2749.161412, 2756.27177, 2763.384345, 2770.499133, 2777.616128, 2784.735326, 2791.856721, 2798.98031, 2806.106086, 2813.234046, 2820.364185, 2827.496498, 2834.63098, 2841.767626, 2848.906432, 2856.047394, 2863.190506, 2870.335763, 2877.483162, 2884.632698, 2891.784367, 2898.938162, 2906.094081, 2913.252119, 2920.41227, 2927.574532, 2934.738899, 2941.905366, 2949.07393, 2956.244586, 2963.41733, 2970.592157, 2977.769063, 2984.948044, 2992.129095, 2999.312212, 3006.497391, 3013.684628, 3020.873918, 3028.065257, 3035.258642, 3042.454067, 3049.651529, 3056.851023, 3064.052545, 3071.256092, 3078.46166, 3085.669243, 3092.878838, 3100.090442, 3107.304049])
@@ -220,7 +221,7 @@ sp.save(fig, out / 'fstore.svg')
 click_hours = [1.5, 4.0, 7.5, 10.0, 13.0, 14.5, 16.0, 18.5, 20.0, 22.5]
 assert len(click_hours) == 10
 assert sum((h < 12 for h in click_hours)) == 4
-for k in (1, 2):
+for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.9, 2.5))
     ax.plot([0, 24], [1, 1], color=C['neutral'], lw=1.5)
     for h in click_hours:
@@ -228,15 +229,16 @@ for k in (1, 2):
         ax.plot([h], [1], 'o', ms=12, color=V['c1'] if early else C['neutral_l'], mec=V['c1'] if early else C['neutral'], mew=1.5, zorder=5)
     ax.axvline(12, color=C['danger'], lw=2.2)
     ax.text(12, 1.95, 'prediction at noon', ha='center', fontsize=12, color=C['danger'], fontweight='bold', zorder=10, bbox=dict(facecolor='white', edgecolor='none', pad=1))
-    a = 1.0 if k >= 2 else 0.0
-    ax.annotate('', xy=(0, 0.45), xytext=(12, 0.45), arrowprops=dict(arrowstyle='<->', color=V['c1'], lw=2, alpha=a))
-    ax.text(6, 0.18, 'point-in-time join: 4 clicks', ha='center', fontsize=12, color=V['c1'], fontweight='bold', alpha=a, bbox=dict(facecolor='white', edgecolor='none', pad=1, alpha=a), zorder=10)
-    ax.annotate('', xy=(0, -0.35), xytext=(24, -0.35), arrowprops=dict(arrowstyle='<->', color=C['danger'], lw=2, alpha=a))
-    ax.text(12, -0.62, 'naive join to the midnight table: 10 clicks (2.5×)', ha='center', fontsize=12, color=C['danger'], fontweight='bold', alpha=a, bbox=dict(facecolor='white', edgecolor='none', pad=1, alpha=a), zorder=10)
+    a2 = 1.0 if k >= 2 else 0.0
+    a3 = 1.0 if k >= 3 else 0.0
+    ax.annotate('', xy=(0, 0.45), xytext=(12, 0.45), arrowprops=dict(arrowstyle='<->', color=V['c1'], lw=2, alpha=a2))
+    ax.text(6, 0.14, 'point-in-time join: 4 clicks (valid)', ha='center', fontsize=11.5, color=V['c1'], fontweight='bold', alpha=a2, bbox=dict(facecolor='white', edgecolor='none', pad=1, alpha=a2), zorder=10)
+    ax.annotate('', xy=(0, -0.35), xytext=(24, -0.35), arrowprops=dict(arrowstyle='<->', color=C['danger'], lw=2, alpha=a3))
+    ax.text(12, -0.66, 'naive join to midnight table: 10 clicks (2.5× future leakage)', ha='center', fontsize=11.5, color=C['danger'], fontweight='bold', alpha=a3, bbox=dict(facecolor='white', edgecolor='none', pad=1, alpha=a3), zorder=10)
     if k == 1:
         ax.text(18, 0.45, 'total_clicks_today = ???', ha='center', fontsize=12.5, fontweight='bold', color=C['danger'])
     ax.set_xlim(-0.5, 24.5)
-    ax.set_ylim(-0.9, 2.3)
+    ax.set_ylim(-0.95, 2.3)
     ax.set_yticks([])
     ax.spines['left'].set_visible(False)
     ax.set_xticks([0, 6, 12, 18, 24])
@@ -288,6 +290,38 @@ for k in (1, 2):
     ax.tick_params(axis='y', labelsize=13)
     ax.set_ylabel('Users exposed until rollback (%)', fontsize=13)
     sp.save(fig, out / f'exposure_step{k}.svg')
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(7.6, 3.05))
+    ax.set_xlim(0, 12.6)
+    ax.set_ylim(0, 4.9)
+    hide_axis(ax)
+    box(ax, 0.08, 3.45, 2.05, 1.15, '1. Shadow\n(0% users)', V['c1_l'], V['c1'], fs=10.8)
+    box(ax, 2.55, 4.05, 2.35, 0.62, 'Prod v1 (100%)', V['ok_l'], V['ok'], fs=10.2)
+    box(ax, 2.55, 3.25, 2.35, 0.62, 'Cand v2 (copy)', V['c3_l'], V['c3'], fs=10.2)
+    arrow(ax, (2.15, 4.20), (2.53, 4.35), V['ok'])
+    ax.annotate('', xy=(2.53, 3.56), xytext=(2.15, 3.85), arrowprops=dict(arrowstyle='-|>', ls='--', color=V['c3'], lw=1.6))
+    box(ax, 5.35, 4.05, 2.40, 0.62, 'Users served', V['frame_l'], V['frame'], fs=10.2, tc=C['text'])
+    box(ax, 5.35, 3.15, 3.40, 0.78, 'Compare outputs\nand latency', V['c3_l'], V['c3'], fs=10.0)
+    arrow(ax, (4.92, 4.36), (5.33, 4.36), V['ok'])
+    arrow(ax, (4.92, 3.56), (5.33, 3.56), V['c3'])
+    ax.text(9.05, 3.92, 'extra compute,\n0 user harm', ha='left', va='center', fontsize=10.8, fontweight='bold', color=V['c1'])
+    if k >= 2:
+        box(ax, 0.08, 1.65, 2.05, 1.15, '2. Canary\n(5% users)', V['c2_l'], V['c2'], fs=10.8)
+        box(ax, 2.55, 2.25, 2.35, 0.60, 'Prod v1 (95%)', V['ok_l'], V['ok'], fs=10.2)
+        box(ax, 2.55, 1.47, 2.35, 0.60, 'Cand v2 (5%)', V['c2_l'], V['c2'], fs=10.2)
+        arrow(ax, (2.15, 2.42), (2.53, 2.55), V['ok'])
+        arrow(ax, (2.15, 2.02), (2.53, 1.77), V['c2'])
+        box(ax, 5.35, 1.47, 3.40, 1.38, 'Live outcomes +\nguardrails (20× less)', V['c2_l'], V['c2'], fs=10.2)
+        arrow(ax, (4.92, 2.55), (5.33, 2.45), V['ok'])
+        arrow(ax, (4.92, 1.77), (5.33, 1.87), V['c2'])
+        ax.text(9.05, 2.16, 'real feedback,\nbounded blast', ha='left', va='center', fontsize=10.8, fontweight='bold', color=V['c2'])
+    if k >= 3:
+        box(ax, 0.08, 0.15, 3.05, 0.96, '3. Evidence Check\n(fixed thresholds)', V['c3_l'], V['c3'], fs=10.5)
+        box(ax, 3.60, 0.15, 4.35, 0.96, 'Promote: 1% $\\rightarrow$ 5%\n$\\rightarrow$ 25% $\\rightarrow$ 100%', V['ok_l'], V['ok'], fs=10.5)
+        box(ax, 8.45, 0.15, 4.05, 0.96, 'Breach: instant rollback\nto validated v1', V['bad_l'], V['bad'], fs=10.5)
+        arrow(ax, (3.15, 0.63), (3.58, 0.63), V['ok'])
+        arrow(ax, (7.97, 0.63), (8.43, 0.63), V['bad'])
+    sp.save(fig, out / f'shadow_step{k}.svg')
 stages = [(1.0, 2), (5.0, 0.5), (25.0, 0.5), (50.0, 1)]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.4, 3.0))
@@ -309,22 +343,22 @@ for k in (1, 2):
     ax.tick_params(labelsize=12)
     ax.set_yticks([0, 50, 100])
     sp.save(fig, out / f'stages_step{k}.svg')
-fig, ax = plt.subplots(figsize=(5.2, 3.3))
+fig, ax = plt.subplots(figsize=(4.4, 2.9))
 d = np.linspace(0.0003, 0.01, 400)
-for test, ck, xy in ((SimpleNamespace(available_per_variant=None, baseline_rate=0.05, collection_time=Q_(1.430016, 'h'), confidence=None, daily_requests=Q_(1000000.0, '1 / d'), family_size=20, familywise_error=0.6415140776, lift=0.005, lift_squared=2.5e-05, name='Two-arm test for a 0.5-point CTR lift on a 5 percent baseline', per_variant=29792.0, power=None, relative_lift=None, significance=0.05, target_rate=0.055, total=59584.0, two_variance=0.095, z_alpha=1.96, z_beta=0.84, z_sum_squared=7.84), 'memory', (0.0078, 18000.0)), (SimpleNamespace(available_per_variant=None, baseline_rate=0.01, collection_time=Q_(29.804544, 'h'), confidence=None, daily_requests=Q_(1000000.0, '1 / d'), family_size=20, familywise_error=0.6415140776, lift=0.0005, lift_squared=2.5e-07, name='Two-arm test for a 0.05-point CTR lift on a 1 percent baseline', per_variant=620928.0, power=None, relative_lift=None, significance=0.05, target_rate=0.0105, total=1241856.0, two_variance=0.0198, z_alpha=1.96, z_beta=0.84, z_sum_squared=7.84), 'compute', (0.0062, 650.0))):
+for test, ck, xy in ((SimpleNamespace(available_per_variant=None, baseline_rate=0.05, collection_time=Q_(1.430016, 'h'), confidence=None, daily_requests=Q_(1000000.0, '1 / d'), family_size=20, familywise_error=0.6415140776, lift=0.005, lift_squared=2.5e-05, name='Two-arm test for a 0.5-point CTR lift on a 5 percent baseline', per_variant=29792.0, power=None, relative_lift=None, significance=0.05, target_rate=0.055, total=59584.0, two_variance=0.095, z_alpha=1.96, z_beta=0.84, z_sum_squared=7.84), 'memory', (0.0074, 18000.0)), (SimpleNamespace(available_per_variant=None, baseline_rate=0.01, collection_time=Q_(29.804544, 'h'), confidence=None, daily_requests=Q_(1000000.0, '1 / d'), family_size=20, familywise_error=0.6415140776, lift=0.0005, lift_squared=2.5e-07, name='Two-arm test for a 0.05-point CTR lift on a 1 percent baseline', per_variant=620928.0, power=None, relative_lift=None, significance=0.05, target_rate=0.0105, total=1241856.0, two_variance=0.0198, z_alpha=1.96, z_beta=0.84, z_sum_squared=7.84), 'compute', (0.0058, 650.0))):
     nn = [calc_two_proportion_sample_size({'memory': 0.05, 'compute': 0.01}[ck], x, {'memory': 1.96, 'compute': 1.96}[ck], {'memory': 0.84, 'compute': 0.84}[ck]) for x in d]
     ax.plot(d * 100, nn, color=C[ck], lw=2.8)
-    ax.text(xy[0] * 100, xy[1], f"{100 * {'memory': 0.05, 'compute': 0.01}[ck]:.0f}% baseline", color=C[ck], fontsize=13, fontweight='bold')
+    ax.text(xy[0] * 100, xy[1], f"{100 * {'memory': 0.05, 'compute': 0.01}[ck]:.0f}% baseline", color=C[ck], fontsize=14, fontweight='bold')
 ax.plot([0.5], [29792.0], 'o', ms=10, color=C['memory'], mec='white', zorder=5)
-ax.annotate('29,792 at 0.5 pt', (0.5, 29792.0), xytext=(8, 30), textcoords='offset points', fontsize=13, fontweight='bold', color=C['memory'])
+ax.annotate('29,792 at 0.5 pt', (0.5, 29792.0), xytext=(8, 28), textcoords='offset points', fontsize=14, fontweight='bold', color=C['memory'])
 ax.plot([0.05], [620928.0], 'o', ms=10, color=C['compute'], mec='white', zorder=5)
-ax.annotate('620,928 at 0.05 pt', (0.05, 620928.0), xytext=(40, 6), textcoords='offset points', fontsize=13, fontweight='bold', color=C['compute'])
+ax.annotate('620,928 at 0.05 pt', (0.05, 620928.0), xytext=(36, 6), textcoords='offset points', fontsize=14, fontweight='bold', color=C['compute'])
 ax.set_yscale('log')
 ax.set_xlim(0, 1.0)
 ax.set_ylim(500.0, 3000000.0)
-ax.tick_params(labelsize=12)
-ax.set_xlabel('Smallest lift to detect (percentage points)', fontsize=13)
-ax.set_ylabel('Users per variant', fontsize=13)
+ax.tick_params(labelsize=14)
+ax.set_xlabel('Smallest lift to detect (percentage points)', fontsize=14.5)
+ax.set_ylabel('Users per variant', fontsize=14.5)
 sp.save(fig, out / 'mde.svg')
 fig, ax = plt.subplots(figsize=(4.6, 2.4))
 for y, lab, lo, hi, ck in ((1, 'Shared\nthreads', 500.0, 1500.0, 'danger'), (0, 'Own load\nthread', 75.0, 150.0, 'data')):
@@ -357,41 +391,55 @@ ax.tick_params(labelsize=12)
 ax.set_xlabel('Independent checks, M', fontsize=13)
 ax.set_ylabel('P(any false alert)', fontsize=13)
 sp.save(fig, out / 'alerts.svg')
-fig, ax = plt.subplots(figsize=(5.9, 2.9))
-ax.set_xlim(0, 10)
-ax.set_xlim(0, 10.5)
-ax.set_ylim(0, 4.4)
-hide_axis(ax)
-levels = [('Infrastructure', 'platform team', V['c1_l'], V['c1']), ('Model', 'model owner', V['c1_l'], V['c1']), ('Portfolio', 'domain team', V['c3_l'], V['c3']), ('Business', 'incident lead', V['bad_l'], V['bad'])]
-for i, (lab, own, fc, ec) in enumerate(levels):
-    y0, y1 = (i * 1.0 + 0.1, i * 1.0 + 1.0)
-    w0, w1 = (7.0 - 1.3 * i, 7.0 - 1.3 * (i + 1))
-    cx = 3.7
-    ax.add_patch(Polygon([(cx - w0 / 2, y0), (cx + w0 / 2, y0), (cx + w1 / 2 + 0.01, y1), (cx - w1 / 2 - 0.01, y1)], closed=True, facecolor=fc, edgecolor=ec, lw=1.6))
-    ax.text(cx, (y0 + y1) / 2, lab, ha='center', va='center', fontsize=12.5, fontweight='bold', color=ec)
-    ax.text(7.9, (y0 + y1) / 2, own, ha='left', va='center', fontsize=12.5, fontweight='bold', color=ec)
-ax.text(7.9, 4.25, 'first owner paged', ha='left', fontsize=11, color=C['neutral'])
-ax.annotate('', xy=(7.6, 3.8), xytext=(7.6, 0.2), arrowprops=dict(arrowstyle='<->', color=C['neutral'], lw=1.3))
-sp.save(fig, out / 'pyramid.svg')
-fig, ax = plt.subplots(figsize=(5.9, 2.6))
-rows = [('Availability', 0.4, 'serving'), ('Latency', 0.6, 'serving'), ('Freshness', 1.3, 'data'), ('Model quality', 0.5, 'model')]
-for i, (lab, v, own) in enumerate(rows):
-    y = 3 - i
-    bad = v > 1
-    ax.barh(y, v, color=C['danger'] if bad else C['memory_l'], edgecolor=C['danger'] if bad else C['memory'], height=0.6, lw=1.5)
-    ax.text(v - 0.03 if bad else v + 0.03, y, f'{v:.2f}', va='center', fontsize=12.5, fontweight='bold', ha='right' if bad else 'left', color='white' if bad else C['memory'], bbox=None if bad else dict(facecolor='white', edgecolor='none', pad=0.5), zorder=5)
-    ax.text(-0.03, y, f'{lab}\n({own} owner)', ha='right', va='center', fontsize=11.5, fontweight='bold')
-ax.axvline(1.0, color=C['text'], lw=2)
-ax.text(1.02, 3.55, 'budget spent: B = 1', ha='left', fontsize=11.5, fontweight='bold')
-ax.axvline(0.7, color=C['neutral'], lw=1.5, ls='--')
-ax.text(0.7 - 0.02, 3.55, 'mean 0.70', ha='right', fontsize=11.5, color=C['neutral'], fontweight='bold')
-ax.text(1.36, 1.0, 'max: stop\npromotion', va='center', fontsize=12, color=C['danger'], fontweight='bold')
-ax.set_xlim(0, 1.75)
-ax.set_ylim(-0.5, 3.8)
-ax.set_yticks([])
-ax.spines['left'].set_visible(False)
-ax.set_xlabel('Budget consumed B = observed / allowed violations (illustrative)')
-sp.save(fig, out / 'slo_vector.svg')
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(7.2, 2.95))
+    ax.set_xlim(0, 14.5)
+    ax.set_ylim(0, 4.5)
+    hide_axis(ax)
+    levels = [('Infrastructure', 'platform team', V['c1_l'], V['c1']), ('Model', 'model owner', V['c1_l'], V['c1']), ('Portfolio', 'domain team', V['c3_l'], V['c3']), ('Business', 'incident lead', V['bad_l'], V['bad'])]
+    for i, (lab, own, fc, ec) in enumerate(levels):
+        y0, y1 = (i * 1.0 + 0.1, i * 1.0 + 1.0)
+        w0, w1 = (6.4 - 1.2 * i, 6.4 - 1.2 * (i + 1))
+        cx = 3.3
+        if k == 2 and i == 1:
+            fc, ec = (V['bad_l'], V['bad'])
+        if k == 3 and i == 0:
+            fc, ec = (V['ok_l'], V['ok'])
+        ax.add_patch(Polygon([(cx - w0 / 2, y0), (cx + w0 / 2, y0), (cx + w1 / 2 + 0.01, y1), (cx - w1 / 2 - 0.01, y1)], closed=True, facecolor=fc, edgecolor=ec, lw=1.8 if (k == 2 and i == 1) or (k == 3 and i == 0) else 1.5))
+        ax.text(cx, (y0 + y1) / 2, lab, ha='center', va='center', fontsize=12.5, fontweight='bold', color=ec)
+        ax.text(7.15, (y0 + y1) / 2, own, ha='left', va='center', fontsize=12.0, fontweight='bold', color=ec)
+    ax.text(7.15, 4.30, 'first owner paged', ha='left', fontsize=11.5, color=C['neutral'])
+    ax.annotate('', xy=(6.85, 3.8), xytext=(6.85, 0.2), arrowprops=dict(arrowstyle='<->', color=C['neutral'], lw=1.4))
+    if k >= 2:
+        box(ax, 10.25, 2.25, 4.10, 0.90, '60 / 100 models fire\nat once (alert storm)', V['bad_l'], V['bad'], fs=11.2)
+    if k >= 3:
+        box(ax, 10.25, 0.55, 4.10, 0.96, 'correlate $\\rightarrow$ 1 shared\npipeline incident', V['ok_l'], V['ok'], fs=11.2)
+        arrow(ax, (12.30, 2.22), (12.30, 1.54), V['ok'], lw=2.0)
+    sp.save(fig, out / f'pyramid_step{k}.svg')
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.9, 2.6))
+    rows = [('Availability', 0.4, 'serving'), ('Latency', 0.6, 'serving'), ('Freshness', 1.3, 'data'), ('Model quality', 0.5, 'model')]
+    for i, (lab, v, own) in enumerate(rows):
+        y = 3 - i
+        bad = v > 1
+        ax.text(-0.03, y, f'{lab}\n({own} owner)', ha='right', va='center', fontsize=11.5, fontweight='bold')
+        if bad and k == 1:
+            ax.text(0.18, y, '??? (not checked by HTTP 200)', va='center', ha='left', fontsize=11.5, fontweight='bold', color=C['danger'])
+            continue
+        ax.barh(y, v, color=C['danger'] if bad else C['memory_l'], edgecolor=C['danger'] if bad else C['memory'], height=0.6, lw=1.5)
+        ax.text(v - 0.03 if bad else v + 0.03, y, f'{v:.2f}', va='center', fontsize=12.5, fontweight='bold', ha='right' if bad else 'left', color='white' if bad else C['memory'], bbox=None if bad else dict(facecolor='white', edgecolor='none', pad=0.5), zorder=5)
+    ax.axvline(1.0, color=C['text'], lw=2)
+    ax.text(1.02, 3.55, 'budget spent: B = 1', ha='left', fontsize=11.5, fontweight='bold')
+    if k >= 2:
+        ax.axvline(0.7, color=C['neutral'], lw=1.5, ls='--')
+        ax.text(0.7 - 0.02, 3.55, 'mean 0.70', ha='right', fontsize=11.5, color=C['neutral'], fontweight='bold')
+        ax.text(1.36, 1.0, 'max: stop\npromotion', va='center', fontsize=12, color=C['danger'], fontweight='bold')
+    ax.set_xlim(0, 1.75)
+    ax.set_ylim(-0.5, 3.8)
+    ax.set_yticks([])
+    ax.spines['left'].set_visible(False)
+    ax.set_xlabel('Budget consumed B = observed / allowed violations (illustrative)')
+    sp.save(fig, out / f'slo_vector_step{k}.svg')
 fig, ax = plt.subplots(figsize=(5.4, 3.0))
 ax.add_patch(Rectangle((15.83333333, 0.6), 21.33333333 - 15.83333333, 0.8, facecolor=C['danger_l'], edgecolor=C['danger'], lw=1.5))
 ax.text((15.83333333 + 21.33333333) / 2, 1.0, 'facebook.com unreachable\nabout 5.5 h', ha='center', va='center', fontsize=13, fontweight='bold', color=C['danger'])
@@ -414,7 +462,8 @@ for y, key in ((1, 'Jobs'), (0, 'GPU time')):
     left = 0
     for (lab, ck), v in zip(parts, data[key]):
         ax.barh(y, v, left=left, color=C[ck], height=0.6)
-        ax.text(left + v / 2, y, f'{lab}\n{v:.0f}%', ha='center', va='center', fontsize=13.5, fontweight='bold', color='white')
+        fmt_v = f'{v:.1f}%' if key == 'GPU time' else f'{v:.0f}%'
+        ax.text(left + v / 2, y, f'{lab}\n{fmt_v}', ha='center', va='center', fontsize=13, fontweight='bold', color='white')
         left += v
     ax.text(-1.5, y, key, ha='right', va='center', fontsize=13, fontweight='bold')
 ax.set_xlim(0, 100)
@@ -469,4 +518,27 @@ ax.set_yticks([])
 ax.spines['left'].set_visible(False)
 ax.set_xlabel('Share of monthly TCO (%), constructed budgets')
 sp.save(fig, out / 'tco.svg')
+
+# P28 Diagnose: 4-step progressive attribution flowchart
+for k in (1, 2, 3, 4):
+    fig, ax = plt.subplots(figsize=(4.4, 2.85))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 9.0)
+    ax.axis('off')
+    steps = [
+        (7.15, '1. Feature freshness', 'user_features 3 h stale (SLO 1 h)', C['danger_l'], C['danger']),
+        (4.85, '2. Feature pipeline', 'Kafka consumer lag 10M (norm 10K)', C['compute_l'], C['compute']),
+        (2.55, '3. Hypothesis', 'Broker disk 95% full on 1 partition', C['network_l'], C['network']),
+        (0.25, '4. Verify & recover', 'Free disk $\\rightarrow$ lag & freshness recover', C['data_l'], C['data']),
+    ]
+    for idx, (y, head, sub, fc, ec) in enumerate(steps):
+        al = 1.0 if idx < k else 0.0
+        ax.add_patch(FancyBboxPatch((0.2, y), 9.6, 1.56, boxstyle='round,pad=0.04,rounding_size=0.22', fc=fc, ec=ec, lw=2.0, alpha=al))
+        ax.text(0.55, y + 1.08, head, ha='left', va='center', fontsize=13.5, fontweight='bold', color=ec, alpha=al)
+        ax.text(0.55, y + 0.45, sub, ha='left', va='center', fontsize=12.5, fontweight='bold', color=C['text'], alpha=al)
+        if idx < 3:
+            al_a = 1.0 if (idx + 1) < k else 0.0
+            ax.annotate('', xy=(5.0, y - 0.65), xytext=(5.0, y - 0.08), arrowprops=dict(arrowstyle='-|>', color=C['text'], lw=2.0, mutation_scale=12, alpha=al_a))
+    sp.save(fig, out / f'diagnose_step{k}.svg')
+
 print('done')

@@ -28,8 +28,8 @@ from types import SimpleNamespace
 import sys as _sys; from pathlib import Path as _Path; _sys.path.insert(0, str(_Path(__file__).resolve().parents[3] / "mlsysim"))
 from mlsysim.core.units import Q_
 import mlsysim
-_VALS = {'goyal_gpus': '256', 'goyal_hours_word': 'one', 'goyal_hours': '1', 'goyal_base_hours': '29', 'goyal_base_gpus': '8', 'goyal_base_batch': '256', 'goyal_batch': '8,192', 'goyal_batch_k': '8', 'goyal_servers': '32', 'goyal_per_gpu': '32', 'goyal_batch_x': '32', 'goyal_gpu_x': '32', 'goyal_eff_pct': '90', 'goyal_eth_gbps': '50', 'goyal_epochs': '90', 'goyal_warmup_epochs': '5', 'goyal_err_base': '23.60', 'goyal_err_nowarm': '24.84', 'goyal_err_warm': '23.74', 'goyal_spread': '0.3', 'goyal_up1_k': '16', 'goyal_up1_err': '24.79', 'goyal_up2_k': '32', 'goyal_up2_err': '27.55', 'goyal_up3_k': '64', 'goyal_up3_err': '33.96', 'params_b': '175', 'state_bpp': '16', 'opt_bpp': '12', 'fp16_bytes': '2', 'state_gb': '2,800', 'state_tb': '2.8', 'hbm_gb': '80', 'state_gpus': '35', 'ref_gpus': '1,024', 'ref_nodes': '128', 'gpus_per_node': '8', 'nvlink_gbs': '450', 'ndr_gbs': '50', 'nvlink_ndr_x': '9', 'grad_gb': '350', 'ring_gb': '699', 'ar_a_s': '14', 'batch_tokens_m': '2', 'flops_per_pt': '6', 'step_eflops': '2.1', 'local_eff_pct': '50', 'fp8_tflops': '1,979', 't_compute_s': '2.1', 'exposed_a_s': '11.9', 'step_a_s': '14.0', 'eff_a_pct': '15', 'resid_pct': '1', 'resid_gpus': '512', 'resid_share_pct': '84', 'gpt2_step_s': '1.8', 'gpt2_step_ms': '1,800', 'gpt2_gpus_1': '8', 'gpt2_sync1_gb': '5.2', 'gpt2_gpus_4': '32', 'gpt2_sync4_gb': '5.8', 'eth10_gbs': '1.25', 'eth10_gbps': '10', 'gpt2_comm1_ms': '11.7', 'gpt2_eff1_pct': '99.4', 'gpt2_inter_ms': '4,650', 'gpt2_comm4_ms': '4,661.7', 'gpt2_comm4_round_ms': '4,662', 'gpt2_step4_ms': '6,461.7', 'gpt2_step1_ms': '1,812', 'gpt2_step4_round_ms': '6,462', 'gpt2_eff4_pct': '27.9', 'gpt2_speedup4': '8.9', 'gpt2_accum': '4', 'gpt2_batch': '512', 'gpt2_acc_hours': '3.1', 'gpt2_acc_usd': '100', 'gpt2_4_usd': '359', 'gpt2_4_hours': '2.8', 'node_hour_usd': '32', 'eos_n0': '512', 'eos_n1': '10,752', 'eos_t0': '58', 'eos_t1': '3.9', 'eos_n_x': '21', 'eos_t_x': '14.9', 'eos_eff_pct': '71', 'mlperf_min_pct': '71', 'mlperf_max_pct': '84', 'strag_pct': '1', 'strag_on': '0.99', 'strag_n': '1,000', 'strag_n_plain': '1000', 'strag_expected': '10', 'strag_node_pct': '92', 'strag_100_pct': '37', 'strag_1k_pct': '0.004', 'cb_trace_m': '1.6', 'cb_norm': '100', 'cb_devices': '64', 'cb_local': '4', 'cb_accum': '32', 'cb_global': '8,192', 'cb_bcrit': '16,000', 'cb_per_gpu': '128', 'cb_crossover': '125', 'cb_params_b': '7', 'ssp_base_iters': '100,000', 'bsp8_workers': '8', 'bsp8_iters': '12,800', 'bsp8_comm_pct': '15', 'bsp8_speedup': '6.8', 'bsp8_usd': '26', 'bsp64_workers': '64', 'bsp64_iters': '1,720', 'bsp64_comm_pct': '45', 'bsp64_speedup': '40.1', 'bsp64_usd': '35', 'ssp64_workers': '64', 'ssp64_iters': '2,100', 'ssp64_comm_pct': '25', 'ssp64_speedup': '38.1', 'ssp64_usd': '37', 'ssp_s': '4', 'ssp_batch': '32', 'gpu_hour_usd': '2', 'wall_growth': '15', 'wall_orders_word': 'four', 'wall_gap': '35', 'z7_params_b': '7', 'z7_gpus': '64', 'a100_gb': '80', 'z7_ddp_gb': '112', 'z7_opt_gb': '84', 'z7_z1_gb': '29.3', 'z7_z2_gb': '15.5', 'z7_z3_gb': '1.75', 'z7_weights_gb': '14', 'z3_traffic_x': '1.5', 'z175_gpus': '64', 'z175_state_gb': '43.75', 'z175_act_gb': '4.8', 'z175_total_gb': '48.6', 'z175_seq': '2,048', 'z175_gather_tb': '1.1', 'z175_gather_x': '10', 'z175_gather_x_word': 'ten', 'naive_busy': '2', 'naive_slots': '8', 'naive_idle': '6', 'pipe_p': '4', 'pipe_busy': '8', 'pipe_slots': '14', 'pipe_idle': '6', 'pipe_bubble_pct': '43', 'pipe_fill': '3', 'pipe_phase': '7', 'p8m32_p': '8', 'p8m32_m': '32', 'p8m32_fill': '7', 'p8m32_phase': '39', 'p16m32_p': '16', 'p16m32_m': '32', 'p16m32_fill': '15', 'p16m32_phase': '47', 'p8m8_p': '8', 'p8m8_m': '8', 'p8m8_fill': '7', 'p8m8_phase': '15', 'p8m32_bubble_pct': '18', 'p16m32_bubble_pct': '31.9', 'p16m32_bubble_round_pct': '32', 'p8m8_bubble_pct': '47', 'bubble_target_pct': '10', 'bubble_m_coef': '9', 'p16_m_needed': '135', 'depth_word': 'four', 'tp_degree': '8', 'tp_tokens': '2,048', 'tp_compute_ms': '1.9', 'tp_nvlink_ms': '0.4', 'tp_ndr_ms': '3.5', 'gpt3_layers': '96', 'meg_2_pct': '95', 'meg_4_pct': '82', 'meg_8_pct': '77', 'meg_top_pct': '74', 'meg_gpus': '512', 'meg_servers': '64', 'meg_base_b': '1.2', 'meg_top_b': '8.3', 'nvswitch_gbs': '300', 'ring_nvlink_tokens': '1,100', 'ring_ndr_tokens': '9,900', 'dlrm_tb': '10', 'tp_b': '8', 'dp_a': '1024', 'dp_b': '128', 'pp_c': '4', 'dp_c': '32', 'dp_c_others': '31', 'm_c': '32', 'shard_b_gb': '43.75', 'shard_c_gb': '10.9', 'ar_b_s': '1.75', 'ar_c_s': '0.44', 'eff_b_raw_pct': '54.5', 'eff_b_pct': '83', 'eff_c_pct': '87', 'bubble_c_pct': '8.6', 'bubble_c_fill': '3', 'bubble_c_phase': '35', 'state_b_gb': '350', 'state_c_gb': '87.5', 'zero1_c_gb': '24', 'dp_byte_cut_x': '8', 'l16k_gpus': '16,384', 'l16k_pp': '16', 'l16k_state_gb': '21.9', 'l16k_bubble_pct': '31.9', 'll3_gpus_8k': '8,192', 'll3_gpus_16k': '16,384', 'll3_tp': '8', 'll3_pp': '16', 'll3_cp_long': '16', 'll3_dp_8k': '64', 'll3_dp_16k': '128', 'll3_dp_long': '8', 'll3_seq': '8,192', 'll3_seq_long': '131,072', 'll3_tokens_m': '16', 'll3_tflops_8k': '430', 'll3_tflops_16k': '400', 'll3_tflops_long': '380', 'll3_mfu_8k': '43', 'll3_mfu_16k': '41', 'll3_mfu_long': '38', 'recomp_base': '3', 'recomp_full': '4', 'recomp_pct': '33', 'act_none_tb': '1.1', 'act_full_gb': '19.3', 'act_mb': '4', 'rlhf_policy_b': '70', 'rlhf_critic_b': '13', 'rlhf_policy_gb': '1,120', 'rlhf_ref_gb': '140', 'rlhf_reward_gb': '26', 'rlhf_value_gb': '208', 'rlhf_ppo_gb': '1,494', 'rlhf_dpo_gb': '1,260', 'rlhf_dpo_cut_pct': '15.7', 'rlhf_kv_gb': '85.9', 'rlhf_rollouts': '256', 'rlhf_rollout_tokens': '1,024', 'rlhf_tp': '8', 'rlhf_pp': '4', 'rlhf_dp': '8', 'rlhf_gpus': '256', 'rlhf_policy_per_gpu_gb': '35', 'rlhf_train_infer_word': 'eight', 'fleet_mfu_pct': '41', 'double_mfu_pct': '34', 'gpu_mttf_h': '50,000', 'fail_gpus': '1,024', 'fail_interval_h': '48.8', 'fail_interval_days_word': 'two'}
-_NUMS = {'goyal_gpus': 256.0, 'goyal_hours': 1.0, 'goyal_base_hours': 29.0, 'goyal_base_gpus': 8.0, 'goyal_base_batch': 256.0, 'goyal_batch': 8192.0, 'goyal_batch_k': 8.0, 'goyal_servers': 32.0, 'goyal_per_gpu': 32.0, 'goyal_batch_x': 32.0, 'goyal_gpu_x': 32.0, 'goyal_eff_pct': 90.0, 'goyal_eth_gbps': 50.0, 'goyal_epochs': 90.0, 'goyal_warmup_epochs': 5.0, 'goyal_err_base': 23.6, 'goyal_err_nowarm': 24.84, 'goyal_err_warm': 23.74, 'goyal_spread': 0.3, 'goyal_up1_k': 16.0, 'goyal_up1_err': 24.79, 'goyal_up2_k': 32.0, 'goyal_up2_err': 27.55, 'goyal_up3_k': 64.0, 'goyal_up3_err': 33.96, 'params_b': 175.0, 'state_bpp': 16.0, 'opt_bpp': 12.0, 'fp16_bytes': 2.0, 'state_gb': 2800.0, 'state_tb': 2.8, 'hbm_gb': 80.0, 'state_gpus': 35.0, 'ref_gpus': 1024.0, 'ref_nodes': 128.0, 'gpus_per_node': 8.0, 'nvlink_gbs': 450.0, 'ndr_gbs': 50.0, 'nvlink_ndr_x': 9.0, 'grad_gb': 350.0, 'ring_gb': 699.0, 'ar_a_s': 14.0, 'batch_tokens_m': 2.0, 'flops_per_pt': 6.0, 'step_eflops': 2.1, 'local_eff_pct': 50.0, 'fp8_tflops': 1979.0, 't_compute_s': 2.1, 'exposed_a_s': 11.9, 'step_a_s': 14.0, 'eff_a_pct': 15.0, 'resid_pct': 1.0, 'resid_gpus': 512.0, 'resid_share_pct': 84.0, 'gpt2_step_s': 1.8, 'gpt2_step_ms': 1800.0, 'gpt2_gpus_1': 8.0, 'gpt2_sync1_gb': 5.2, 'gpt2_gpus_4': 32.0, 'gpt2_sync4_gb': 5.8, 'eth10_gbs': 1.25, 'eth10_gbps': 10.0, 'gpt2_comm1_ms': 11.7, 'gpt2_eff1_pct': 99.4, 'gpt2_inter_ms': 4650.0, 'gpt2_comm4_ms': 4661.7, 'gpt2_comm4_round_ms': 4662.0, 'gpt2_step4_ms': 6461.7, 'gpt2_step1_ms': 1812.0, 'gpt2_step4_round_ms': 6462.0, 'gpt2_eff4_pct': 27.9, 'gpt2_speedup4': 8.9, 'gpt2_accum': 4.0, 'gpt2_batch': 512.0, 'gpt2_acc_hours': 3.1, 'gpt2_acc_usd': 100.0, 'gpt2_4_usd': 359.0, 'gpt2_4_hours': 2.8, 'node_hour_usd': 32.0, 'eos_n0': 512.0, 'eos_n1': 10752.0, 'eos_t0': 58.0, 'eos_t1': 3.9, 'eos_n_x': 21.0, 'eos_t_x': 14.9, 'eos_eff_pct': 71.0, 'mlperf_min_pct': 71.0, 'mlperf_max_pct': 84.0, 'strag_pct': 1.0, 'strag_on': 0.99, 'strag_n': 1000.0, 'strag_n_plain': 1000.0, 'strag_expected': 10.0, 'strag_node_pct': 92.0, 'strag_100_pct': 37.0, 'strag_1k_pct': 0.004, 'cb_trace_m': 1.6, 'cb_norm': 100.0, 'cb_devices': 64.0, 'cb_local': 4.0, 'cb_accum': 32.0, 'cb_global': 8192.0, 'cb_bcrit': 16000.0, 'cb_per_gpu': 128.0, 'cb_crossover': 125.0, 'cb_params_b': 7.0, 'ssp_base_iters': 100000.0, 'bsp8_workers': 8.0, 'bsp8_iters': 12800.0, 'bsp8_comm_pct': 15.0, 'bsp8_speedup': 6.8, 'bsp8_usd': 26.0, 'bsp64_workers': 64.0, 'bsp64_iters': 1720.0, 'bsp64_comm_pct': 45.0, 'bsp64_speedup': 40.1, 'bsp64_usd': 35.0, 'ssp64_workers': 64.0, 'ssp64_iters': 2100.0, 'ssp64_comm_pct': 25.0, 'ssp64_speedup': 38.1, 'ssp64_usd': 37.0, 'ssp_s': 4.0, 'ssp_batch': 32.0, 'gpu_hour_usd': 2.0, 'wall_growth': 15.0, 'wall_gap': 35.0, 'z7_params_b': 7.0, 'z7_gpus': 64.0, 'a100_gb': 80.0, 'z7_ddp_gb': 112.0, 'z7_opt_gb': 84.0, 'z7_z1_gb': 29.3, 'z7_z2_gb': 15.5, 'z7_z3_gb': 1.75, 'z7_weights_gb': 14.0, 'z3_traffic_x': 1.5, 'z175_gpus': 64.0, 'z175_state_gb': 43.75, 'z175_act_gb': 4.8, 'z175_total_gb': 48.6, 'z175_seq': 2048.0, 'z175_gather_tb': 1.1, 'z175_gather_x': 10.0, 'naive_busy': 2.0, 'naive_slots': 8.0, 'naive_idle': 6.0, 'pipe_p': 4.0, 'pipe_busy': 8.0, 'pipe_slots': 14.0, 'pipe_idle': 6.0, 'pipe_bubble_pct': 43.0, 'pipe_fill': 3.0, 'pipe_phase': 7.0, 'p8m32_p': 8.0, 'p8m32_m': 32.0, 'p8m32_fill': 7.0, 'p8m32_phase': 39.0, 'p16m32_p': 16.0, 'p16m32_m': 32.0, 'p16m32_fill': 15.0, 'p16m32_phase': 47.0, 'p8m8_p': 8.0, 'p8m8_m': 8.0, 'p8m8_fill': 7.0, 'p8m8_phase': 15.0, 'p8m32_bubble_pct': 18.0, 'p16m32_bubble_pct': 31.9, 'p16m32_bubble_round_pct': 32.0, 'p8m8_bubble_pct': 47.0, 'bubble_target_pct': 10.0, 'bubble_m_coef': 9.0, 'p16_m_needed': 135.0, 'tp_degree': 8.0, 'tp_tokens': 2048.0, 'tp_compute_ms': 1.9, 'tp_nvlink_ms': 0.4, 'tp_ndr_ms': 3.5, 'gpt3_layers': 96.0, 'meg_2_pct': 95.0, 'meg_4_pct': 82.0, 'meg_8_pct': 77.0, 'meg_top_pct': 74.0, 'meg_gpus': 512.0, 'meg_servers': 64.0, 'meg_base_b': 1.2, 'meg_top_b': 8.3, 'nvswitch_gbs': 300.0, 'ring_nvlink_tokens': 1100.0, 'ring_ndr_tokens': 9900.0, 'dlrm_tb': 10.0, 'tp_b': 8.0, 'dp_a': 1024.0, 'dp_b': 128.0, 'pp_c': 4.0, 'dp_c': 32.0, 'dp_c_others': 31.0, 'm_c': 32.0, 'shard_b_gb': 43.75, 'shard_c_gb': 10.9, 'ar_b_s': 1.75, 'ar_c_s': 0.44, 'eff_b_raw_pct': 54.5, 'eff_b_pct': 83.0, 'eff_c_pct': 87.0, 'bubble_c_pct': 8.6, 'bubble_c_fill': 3.0, 'bubble_c_phase': 35.0, 'state_b_gb': 350.0, 'state_c_gb': 87.5, 'zero1_c_gb': 24.0, 'dp_byte_cut_x': 8.0, 'l16k_gpus': 16384.0, 'l16k_pp': 16.0, 'l16k_state_gb': 21.9, 'l16k_bubble_pct': 31.9, 'll3_gpus_8k': 8192.0, 'll3_gpus_16k': 16384.0, 'll3_tp': 8.0, 'll3_pp': 16.0, 'll3_cp_long': 16.0, 'll3_dp_8k': 64.0, 'll3_dp_16k': 128.0, 'll3_dp_long': 8.0, 'll3_seq': 8192.0, 'll3_seq_long': 131072.0, 'll3_tokens_m': 16.0, 'll3_tflops_8k': 430.0, 'll3_tflops_16k': 400.0, 'll3_tflops_long': 380.0, 'll3_mfu_8k': 43.0, 'll3_mfu_16k': 41.0, 'll3_mfu_long': 38.0, 'recomp_base': 3.0, 'recomp_full': 4.0, 'recomp_pct': 33.0, 'act_none_tb': 1.1, 'act_full_gb': 19.3, 'act_mb': 4.0, 'rlhf_policy_b': 70.0, 'rlhf_critic_b': 13.0, 'rlhf_policy_gb': 1120.0, 'rlhf_ref_gb': 140.0, 'rlhf_reward_gb': 26.0, 'rlhf_value_gb': 208.0, 'rlhf_ppo_gb': 1494.0, 'rlhf_dpo_gb': 1260.0, 'rlhf_dpo_cut_pct': 15.7, 'rlhf_kv_gb': 85.9, 'rlhf_rollouts': 256.0, 'rlhf_rollout_tokens': 1024.0, 'rlhf_tp': 8.0, 'rlhf_pp': 4.0, 'rlhf_dp': 8.0, 'rlhf_gpus': 256.0, 'rlhf_policy_per_gpu_gb': 35.0, 'fleet_mfu_pct': 41.0, 'double_mfu_pct': 34.0, 'gpu_mttf_h': 50000.0, 'fail_gpus': 1024.0, 'fail_interval_h': 48.8}
+_VALS = {'goyal_gpus': '256', 'goyal_hours_word': 'one', 'goyal_hours': '1', 'goyal_base_hours': '29', 'goyal_base_gpus': '8', 'goyal_base_batch': '256', 'goyal_batch': '8,192', 'goyal_batch_k': '8', 'goyal_servers': '32', 'goyal_per_gpu': '32', 'goyal_batch_x': '32', 'goyal_gpu_x': '32', 'goyal_eff_pct': '90', 'goyal_eth_gbps': '50', 'goyal_epochs': '90', 'goyal_warmup_epochs': '5', 'goyal_err_base': '23.60', 'goyal_err_nowarm': '24.84', 'goyal_err_warm': '23.74', 'goyal_spread': '0.3', 'goyal_up1_k': '16', 'goyal_up1_err': '24.79', 'goyal_up2_k': '32', 'goyal_up2_err': '27.55', 'goyal_up3_k': '64', 'goyal_up3_err': '33.96', 'params_b': '175', 'state_bpp': '16', 'opt_bpp': '12', 'fp16_bytes': '2', 'state_gb': '2,800', 'state_tb': '2.8', 'hbm_gb': '80', 'state_gpus': '35', 'ref_gpus': '1,024', 'ref_nodes': '128', 'gpus_per_node': '8', 'nvlink_gbs': '450', 'ndr_gbs': '50', 'nvlink_ndr_x': '9', 'grad_gb': '350', 'ring_gb': '699', 'ar_a_s': '14', 'batch_tokens_m': '2', 'flops_per_pt': '6', 'step_eflops': '2.1', 'local_eff_pct': '50', 'fp8_tflops': '1,979', 't_compute_s': '2.1', 'exposed_a_s': '11.9', 'step_a_s': '14.0', 'eff_a_pct': '15', 'resid_pct': '1', 'resid_gpus': '512', 'resid_share_pct': '84', 'gpt2_step_s': '1.8', 'gpt2_step_ms': '1,800', 'gpt2_gpus_1': '8', 'gpt2_sync1_gb': '5.2', 'gpt2_gpus_4': '32', 'gpt2_sync4_gb': '4.5', 'eth10_gbs': '1.25', 'eth10_gbps': '10', 'gpt2_comm1_ms': '11.7', 'gpt2_eff1_pct': '99.4', 'gpt2_inter_ms': '3,600', 'gpt2_comm4_ms': '3,611.7', 'gpt2_comm4_round_ms': '3,612', 'gpt2_step4_ms': '5,411.7', 'gpt2_step1_ms': '1,812', 'gpt2_step4_round_ms': '5,412', 'gpt2_eff4_pct': '33.3', 'gpt2_speedup4': '10.6', 'gpt2_accum': '4', 'gpt2_batch': '512', 'gpt2_acc_hours': '3.1', 'gpt2_acc_usd': '100', 'gpt2_4_usd': '301', 'gpt2_4_hours': '2.4', 'node_hour_usd': '32', 'eos_n0': '512', 'eos_n1': '10,752', 'eos_t0': '58', 'eos_t1': '3.9', 'eos_n_x': '21', 'eos_t_x': '14.9', 'eos_eff_pct': '71', 'mlperf_min_pct': '71', 'mlperf_max_pct': '84', 'strag_pct': '1', 'strag_on': '0.99', 'strag_n': '1,000', 'strag_n_plain': '1000', 'strag_expected': '10', 'strag_node_pct': '92', 'strag_100_pct': '37', 'strag_1k_pct': '0.004', 'cb_trace_m': '1.6', 'cb_norm': '100', 'cb_devices': '64', 'cb_local': '4', 'cb_accum': '32', 'cb_global': '8,192', 'cb_bcrit': '16,000', 'cb_per_gpu': '128', 'cb_crossover': '125', 'cb_params_b': '7', 'ssp_base_iters': '100,000', 'bsp8_workers': '8', 'bsp8_iters': '12,800', 'bsp8_comm_pct': '15', 'bsp8_speedup': '6.8', 'bsp8_usd': '26', 'bsp64_workers': '64', 'bsp64_iters': '1,720', 'bsp64_comm_pct': '45', 'bsp64_speedup': '40.1', 'bsp64_usd': '35', 'ssp64_workers': '64', 'ssp64_iters': '2,100', 'ssp64_comm_pct': '25', 'ssp64_speedup': '38.1', 'ssp64_usd': '37', 'ssp_s': '4', 'ssp_batch': '32', 'gpu_hour_usd': '2', 'wall_growth': '15', 'wall_orders_word': 'four', 'wall_gap': '35', 'z7_params_b': '7', 'z7_gpus': '64', 'a100_gb': '80', 'z7_ddp_gb': '112', 'z7_opt_gb': '84', 'z7_z1_gb': '29.3', 'z7_z2_gb': '15.5', 'z7_z3_gb': '1.75', 'z7_weights_gb': '14', 'z3_traffic_x': '1.5', 'z175_gpus': '64', 'z175_state_gb': '43.75', 'z175_act_gb': '4.8', 'z175_total_gb': '48.6', 'z175_seq': '2,048', 'z175_gather_tb': '1.1', 'z175_gather_x': '10', 'z175_gather_x_word': 'ten', 'naive_busy': '2', 'naive_slots': '8', 'naive_idle': '6', 'pipe_p': '4', 'pipe_busy': '8', 'pipe_slots': '14', 'pipe_idle': '6', 'pipe_bubble_pct': '43', 'pipe_fill': '3', 'pipe_phase': '7', 'p8m32_p': '8', 'p8m32_m': '32', 'p8m32_fill': '7', 'p8m32_phase': '39', 'p16m32_p': '16', 'p16m32_m': '32', 'p16m32_fill': '15', 'p16m32_phase': '47', 'p8m8_p': '8', 'p8m8_m': '8', 'p8m8_fill': '7', 'p8m8_phase': '15', 'p8m32_bubble_pct': '18', 'p16m32_bubble_pct': '31.9', 'p16m32_bubble_round_pct': '32', 'p8m8_bubble_pct': '47', 'bubble_target_pct': '10', 'bubble_m_coef': '9', 'p16_m_needed': '135', 'depth_word': 'four', 'tp_degree': '8', 'tp_tokens': '2,048', 'tp_compute_ms': '1.9', 'tp_nvlink_ms': '0.4', 'tp_ndr_ms': '3.5', 'gpt3_layers': '96', 'meg_2_pct': '95', 'meg_4_pct': '82', 'meg_8_pct': '77', 'meg_top_pct': '74', 'meg_gpus': '512', 'meg_servers': '64', 'meg_base_b': '1.2', 'meg_top_b': '8.3', 'nvswitch_gbs': '300', 'ring_nvlink_tokens': '1,100', 'ring_ndr_tokens': '9,900', 'dlrm_tb': '10', 'tp_b': '8', 'dp_a': '1024', 'dp_b': '128', 'pp_c': '4', 'dp_c': '32', 'dp_c_others': '31', 'm_c': '32', 'shard_b_gb': '43.75', 'shard_c_gb': '10.9', 'ar_b_s': '1.75', 'ar_c_s': '0.44', 'eff_b_raw_pct': '54.5', 'eff_b_pct': '83', 'eff_c_pct': '87', 'bubble_c_pct': '8.6', 'bubble_c_fill': '3', 'bubble_c_phase': '35', 'state_b_gb': '350', 'state_c_gb': '87.5', 'zero1_c_gb': '24', 'dp_byte_cut_x': '8', 'l16k_gpus': '16,384', 'l16k_pp': '16', 'l16k_state_gb': '21.9', 'l16k_bubble_pct': '31.9', 'll3_gpus_8k': '8,192', 'll3_gpus_16k': '16,384', 'll3_tp': '8', 'll3_pp': '16', 'll3_cp_long': '16', 'll3_dp_8k': '64', 'll3_dp_16k': '128', 'll3_dp_long': '8', 'll3_seq': '8,192', 'll3_seq_long': '131,072', 'll3_tokens_m': '16', 'll3_tflops_8k': '430', 'll3_tflops_16k': '400', 'll3_tflops_long': '380', 'll3_mfu_8k': '43', 'll3_mfu_16k': '41', 'll3_mfu_long': '38', 'recomp_base': '3', 'recomp_full': '4', 'recomp_pct': '33', 'act_none_tb': '1.1', 'act_full_gb': '19.3', 'act_mb': '4', 'rlhf_policy_b': '70', 'rlhf_critic_b': '13', 'rlhf_policy_gb': '1,120', 'rlhf_ref_gb': '140', 'rlhf_reward_gb': '26', 'rlhf_value_gb': '208', 'rlhf_ppo_gb': '1,494', 'rlhf_dpo_gb': '1,260', 'rlhf_dpo_cut_pct': '15.7', 'rlhf_kv_gb': '85.9', 'rlhf_rollouts': '256', 'rlhf_rollout_tokens': '1,024', 'rlhf_tp': '8', 'rlhf_pp': '4', 'rlhf_dp': '8', 'rlhf_gpus': '256', 'rlhf_policy_per_gpu_gb': '35', 'rlhf_train_infer_word': 'eight', 'fleet_mfu_pct': '41', 'double_mfu_pct': '34', 'gpu_mttf_h': '50,000', 'fail_gpus': '1,024', 'fail_interval_h': '48.8', 'fail_interval_days_word': 'two'}
+_NUMS = {'goyal_gpus': 256.0, 'goyal_hours': 1.0, 'goyal_base_hours': 29.0, 'goyal_base_gpus': 8.0, 'goyal_base_batch': 256.0, 'goyal_batch': 8192.0, 'goyal_batch_k': 8.0, 'goyal_servers': 32.0, 'goyal_per_gpu': 32.0, 'goyal_batch_x': 32.0, 'goyal_gpu_x': 32.0, 'goyal_eff_pct': 90.0, 'goyal_eth_gbps': 50.0, 'goyal_epochs': 90.0, 'goyal_warmup_epochs': 5.0, 'goyal_err_base': 23.6, 'goyal_err_nowarm': 24.84, 'goyal_err_warm': 23.74, 'goyal_spread': 0.3, 'goyal_up1_k': 16.0, 'goyal_up1_err': 24.79, 'goyal_up2_k': 32.0, 'goyal_up2_err': 27.55, 'goyal_up3_k': 64.0, 'goyal_up3_err': 33.96, 'params_b': 175.0, 'state_bpp': 16.0, 'opt_bpp': 12.0, 'fp16_bytes': 2.0, 'state_gb': 2800.0, 'state_tb': 2.8, 'hbm_gb': 80.0, 'state_gpus': 35.0, 'ref_gpus': 1024.0, 'ref_nodes': 128.0, 'gpus_per_node': 8.0, 'nvlink_gbs': 450.0, 'ndr_gbs': 50.0, 'nvlink_ndr_x': 9.0, 'grad_gb': 350.0, 'ring_gb': 699.0, 'ar_a_s': 14.0, 'batch_tokens_m': 2.0, 'flops_per_pt': 6.0, 'step_eflops': 2.1, 'local_eff_pct': 50.0, 'fp8_tflops': 1979.0, 't_compute_s': 2.1, 'exposed_a_s': 11.9, 'step_a_s': 14.0, 'eff_a_pct': 15.0, 'resid_pct': 1.0, 'resid_gpus': 512.0, 'resid_share_pct': 84.0, 'gpt2_step_s': 1.8, 'gpt2_step_ms': 1800.0, 'gpt2_gpus_1': 8.0, 'gpt2_sync1_gb': 5.2, 'gpt2_gpus_4': 32.0, 'gpt2_sync4_gb': 4.5, 'eth10_gbs': 1.25, 'eth10_gbps': 10.0, 'gpt2_comm1_ms': 11.7, 'gpt2_eff1_pct': 99.4, 'gpt2_inter_ms': 3600.0, 'gpt2_comm4_ms': 3611.7, 'gpt2_comm4_round_ms': 3612.0, 'gpt2_step4_ms': 5411.7, 'gpt2_step1_ms': 1812.0, 'gpt2_step4_round_ms': 5412.0, 'gpt2_eff4_pct': 33.3, 'gpt2_speedup4': 10.6, 'gpt2_accum': 4.0, 'gpt2_batch': 512.0, 'gpt2_acc_hours': 3.1, 'gpt2_acc_usd': 100.0, 'gpt2_4_usd': 301.0, 'gpt2_4_hours': 2.4, 'node_hour_usd': 32.0, 'eos_n0': 512.0, 'eos_n1': 10752.0, 'eos_t0': 58.0, 'eos_t1': 3.9, 'eos_n_x': 21.0, 'eos_t_x': 14.9, 'eos_eff_pct': 71.0, 'mlperf_min_pct': 71.0, 'mlperf_max_pct': 84.0, 'strag_pct': 1.0, 'strag_on': 0.99, 'strag_n': 1000.0, 'strag_n_plain': 1000.0, 'strag_expected': 10.0, 'strag_node_pct': 92.0, 'strag_100_pct': 37.0, 'strag_1k_pct': 0.004, 'cb_trace_m': 1.6, 'cb_norm': 100.0, 'cb_devices': 64.0, 'cb_local': 4.0, 'cb_accum': 32.0, 'cb_global': 8192.0, 'cb_bcrit': 16000.0, 'cb_per_gpu': 128.0, 'cb_crossover': 125.0, 'cb_params_b': 7.0, 'ssp_base_iters': 100000.0, 'bsp8_workers': 8.0, 'bsp8_iters': 12800.0, 'bsp8_comm_pct': 15.0, 'bsp8_speedup': 6.8, 'bsp8_usd': 26.0, 'bsp64_workers': 64.0, 'bsp64_iters': 1720.0, 'bsp64_comm_pct': 45.0, 'bsp64_speedup': 40.1, 'bsp64_usd': 35.0, 'ssp64_workers': 64.0, 'ssp64_iters': 2100.0, 'ssp64_comm_pct': 25.0, 'ssp64_speedup': 38.1, 'ssp64_usd': 37.0, 'ssp_s': 4.0, 'ssp_batch': 32.0, 'gpu_hour_usd': 2.0, 'wall_growth': 15.0, 'wall_gap': 35.0, 'z7_params_b': 7.0, 'z7_gpus': 64.0, 'a100_gb': 80.0, 'z7_ddp_gb': 112.0, 'z7_opt_gb': 84.0, 'z7_z1_gb': 29.3, 'z7_z2_gb': 15.5, 'z7_z3_gb': 1.75, 'z7_weights_gb': 14.0, 'z3_traffic_x': 1.5, 'z175_gpus': 64.0, 'z175_state_gb': 43.75, 'z175_act_gb': 4.8, 'z175_total_gb': 48.6, 'z175_seq': 2048.0, 'z175_gather_tb': 1.1, 'z175_gather_x': 10.0, 'naive_busy': 2.0, 'naive_slots': 8.0, 'naive_idle': 6.0, 'pipe_p': 4.0, 'pipe_busy': 8.0, 'pipe_slots': 14.0, 'pipe_idle': 6.0, 'pipe_bubble_pct': 43.0, 'pipe_fill': 3.0, 'pipe_phase': 7.0, 'p8m32_p': 8.0, 'p8m32_m': 32.0, 'p8m32_fill': 7.0, 'p8m32_phase': 39.0, 'p16m32_p': 16.0, 'p16m32_m': 32.0, 'p16m32_fill': 15.0, 'p16m32_phase': 47.0, 'p8m8_p': 8.0, 'p8m8_m': 8.0, 'p8m8_fill': 7.0, 'p8m8_phase': 15.0, 'p8m32_bubble_pct': 18.0, 'p16m32_bubble_pct': 31.9, 'p16m32_bubble_round_pct': 32.0, 'p8m8_bubble_pct': 47.0, 'bubble_target_pct': 10.0, 'bubble_m_coef': 9.0, 'p16_m_needed': 135.0, 'tp_degree': 8.0, 'tp_tokens': 2048.0, 'tp_compute_ms': 1.9, 'tp_nvlink_ms': 0.4, 'tp_ndr_ms': 3.5, 'gpt3_layers': 96.0, 'meg_2_pct': 95.0, 'meg_4_pct': 82.0, 'meg_8_pct': 77.0, 'meg_top_pct': 74.0, 'meg_gpus': 512.0, 'meg_servers': 64.0, 'meg_base_b': 1.2, 'meg_top_b': 8.3, 'nvswitch_gbs': 300.0, 'ring_nvlink_tokens': 1100.0, 'ring_ndr_tokens': 9900.0, 'dlrm_tb': 10.0, 'tp_b': 8.0, 'dp_a': 1024.0, 'dp_b': 128.0, 'pp_c': 4.0, 'dp_c': 32.0, 'dp_c_others': 31.0, 'm_c': 32.0, 'shard_b_gb': 43.75, 'shard_c_gb': 10.9, 'ar_b_s': 1.75, 'ar_c_s': 0.44, 'eff_b_raw_pct': 54.5, 'eff_b_pct': 83.0, 'eff_c_pct': 87.0, 'bubble_c_pct': 8.6, 'bubble_c_fill': 3.0, 'bubble_c_phase': 35.0, 'state_b_gb': 350.0, 'state_c_gb': 87.5, 'zero1_c_gb': 24.0, 'dp_byte_cut_x': 8.0, 'l16k_gpus': 16384.0, 'l16k_pp': 16.0, 'l16k_state_gb': 21.9, 'l16k_bubble_pct': 31.9, 'll3_gpus_8k': 8192.0, 'll3_gpus_16k': 16384.0, 'll3_tp': 8.0, 'll3_pp': 16.0, 'll3_cp_long': 16.0, 'll3_dp_8k': 64.0, 'll3_dp_16k': 128.0, 'll3_dp_long': 8.0, 'll3_seq': 8192.0, 'll3_seq_long': 131072.0, 'll3_tokens_m': 16.0, 'll3_tflops_8k': 430.0, 'll3_tflops_16k': 400.0, 'll3_tflops_long': 380.0, 'll3_mfu_8k': 43.0, 'll3_mfu_16k': 41.0, 'll3_mfu_long': 38.0, 'recomp_base': 3.0, 'recomp_full': 4.0, 'recomp_pct': 33.0, 'act_none_tb': 1.1, 'act_full_gb': 19.3, 'act_mb': 4.0, 'rlhf_policy_b': 70.0, 'rlhf_critic_b': 13.0, 'rlhf_policy_gb': 1120.0, 'rlhf_ref_gb': 140.0, 'rlhf_reward_gb': 26.0, 'rlhf_value_gb': 208.0, 'rlhf_ppo_gb': 1494.0, 'rlhf_dpo_gb': 1260.0, 'rlhf_dpo_cut_pct': 15.7, 'rlhf_kv_gb': 85.9, 'rlhf_rollouts': 256.0, 'rlhf_rollout_tokens': 1024.0, 'rlhf_tp': 8.0, 'rlhf_pp': 4.0, 'rlhf_dp': 8.0, 'rlhf_gpus': 256.0, 'rlhf_policy_per_gpu_gb': 35.0, 'fleet_mfu_pct': 41.0, 'double_mfu_pct': 34.0, 'gpu_mttf_h': 50000.0, 'fail_gpus': 1024.0, 'fail_interval_h': 48.8}
 import sys
 from pathlib import Path
 import numpy as np
@@ -154,7 +154,7 @@ for k in (1, 2):
     sp.save(fig, out / f'eta_bars_step{k}.svg')
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 1.6))
-    data = [('8 GPUs, one node\n(NVLink)', 1800.0, 11.7, '99.4%', '1,812'), ('32 GPUs, four nodes\n(10 Gb Ethernet)', 1800.0, 4661.7, '27.9%', '6,462')]
+    data = [('8 GPUs, one node\n(NVLink)', 1800.0, 11.7, '99.4%', '1,812'), ('32 GPUs, four nodes\n(10 Gb Ethernet)', 1800.0, 3611.7, '33.3%', '5,412')]
     for i, (name, comp, comm, eff, total) in enumerate(data):
         y = 1 - i
         shown = i == 0 or k >= 2
@@ -165,8 +165,8 @@ for k in (1, 2):
         label(ax, comp + comm + 80, y, f'{total} ms   {eff}', C['data'] if i == 0 else C['danger'], shown, va='center', fontsize=12.5)
     label(ax, 900, 1, 'compute', 'white', True, ha='center', va='center', fontsize=11)
     label(ax, 900, 0, 'compute', 'white', k >= 2, ha='center', va='center', fontsize=11)
-    label(ax, 4100, 0, 'communication 4,662 ms', 'white', k >= 2, ha='center', va='center', fontsize=11)
-    ax.set_xlim(0, 8500)
+    label(ax, 1800.0 + 3611.7 / 2, 0, 'communication 3,612 ms', 'white', k >= 2, ha='center', va='center', fontsize=11)
+    ax.set_xlim(0, 7500)
     ax.set_ylim(-0.5, 1.5)
     ax.set_yticks([])
     ax.spines['left'].set_visible(False)
@@ -180,8 +180,12 @@ for (name, col), pts, eff, (_, (_, _, _, acc)) in zip(names_ml, [[{'round': 'v3.
     t = [r['score_minutes'] for r in pts]
     ax.plot(n, t, '-o', ms=5, lw=2.2, color=col, zorder=3)
     ax.plot([n[0], n[-1]], [t[0], t[0] * n[0] / n[-1]], '--', lw=1.2, color=col, alpha=0.7)
-    dy = -11 if acc == 'TPU-trillium' else 5 if acc == 'Blackwell' else 0
-    ax.annotate(f'{eff:.0%}', (n[-1], t[-1]), xytext=(6, dy), textcoords='offset points', fontsize=11, fontweight='bold', color=col, va='center')
+    if acc == 'TPU-trillium':
+        ax.annotate(f'{eff:.0%}', (n[-1], t[-1]), xytext=(5200, 18.5), textcoords='data', fontsize=10.5, fontweight='bold', color=col, va='center', ha='left', arrowprops=dict(arrowstyle='-', color=col, lw=0.9))
+    elif acc == 'Blackwell':
+        ax.annotate(f'{eff:.0%}', (n[-1], t[-1]), xytext=(3350, 28.5), textcoords='data', fontsize=10.5, fontweight='bold', color=col, va='center', ha='left', arrowprops=dict(arrowstyle='-', color=col, lw=0.9))
+    else:
+        ax.annotate(f'{eff:.0%}', (n[-1], t[-1]), xytext=(6, 0), textcoords='offset points', fontsize=11, fontweight='bold', color=col, va='center')
     ax.plot([], [], '-o', color=col, lw=2.2, ms=5, label=name)
 ax.set_xscale('log')
 ax.set_yscale('log')
@@ -286,6 +290,9 @@ ax.tick_params(labelsize=14)
 sp.save(fig, out / 'goyal_batch.svg')
 deck_label = {'AlexNet': 'AlexNet', 'VGG-16': '', 'BERT-Large': '', 'GPT-2': 'GPT-2', 'GPT-3': 'GPT-3', 'PaLM': 'PaLM', 'Llama 3 (405B)': 'Llama 3 405B'}
 wall_rows = [{'Year': 2012, 'Date': '2012-09-30', 'Name': 'AlexNet', 'Type': 'Model', 'Memory_GB': 0.96}, {'Year': 2014, 'Date': '2014-09-04', 'Name': 'VGG-16', 'Type': 'Model', 'Memory_GB': 2.208}, {'Year': 2015, 'Date': '2015-12-10', 'Name': 'ResNet-152', 'Type': 'Model', 'Memory_GB': 0.9632}, {'Year': 2018, 'Date': '2018-10-11', 'Name': 'BERT-Large', 'Type': 'Model', 'Memory_GB': 5.44}, {'Year': 2019, 'Date': '2019-02-14', 'Name': 'GPT-2', 'Type': 'Model', 'Memory_GB': 24.0}, {'Year': 2020, 'Date': '2020-05-28', 'Name': 'GPT-3', 'Type': 'Model', 'Memory_GB': 2793.6}, {'Year': 2022, 'Date': '2022-04-04', 'Name': 'PaLM', 'Type': 'Model', 'Memory_GB': 8645.6}, {'Year': 2024, 'Date': '2024-07-23', 'Name': 'Llama 3 (405B)', 'Type': 'Model', 'Memory_GB': 6480.0}, {'Year': 2014, 'Date': None, 'Name': 'K80', 'Type': 'GPU', 'Memory_GB': 12}, {'Year': 2017, 'Date': None, 'Name': 'V100', 'Type': 'GPU', 'Memory_GB': 32}, {'Year': 2020, 'Date': None, 'Name': 'A100', 'Type': 'GPU', 'Memory_GB': 80}, {'Year': 2022, 'Date': None, 'Name': 'H100', 'Type': 'GPU', 'Memory_GB': 80}, {'Year': 2024, 'Date': None, 'Name': 'B200', 'Type': 'GPU', 'Memory_GB': 180}]
+# B300 (2025) added 2026-11-20 from the registry, as the chapter's MemoryWallTrend reads it.
+from mlsysim import Hardware as _Hw
+wall_rows.append({'Year': int(_Hw.Cloud.B300.release_year), 'Date': '2025-08-22', 'Name': 'B300', 'Type': 'GPU', 'Memory_GB': _Hw.Cloud.B300.memory.capacity.to('GiB').magnitude})
 mx, my, ml = ([], [], [])
 for r_ in wall_rows:
     if r_['Type'] == 'Model' and r_['Name'] in deck_label:
@@ -304,8 +311,8 @@ fig, ax = plt.subplots(figsize=(5.8, 2.35))
 ax.plot(gx, gy, '--s', color=C['memory'], lw=2.5, ms=7)
 ax.plot(mx, my, '-o', color=C['danger'], lw=2.5, ms=7)
 for x, y, lab in zip(gx, gy, gl):
-    ax.annotate(lab, (x, y), xytext=(0, -16), textcoords='offset points', ha='center', fontsize=10.5, fontweight='bold', color=C['memory'])
-offs = {'AlexNet': (4, 8), '': (0, 0), 'GPT-2': (8, -12), 'GPT-3': (-10, 8), 'PaLM': (0, 9), 'Llama 3 405B': (0, -18)}
+    ax.annotate(lab, (x, y), xytext=(0, 9) if lab == 'B300' else (0, -16), textcoords='offset points', ha='center', fontsize=10.5, fontweight='bold', color=C['memory'])
+offs = {'AlexNet': (4, 8), '': (0, 0), 'GPT-2': (8, -12), 'GPT-3': (-10, 8), 'PaLM': (0, 9), 'Llama 3 405B': (0, 9)}
 for x, y, lab in zip(mx, my, ml):
     ax.annotate(lab, (x, y), xytext=offs[lab], textcoords='offset points', ha='right' if lab == 'GPT-3' else 'left' if lab == 'GPT-2' else 'center', fontsize=10.5, fontweight='bold', color=C['danger'])
 ax.annotate('GPT-3: 2.8 TB of state,\n35× one 80 GB GPU', (2020.4, gpt3['Memory_GB']), xytext=(2013.6, 1500), fontsize=11, fontweight='bold', color=C['text'], arrowprops=dict(arrowstyle='->', color=C['text'], lw=1.2))
@@ -313,7 +320,7 @@ ax.text(2012.3, 70, "one accelerator's memory", fontsize=11, fontweight='bold', 
 ax.text(2015.6, 0.35, 'training state, 16 B per parameter', fontsize=11, fontweight='bold', color=C['danger'])
 ax.set_yscale('log')
 ax.set_ylim(0.2, 30000)
-ax.set_xlim(2011.8, 2025.2)
+ax.set_xlim(2011.8, 2025.8)
 ax.set_ylabel('GB (log)')
 ax.set_yticks([1, 10, 100, 1000, 10000])
 ax.set_yticklabels(['1', '10', '100', '1,000', '10,000'])
@@ -378,11 +385,211 @@ def gpipe(p=4, m=4):
             g[st][st + i] = f'F{i + 1}'
             g[st][m + p - 1 + (p - 1 - st) + i] = f'B{m - i}'
     return g
-for k in (1, 2):
-    s = SVG(900, 345)
+for k in (1, 2, 3):
+    s = SVG(900, 392)
     pipe_grid(s, 30, naive(), 'One batch through 4 stages: each GPU idles 6 of 8 slots', 1.0)
     pipe_grid(s, 210, gpipe(), 'Four microbatches (GPipe): each GPU idles 6 of 14 slots, 43%', 1.0 if k >= 2 else 0.0, cw=55)
+    if k >= 3:
+        s.rect(68, 206, 222, 38, 'none', V['bad'], sw=3.2, dash='6,4', rx=5)
+        s.text(460, 372, 'GPipe catch: GPU 0 holds all m = 4 microbatches live before B4', 21, V['bad'], anchor='middle')
     s.save(out / f'pipe_step{k}.svg')
+
+# Explore figure vol2:fig-fsdp-parameter-lifetime (4-step)
+for k in (1, 2, 3, 4):
+    s = SVG(940, 340)
+    cols = ['Init', 'Fwd AG', 'Fwd', 'Release', 'Bwd AG+G', 'RS+Step']
+    rows_f = [
+        ('Param shard (1/N)', V['c1_l'], V['c1']),
+        ('Opt shard (1/N)', '#f1f5f9', V['gray']),
+        ('Gathered params', V['c2_l'], V['c2']),
+        ('Saved activations', V['ok_l'], V['ok']),
+        ('Full layer grad', V['bad_l'], V['bad']),
+        ('Grad shard (1/N)', V['c3_l'], V['c3']),
+    ]
+    x0, y0, cw, rh = 200, 44, 118, 38
+    for ci, cl in enumerate(cols):
+        s.text(x0 + ci * cw + cw / 2, 22, cl, 20, V['text'])
+    for ri, (rl, fc, ec) in enumerate(rows_f):
+        y = y0 + ri * (rh + 6)
+        s.text(x0 - 12, y + rh / 2, rl, 19, V['text'], anchor='end')
+        for ci in range(6):
+            x = x0 + ci * cw + 4
+            s.rect(x, y, cw - 8, rh, '#f8fafc', '#e2e8f0', sw=1.2, rx=4)
+    # Step 1: persistent param & opt shards
+    for ci in range(6):
+        x = x0 + ci * cw + 4
+        s.rect(x, y0, cw - 8, rh, V['c1_l'], V['c1'], sw=2, rx=4)
+        s.text(x + (cw - 8) / 2, y0 + rh / 2, '1/N', 20, V['c1'])
+        s.rect(x, y0 + 44, cw - 8, rh, '#e2e8f0', V['gray'], sw=2, rx=4)
+        s.text(x + (cw - 8) / 2, y0 + 44 + rh / 2, '1/N', 20, V['gray'])
+    # Step 2: Forward AllGather + Compute activations
+    if k >= 2:
+        for ci, txt in ((1, 'AllGather'), (2, 'Full W')):
+            x = x0 + ci * cw + 4
+            s.rect(x, y0 + 88, cw - 8, rh, V['c2_l'], V['c2'], sw=2.2, rx=4)
+            s.text(x + (cw - 8) / 2, y0 + 88 + rh / 2, txt, 19, '#b45309')
+        x = x0 + 2 * cw + 4
+        s.rect(x, y0 + 132, cw - 8, rh, V['ok_l'], V['ok'], sw=2.2, rx=4)
+        s.text(x + (cw - 8) / 2, y0 + 132 + rh / 2, 'saved', 19, V['ok'])
+    # Step 3: Release gathered params while activations stay live
+    if k >= 3:
+        x = x0 + 3 * cw + 4
+        s.rect(x, y0 + 88, cw - 8, rh, 'white', V['c2'], sw=2, dash='6,4', rx=4)
+        s.text(x + (cw - 8) / 2, y0 + 88 + rh / 2, 'freed', 19, '#b45309')
+        s.rect(x, y0 + 132, cw - 8, rh, V['ok_l'], V['ok'], sw=2.2, rx=4)
+        s.text(x + (cw - 8) / 2, y0 + 132 + rh / 2, 'live', 19, V['ok'])
+    # Step 4: Backward 2nd AllGather + Full grad + ReduceScatter shard
+    if k >= 4:
+        x4 = x0 + 4 * cw + 4
+        s.rect(x4, y0 + 88, cw - 8, rh, V['c2_l'], V['c2'], sw=2.4, rx=4)
+        s.text(x4 + (cw - 8) / 2, y0 + 88 + rh / 2, '2nd AG', 19, '#b45309')
+        s.rect(x4, y0 + 132, cw - 8, rh, 'white', V['ok'], sw=2, dash='6,4', rx=4)
+        s.text(x4 + (cw - 8) / 2, y0 + 132 + rh / 2, 'freed', 19, V['ok'])
+        s.rect(x4, y0 + 176, cw - 8, rh, V['bad_l'], V['bad'], sw=2.2, rx=4)
+        s.text(x4 + (cw - 8) / 2, y0 + 176 + rh / 2, 'full G', 19, V['bad'])
+        x5 = x0 + 5 * cw + 4
+        s.rect(x5, y0 + 220, cw - 8, rh, V['c3_l'], V['c3'], sw=2.2, rx=4)
+        s.text(x5 + (cw - 8) / 2, y0 + 220 + rh / 2, 'RS 1/N', 19, V['c3'])
+    cap = {
+        1: 'Persistent per GPU: only 1/N of parameters and optimizer state.',
+        2: 'Forward: AllGather assembles full layer weights; compute saves activations.',
+        3: 'Release: gathered weights are freed immediately; activations stay live.',
+        4: 'Backward: 2nd AllGather + ReduceScatter -> 3L collectives/step, ~3x param bytes.',
+    }[k]
+    s.text(470, 322, cap, 20, V['text'])
+    s.save(out / f'fsdp_life_step{k}.svg')
+
+# Explore figure vol2:fig-pipeline-1f1b (3-step, p=4, m=8)
+def build_1f1b(p=4, m=8):
+    # Exact 1F1B schedule on 22 slots (warmup, steady 1F1B, cooldown)
+    # Using classic PipeDream-Flush / Megatron 1F1B slot positions (1F1B unit F=1, B=1)
+    # Warmup forwards per stage s: p - s (4, 3, 2, 1)
+    # Wait: with unit F=1 and B=1, total slots = 2*(m+p-1) = 22.
+    # For each microbatch i (1..m): F_i on stage s is at slot t_F(s, i), B_i on stage s is at slot t_B(s, i).
+    # Standard unit-time 1F1B for p=4, m=8:
+    # Stage 3: F1@3, B1@4, F2@5, B2@6, F3@7, B3@8, F4@9, B4@10, F5@11, B5@12, F6@13, B6@14, F7@15, B7@16, F8@17, B8@18
+    # Stage 2: F1@2, F2@3, B1@5, F3@6, B2@7, F4@8, B3@9, F5@10, B4@11, F6@12, B5@13, F7@14, B6@15, F8@16, B7@17, B8@19
+    # Stage 1: F1@1, F2@2, F3@3, B1@6, F4@7, B2@8, F5@9, B3@10, F6@11, B4@12, F7@13, B5@14, F8@15, B6@16, B7@18, B8@20
+    # Stage 0: F1@0, F2@1, F3@2, F4@3, B1@7, F5@8, B2@9, F6@10, B3@11, F7@12, B4@13, F8@14, B5@15, B6@17, B7@19, B8@21
+    # Verify dependencies: F_i(s) < F_i(s+1), F_i(p-1) < B_i(p-1), B_i(s+1) < B_i(s)!
+    # Let's check: F5: s0@8 -> s1@9 -> s2@10 -> s3@11 -> B5: s3@12 -> s2@13 -> s1@14 -> s0@15! ALL VALID & COLLISION-FREE!
+    sched = {
+        0: [(0,'F1','w'),(1,'F2','w'),(2,'F3','w'),(3,'F4','w'),(7,'B1','s'),(8,'F5','s'),(9,'B2','s'),(10,'F6','s'),(11,'B3','s'),(12,'F7','s'),(13,'B4','s'),(14,'F8','s'),(15,'B5','c'),(17,'B6','c'),(19,'B7','c'),(21,'B8','c')],
+        1: [(1,'F1','w'),(2,'F2','w'),(3,'F3','w'),(6,'B1','s'),(7,'F4','s'),(8,'B2','s'),(9,'F5','s'),(10,'B3','s'),(11,'F6','s'),(12,'B4','s'),(13,'F7','s'),(14,'B5','s'),(15,'F8','s'),(16,'B6','c'),(18,'B7','c'),(20,'B8','c')],
+        2: [(2,'F1','w'),(3,'F2','w'),(5,'B1','s'),(6,'F3','s'),(7,'B2','s'),(8,'F4','s'),(9,'B3','s'),(10,'F5','s'),(11,'B4','s'),(12,'F6','s'),(13,'B5','s'),(14,'F7','s'),(15,'B6','s'),(16,'F8','s'),(17,'B7','c'),(19,'B8','c')],
+        3: [(3,'F1','w'),(4,'B1','s'),(5,'F2','s'),(6,'B2','s'),(7,'F3','s'),(8,'B3','s'),(9,'F4','s'),(10,'B4','s'),(11,'F5','s'),(12,'B5','s'),(13,'F6','s'),(14,'B6','s'),(15,'F7','s'),(16,'B7','s'),(17,'F8','s'),(18,'B8','c')],
+    }
+    return sched
+
+_sched_1f1b = build_1f1b()
+for k in (1, 2, 3):
+    s = SVG(985, 372)
+    cw, rh, x0, y0 = 34, 44, 86, 74
+    s.text(460, 22, '1F1B schedule (p = 4 stages, m = 8 microbatches)', 22, V['text'])
+    # Phase labels at top
+    s.text(x0 + 2 * cw, 54, 'Warm-up', 19, V['c1'])
+    if k >= 2:
+        s.text(x0 + 10.5 * cw, 54, 'Steady 1F1B (free each act. on B)', 19, V['ok'])
+    if k >= 3:
+        s.text(x0 + 19.2 * cw, 54, 'Cooldown', 19, '#b45309')
+    peaks = [4, 3, 2, 1]
+    s.text(910, 42, 'Peak live', 18, V['ok'])
+    s.text(910, 62, 'activations', 18, V['ok'])
+    for st in range(4):
+        y = y0 + st * (rh + 12)
+        s.text(x0 - 12, y + rh / 2, f'GPU {st}', 20, V['gray'], anchor='end')
+        placed = {}
+        for slot, lbl, ph in _sched_1f1b[st]:
+            if (ph == 'w') or (ph == 's' and k >= 2) or (ph == 'c' and k >= 3):
+                placed[slot] = lbl
+        max_slot = 4 if k == 1 else 18 if k == 2 else 22
+        for t in range(max_slot):
+            x = x0 + t * cw
+            if t in placed:
+                lbl = placed[t]
+                fwd = lbl[0] == 'F'
+                s.rect(x, y, cw - 3, rh, V['c1_l'] if fwd else V['c2_l'], V['c1'] if fwd else V['c2'], 1.8, 4)
+                s.text(x + (cw - 3) / 2, y + rh / 2, lbl, 18, V['c1'] if fwd else '#b45309')
+            else:
+                s.rect(x, y, cw - 3, rh, V['bad_l'], 'none', 0, 4)
+        if k >= 2:
+            s.text(910, y + rh / 2, f'{peaks[st]}', 22, V['ok'])
+    # Compact visual key: F = forward, B = backward, bubble
+    ky = 304
+    s.rect(256, ky, 26, 22, V['c1_l'], V['c1'], 1.6, 3)
+    s.text(269, ky + 11, 'F', 15, V['c1'])
+    s.text(290, ky + 11, '= forward', 18, V['text'], weight='normal', anchor='start')
+    s.rect(418, ky, 26, 22, V['c2_l'], V['c2'], 1.6, 3)
+    s.text(431, ky + 11, 'B', 15, '#b45309')
+    s.text(452, ky + 11, '= backward', 18, V['text'], weight='normal', anchor='start')
+    s.rect(598, ky, 26, 22, V['bad_l'], 'none', 0, 3)
+    s.text(632, ky + 11, '= pipeline bubble', 18, V['text'], weight='normal', anchor='start')
+    cap = {
+        1: 'Step 1 (Warm-up): stage s runs p - s forwards (4, 3, 2, 1) to fill the pipe.',
+        2: 'Step 2 (Steady 1F1B): each B frees one activation -> peak live = [4, 3, 2, 1] vs. GPipe 8.',
+        3: 'Step 3 (Cooldown): same 3/11 (27.3%) bubble as GPipe, half the activation memory.',
+    }[k]
+    s.text(492, 352, cap, 20, V['text'])
+    s.save(out / f'pipe_1f1b_step{k}.svg')
+
+# Explore figures vol2:fig-ulysses-ownership-transpose & vol2:fig-moe-all-to-all-routing + DLRM (3-step)
+for k in (1, 2, 3):
+    s = SVG(940, 335)
+    # Panel 1: Context (DeepSpeed Ulysses + Ring Attention)
+    s.rect(12, 14, 296, 308, '#f8fafc', V['c1'], sw=2.2, rx=8)
+    s.text(160, 40, '1. Context (Ulysses)', 22, V['c1'])
+    s.rect(30, 62, 260, 48, V['c1_l'], V['c1'], sw=1.8, rx=5)
+    s.text(160, 86, 'Token-sharded [S/c, h]', 19, V['c1'])
+    s.line(160, 110, 160, 144, V['c2'], 3.5, arrow=True)
+    s.text(230, 128, 'AllToAll', 19, '#b45309')
+    s.rect(30, 148, 260, 56, V['c2_l'], V['c2'], sw=1.8, rx=5)
+    s.text(160, 168, 'Head-sharded [S, h/c]', 19, '#b45309')
+    s.text(160, 191, 'local attn (0 msgs)', 19, V['gray'], weight='normal')
+    s.line(160, 204, 160, 236, V['c2'], 3.5, arrow=True)
+    s.text(160, 254, 'Inverse AllToAll back', 19, V['c1'])
+    s.text(160, 286, 'Ring Attn: >=1,100 tok NVL', 18, V['gray'], weight='normal')
+    s.text(160, 308, '>=9,900 tok on NDR', 18, V['gray'], weight='normal')
+    # Panel 2: MoE Expert Routing
+    op2 = 1.0 if k >= 2 else 0.0
+    s.rect(322, 14, 296, 308, '#f8fafc', V['c2'], sw=2.2, rx=8, op=op2)
+    s.text(470, 40, '2. Experts (MoE)', 22, '#b45309', op=op2)
+    for ri in range(4):
+        rx = 340 + ri * 66
+        s.rect(rx, 64, 58, 38, V['c1_l'], V['c1'], sw=1.6, rx=4, op=op2)
+        s.text(rx + 29, 83, f'R{ri}', 19, V['c1'], op=op2)
+    s.line(369, 102, 498, 144, V['c2'], 3, arrow=True, op=op2)
+    s.line(435, 102, 369, 144, V['c2'], 2.2, arrow=True, op=op2)
+    s.line(501, 102, 567, 144, V['c2'], 2.2, arrow=True, op=op2)
+    s.rect(380, 113, 180, 26, '#f8fafc', 'none', sw=0, rx=4, op=op2)
+    s.text(470, 126, 'Dispatch AllToAll', 19, '#b45309', op=op2)
+    for ei in range(4):
+        ex = 340 + ei * 66
+        fc = V['bad_l'] if ei == 2 else V['c2_l']
+        ec = V['bad'] if ei == 2 else V['c2']
+        s.rect(ex, 148, 58, 44, fc, ec, sw=2, rx=4, op=op2)
+        s.text(ex + 29, 170, f'E{ei}', 19, V['bad'] if ei == 2 else '#b45309', op=op2)
+    s.line(498, 192, 369, 232, V['c2'], 3, arrow=True, op=op2)
+    s.rect(380, 205, 180, 26, '#f8fafc', 'none', sw=0, rx=4, op=op2)
+    s.text(470, 218, 'Combine AllToAll', 19, '#b45309', op=op2)
+    s.text(470, 254, '2 AllToAlls per MoE layer', 19, V['text'], op=op2)
+    s.text(470, 286, 'Hot expert (E2) overflows', 18, V['bad'], op=op2)
+    s.text(470, 308, 'its capacity buffer', 18, V['bad'], op=op2)
+    # Panel 3: DLRM Embeddings
+    op3 = 1.0 if k >= 3 else 0.0
+    s.rect(632, 14, 296, 308, '#f8fafc', V['ok'], sw=2.2, rx=8, op=op3)
+    s.text(780, 40, '3. Embeddings (DLRM)', 22, V['ok'], op=op3)
+    s.rect(650, 64, 260, 52, V['ok_l'], V['ok'], sw=1.8, rx=5, op=op3)
+    s.text(780, 81, '10 TB+ table sharded', 19, V['ok'], op=op3)
+    s.text(780, 104, 'by row: hash(id) mod N', 18, V['gray'], weight='normal', op=op3)
+    s.line(780, 116, 780, 152, V['ok'], 3.5, arrow=True, op=op3)
+    s.text(846, 134, 'AllToAll', 19, V['ok'], op=op3)
+    s.rect(650, 156, 260, 56, V['c1_l'], V['c1'], sw=1.8, rx=5, op=op3)
+    s.text(780, 175, 'Exchange only touched', 19, V['c1'], op=op3)
+    s.text(780, 198, 'rows per batch', 19, V['c1'], op=op3)
+    s.text(780, 254, 'Sparse lookup traffic', 19, V['text'], op=op3)
+    s.text(780, 286, 'Hot IDs skew receive port', 18, V['bad'], op=op3)
+    s.text(780, 308, '(all ranks query same ID)', 18, V['gray'], weight='normal', op=op3)
+    s.save(out / f'axes_extra_step{k}.svg')
 m = np.arange(1, 257)
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.4, 3.4))
@@ -391,14 +598,17 @@ for k in (1, 2):
         f = np.array([calc_pipeline_bubble(p, int(mm)) for mm in m])
         ax.plot(m, 100 * f, color=col, lw=2.6, alpha=1 if show else 0)
         label(ax, 240, ly, f'p = {p} stages', col, show, fontsize=15, ha='right')
-    pts = [(SimpleNamespace(bubble=0.4285714286, fill_slots=3, idle_slots=6, microbatches=4, name='GPipe, four stages and four microbatches', phase_slots=7, slots=14, stages=4), C['memory'], 'p=4, m=4: 43%', None, True), (SimpleNamespace(bubble=0.1794871795, fill_slots=7, idle_slots=14, microbatches=32, name='Eight pipeline stages at 32 microbatches', phase_slots=39, slots=78, stages=8), C['compute'], 'p=8, m=32: 18%', (-10, -22), True), (SimpleNamespace(bubble=0.3191489362, fill_slots=15, idle_slots=30, microbatches=32, name='Sixteen pipeline stages at 32 microbatches', phase_slots=47, slots=94, stages=16), C['network'], 'm=32: 32%', (8, 8), k >= 2)]
+    pts = [(SimpleNamespace(bubble=0.4285714286, fill_slots=3, idle_slots=6, microbatches=4, name='GPipe, four stages and four microbatches', phase_slots=7, slots=14, stages=4), C['memory'], 'p=4, m=4: 43%', None, True), (SimpleNamespace(bubble=0.1794871795, fill_slots=7, idle_slots=14, microbatches=32, name='Eight pipeline stages at 32 microbatches', phase_slots=39, slots=78, stages=8), C['compute'], 'p=8, m=32: 18%', None, True), (SimpleNamespace(bubble=0.3191489362, fill_slots=15, idle_slots=30, microbatches=32, name='Sixteen pipeline stages at 32 microbatches', phase_slots=47, slots=94, stages=16), C['network'], 'm=32: 32%', (10, 14), k >= 2)]
     for sc, col, lab, off, show in pts:
         p, mm, v = (sc.stages, sc.microbatches, 100 * sc.bubble)
         ax.plot([mm], [v], 'o', ms=9, color=col, mec='white', mew=1.5, alpha=1 if show else 0)
-        if p in (4, 8):
-            ax.annotate(lab, (mm, v), xytext=(1.15, 19 if p == 4 else 3), fontsize=15, fontweight='bold', color=col, arrowprops=dict(arrowstyle='->', color=col, lw=1.2))
+        if p == 4:
+            ax.annotate(lab, (mm, v), xytext=(1.15, 19), fontsize=14, fontweight='bold', color=col, arrowprops=dict(arrowstyle='->', color=col, lw=1.2))
             continue
-        ax.annotate(lab, (mm, v), xytext=off, textcoords='offset points', fontsize=15, fontweight='bold', color=col, alpha=1 if show else 0)
+        if p == 8:
+            ax.annotate(lab, (mm, v), xytext=(46, 26), fontsize=13.5, fontweight='bold', color=col, arrowprops=dict(arrowstyle='->', color=col, lw=1.2))
+            continue
+        ax.annotate(lab, (mm, v), xytext=off, textcoords='offset points', fontsize=14, fontweight='bold', color=col, alpha=1 if show else 0)
     ax.axhline(10.0, color=C['neutral'], lw=1.4, ls='--')
     ax.text(1.05, 10.0 + 2, '10%', color=C['neutral'], fontsize=14, fontweight='bold')
     ax.set_xscale('log', base=2)
@@ -540,18 +750,97 @@ s.save(out / 'grid3d.svg')
 print('figures written to', out)
 _pol, _ref = (1120.0, 140.0)
 _rew, _valg = (26.0, 208.0)
-fig, ax = plt.subplots(figsize=(5.8, 1.1))
-for y, parts, tot in ((1, [(_pol, C['memory'], 'policy'), (_ref, C['neutral'], 'ref.'), (_rew, C['data'], ''), (_valg, C['compute'], 'value')], 'PPO 1,494 GB'), (0, [(_pol, C['memory'], 'policy'), (_ref, C['neutral'], 'ref.')], 'DPO 1,260 GB')):
-    left = 0
-    for w, col, lab in parts:
-        ax.barh(y, w, 0.62, left=left, color=col, edgecolor='white', lw=1)
-        if lab:
-            ax.text(left + w / 2, y, lab, ha='center', va='center', fontsize=11.5, fontweight='bold', color='white')
-        left += w
-    ax.text(left + 15, y, tot, va='center', fontsize=12.5, fontweight='bold', color=C['text'])
-_x = _pol + _ref + _rew / 2
-ax.annotate('reward', (_x, 1.31), xytext=(_x - 25, 1.62), ha='right', va='center', fontsize=11, fontweight='bold', color=C['data'], arrowprops=dict(arrowstyle='-', color=C['data'], lw=1.2))
-ax.set_xlim(0, (_pol + _ref + _rew + _valg) * 1.32)
-ax.set_ylim(-0.4, 1.8)
-ax.axis('off')
-sp.save(fig, out / 'rlhf_state.svg')
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 1.15))
+    rows_rl = (
+        (1, [(_pol, C['memory'], 'policy'), (_ref, C['neutral'], 'ref.'), (_rew, C['data'], ''), (_valg, C['compute'], 'value')], 'PPO 1,494 GB', True),
+        (0, [(_pol, C['memory'], 'policy'), (_ref, C['neutral'], 'ref.')], 'DPO 1,260 GB (-15.7%)', k >= 2),
+    )
+    for y, parts, tot, show in rows_rl:
+        a = 1.0 if show else 0.0
+        left = 0
+        for w, col, lab in parts:
+            ax.barh(y, w, 0.62, left=left, color=col, edgecolor='white', lw=1, alpha=a)
+            if lab:
+                ax.text(left + w / 2, y, lab, ha='center', va='center', fontsize=11.5, fontweight='bold', color='white', alpha=a)
+            left += w
+        ax.text(left + 15, y, tot, va='center', fontsize=12, fontweight='bold', color=C['text'], alpha=a)
+    _x = _pol + _ref + _rew / 2
+    ax.annotate('reward', (_x, 1.31), xytext=(_x - 25, 1.62), ha='right', va='center', fontsize=11, fontweight='bold', color=C['data'], arrowprops=dict(arrowstyle='-', color=C['data'], lw=1.2))
+    ax.set_xlim(0, (_pol + _ref + _rew + _valg) * 1.46)
+    ax.set_ylim(-0.4, 1.8)
+    ax.axis('off')
+    sp.save(fig, out / f'rlhf_state_step{k}.svg')
+
+# F25: ZeRO-3 175B on 64 GPUs: fits memory, stalls on wire (2-step)
+for k in (1, 2):
+    fig, (a1, a2) = plt.subplots(2, 1, figsize=(4.6, 2.35), gridspec_kw={'height_ratios': [1, 1], 'hspace': 0.78})
+    # Top: Memory bar (fits 80 GB)
+    a1.barh(0, 43.75, color=C['memory'], height=0.58)
+    a1.barh(0, 4.8, left=43.75, color=C['data'], height=0.58)
+    a1.axvline(80, color=C['danger'], lw=2, ls='--')
+    a1.text(22, 0, 'state 43.8 GB', ha='center', va='center', fontsize=13.5, fontweight='bold', color='white')
+    a1.text(49.5, 0, '48.6 GB', ha='left', va='center', fontsize=13.5, fontweight='bold', color=C['data'])
+    a1.text(82.0, 0, '80 GB HBM', ha='left', va='center', fontsize=13.5, fontweight='bold', color=C['danger'])
+    a1.set_xlim(0, 122)
+    a1.set_ylim(-0.45, 0.55)
+    a1.set_yticks([])
+    a1.tick_params(axis='x', labelsize=12.5)
+    a1.spines['left'].set_visible(False)
+    a1.set_title('Memory per GPU (64 GPUs): FITS', loc='left', fontsize=14, fontweight='bold', color=C['data'], pad=3)
+    # Bottom: Step time bar (wire 10x compute)
+    al = 1.0 if k >= 2 else 0.0
+    a2.barh(0, 2.1, color=C['memory'], height=0.58, alpha=al)
+    a2.barh(0, 22.0, left=2.1, color=C['danger'], height=0.58, alpha=al)
+    a2.text(13.1, 0, 'regather ~1.1 TB (~22 s)', ha='center', va='center', fontsize=13.5, fontweight='bold', color='white', alpha=al)
+    a2.text(24.7, 0, '~10×', ha='left', va='center', fontsize=14.5, fontweight='bold', color=C['danger'], alpha=al)
+    a2.set_xlim(0, 30)
+    a2.set_ylim(-0.45, 0.55)
+    a2.set_yticks([])
+    a2.spines['left'].set_visible(False)
+    a2.set_xlabel('seconds per step (compute 2.1 s vs. wire)', fontsize=13.5, alpha=al)
+    a2.tick_params(axis='x', labelsize=12.5, colors=C['text'] if k >= 2 else 'white')
+    a2.spines['bottom'].set_alpha(al)
+    a2.set_title('Wire time per step (1 NDR port): STALLS', loc='left', fontsize=14, fontweight='bold', color=C['danger'], pad=3, alpha=al)
+    sp.save(fig, out / f'zero3_175b_step{k}.svg')
+
+# F26: DDP vs FSDP compact schematic
+s = SVG(420, 310)
+s.rect(10, 14, 400, 128, V['c1_l'], V['c1'], sw=2, rx=8)
+s.text(210, 38, 'DDP: Full Copy on Every GPU', 20, V['c1'])
+for gi in range(3):
+    gx = 28 + gi * 128
+    s.rect(gx, 56, 110, 44, 'white', V['c1'], sw=1.8, rx=5)
+    s.text(gx + 55, 78, f'GPU {gi}: 16B/p', 17, V['c1'])
+s.text(210, 122, '1 AllReduce/step (2Ψ bytes)', 18, V['gray'], weight='normal')
+s.rect(10, 164, 400, 134, V['c2_l'], V['c2'], sw=2, rx=8)
+s.text(210, 188, 'FSDP (FULL_SHARD): 1/N State', 20, '#b45309')
+for gi in range(3):
+    gx = 28 + gi * 128
+    s.rect(gx, 206, 110, 44, 'white', V['c2'], sw=1.8, rx=5)
+    s.text(gx + 55, 228, f'GPU {gi}: 16/N', 17, '#b45309')
+s.text(210, 274, 'AllGather + ReduceScatter (3Ψ bytes)', 18, '#b45309', weight='normal')
+s.save(out / 'ddp_vs_fsdp.svg')
+
+# F41: Activation recomputation cost bar (3 fwd -> 4 fwd, +33%)
+fig, ax = plt.subplots(figsize=(4.4, 1.35))
+ax.barh(1, 1.0, color=C['memory'], height=0.56, edgecolor='white', lw=1.2)
+ax.barh(1, 2.0, left=1.0, color=C['compute'], height=0.56, edgecolor='white', lw=1.2)
+ax.text(0.5, 1, 'Fwd', ha='center', va='center', fontsize=13, fontweight='bold', color='white')
+ax.text(2.0, 1, 'Bwd (2)', ha='center', va='center', fontsize=13, fontweight='bold', color='white')
+ax.text(3.12, 1, '3× fwd (1.1 TB)', ha='left', va='center', fontsize=13, fontweight='bold', color=C['text'])
+ax.barh(0, 1.0, color=C['memory'], height=0.56, edgecolor='white', lw=1.2)
+ax.barh(0, 1.0, left=1.0, color=C['danger'], height=0.56, edgecolor='white', lw=1.2)
+ax.barh(0, 2.0, left=2.0, color=C['compute'], height=0.56, edgecolor='white', lw=1.2)
+ax.text(0.5, 0, 'Fwd', ha='center', va='center', fontsize=13, fontweight='bold', color='white')
+ax.text(1.5, 0, 'Rec', ha='center', va='center', fontsize=12.5, fontweight='bold', color='white')
+ax.text(3.0, 0, 'Bwd (2)', ha='center', va='center', fontsize=13, fontweight='bold', color='white')
+ax.text(4.12, 0, '4× (+33%, 19 GB)', ha='left', va='center', fontsize=13, fontweight='bold', color=C['danger'])
+ax.set_yticks([0, 1])
+ax.set_yticklabels(['Full ckpt', 'Baseline'], fontsize=13.5, fontweight='bold')
+ax.set_xlim(0, 6.7)
+ax.set_ylim(-0.5, 1.55)
+ax.set_xticks([0, 1, 2, 3, 4])
+ax.set_xticklabels(['0', '1', '2', '3', '4'], fontsize=12.5)
+ax.set_xlabel('Forward-pass equivalents per step', fontsize=13)
+sp.save(fig, out / 'recomp_bars.svg')

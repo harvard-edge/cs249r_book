@@ -108,15 +108,15 @@ WearableMobileNetV2SparseFlash = _st.SparseFlashFitScenario(
 )
 
 
-PrunedInt8PaperVsMeasured = _st.SpeedupCompositionScenario(
-    name="Half the weights pruned and the rest quantized to INT8: paper against measured",
+PrunedInt8PaperVsRealized = _st.SpeedupCompositionScenario(
+    name="Half the weights pruned and the rest quantized to INT8: paper against realized",
     description="Structured pruning of half the weights and FP32-to-INT8 storage, multiplied on "
     "paper, against a hypothetical realized speedup.",
     factors={
         "pruning": 1 / (1 - 0.5),  # scenario assumption: 50 percent structured pruning
         "quantization": (_BYTES_FP32 / _BYTES_INT8).to("").magnitude,
     },
-    measured=1.5,  # scenario assumption: hypothetical realized speedup
+    realized=1.5,  # scenario assumption: hypothetical realized speedup, constructed, not measured
 )
 
 

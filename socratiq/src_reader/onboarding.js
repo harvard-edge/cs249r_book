@@ -16,9 +16,9 @@ export function createReaderTour({shell, targets}) {
   const back = card.querySelector('[data-tour="back"]');
   const next = card.querySelector('[data-tour="next"]');
   const steps = [
-    {target: targets.preferences, title: 'Make explanations work for you', text: 'Choose your level and optionally add what you know or how you like to learn. You can edit or clear this anytime.'},
-    {target: targets.choose, title: 'Start with a passage', text: 'Highlight text and choose Explain this, or use Choose a paragraph. Picking a paragraph lets you preview it before asking.'},
-    {target: targets.study, title: 'Keep learning', text: 'After an explanation, try Simplify, Show an example, or Check my understanding. Study tools opens quizzes, flashcards, and local progress.'},
+    {target: targets.preferences, title: 'Make explanations work for you', text: 'Choose Beginner, Intermediate, or Advanced depth, customize selection bar actions, or connect your own Gemini, Claude, or OpenRouter model (free shared model by default; saved locally).'},
+    {target: targets.choose, title: 'Start with a passage', text: 'Highlight text for Explain this, Ask…, Check me, or Taxonomy (use ⚙ to customize), or use Choose a paragraph to preview before asking.'},
+    {target: targets.study, title: 'Keep learning', text: 'After an explanation, try Simplify, Show an example, Check my understanding, or Map to taxonomy. Study tools opens quizzes, flashcards, and local progress.'},
   ];
   let index = 0;
   let previousFocus = null;

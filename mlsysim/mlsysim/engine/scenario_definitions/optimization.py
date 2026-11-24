@@ -490,7 +490,7 @@ class SingleNodeInferenceScenario(BaseScenario):
     Assumptions: The generic SingleNodeModel controls work, traffic, and feasibility;
     optional precision and efficiency override its defaults.
 
-    Excludes: The generic activation-traffic heuristic is not a KV-aware serving trace.
+    Excludes: Generic forward activation traffic is not a KV-aware serving trace.
 
     References
     ----------
@@ -533,8 +533,8 @@ class SingleNodeInferenceScenario(BaseScenario):
     @property
     def traffic(self) -> Quantity:
         """Memory bytes implied by the generic roofline profile. Equation: ``result.latency_memory
-        * result.peak_bw_actual``. Units: bytes; this inherits the engine's activation-traffic
-        heuristic rather than a KV trace.
+        * result.peak_bw_actual``. Units: bytes; this inherits the workload's forward activation
+        traffic rather than a KV trace.
         """
         p = self.result
         return (p.latency_memory * p.peak_bw_actual).to("byte")
@@ -1810,7 +1810,7 @@ class SelfContainedReplicaScenario(BaseScenario):
         Equation: Follow the pipeline_depth calculation below; branch conditions and
         rounding are part of its definition."""
         hbm = self.fleet.node.accelerator.memory.capacity
-        state = self.workload.parameters.magnitude * self.bytes_per_param
+        state = self.workload.parameters.to("param").magnitude * self.bytes_per_param
         pp = 1
         while (state / (self.tensor_parallel * pp)).to("GiB") > hbm:
             pp *= 2
@@ -3586,7 +3586,7 @@ class SparseFlashFitScenario(BaseScenario):
 
 
 class SpeedupCompositionScenario(BaseScenario):
-    """Independent paper speedups multiplied together, against the ``measured`` speedup.
+    """Independent paper speedups multiplied together, against the ``realized`` speedup.
 
     Notes
     -----
@@ -3605,7 +3605,7 @@ class SpeedupCompositionScenario(BaseScenario):
     Execute the registered worked inputs; this is a modeled calculation.
 
     >>> from mlsysim import Scenarios
-    >>> case = Scenarios.PrunedInt8PaperVsMeasured
+    >>> case = Scenarios.PrunedInt8PaperVsRealized
     >>> value = case.paper
     >>> round(value, 3)
     8.0"""
@@ -3613,7 +3613,7 @@ class SpeedupCompositionScenario(BaseScenario):
     # Retain the public class identity used by Pydantic schemas and pickle.
     __module__ = "mlsysim.engine.scenario_types"
     factors: Dict[str, float]
-    measured: float
+    realized: float  # a supplied realized speedup; named for what it is (was `measured`, 2026-11-20)
 
     @property
     def paper(self) -> float:
@@ -3631,11 +3631,11 @@ class SpeedupCompositionScenario(BaseScenario):
 
     @property
     def realized_share(self) -> float:
-        """Dimensionless observed speedup divided by the product of component factors.
+        """Dimensionless realized speedup divided by the product of component factors.
 
         Equation:
-            return self.measured / self.paper"""
-        return self.measured / self.paper
+            return self.realized / self.paper"""
+        return self.realized / self.paper
 
 
 class WorkLatencyGapScenario(BaseScenario):

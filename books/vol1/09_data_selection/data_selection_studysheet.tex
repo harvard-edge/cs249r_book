@@ -1,0 +1,155 @@
+% Study sheet: Volume I, Chapter 9, Data Selection.
+% Numbers: \val{...} from data_selection_studysheet_numbers.tex, written by data_selection_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{data_selection_studysheet_numbers}
+\sheetvolume{1}
+\sheetchapter{9}{Data Selection}
+\sheetsources{Numbers from the mlsysim registry and the chapter's scenarios; times are compute-bound unless stated; assumed inputs are marked.}
+
+\begin{document}
+% ===================================================================== FRONT
+\frontside
+\begin{bigidea}
+Every example costs the same forward pass, backward pass and update, whether it teaches the model
+something new or repeats what it knows. Selection decides \hl{which examples deserve a step}. It pays only
+when \hl{choosing costs less than it saves} at the same quality, with the rare cases still covered.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Value is learning per FLOP.}{The information-compute ratio (ICR) is measured gain per training
+  FLOP. Duplicates and mastered examples cost a full step, teach little.}
+\idea{Check the diet first.}{Compute-optimal is about \val{balance} unique tokens per parameter. GPT-2 XL
+  had \val{gpttpp}, each seen \val{gptpasses} times: data-starved.}
+\idea{Selection must pay for itself.}{The fraction kept caps the saving; scorer size and rescoring
+  frequency set the cost. A forward-only score costs a third of an epoch.}
+\idea{Floors before scores.}{Ranking by aggregate score can drop a slice entirely. Reserve a
+  minimum per slice, fill the rest by score, check held-out rare-slice accuracy.}
+\idea{Savings must reach the slowest stage.}{Saved FLOPs shorten a run only when compute sets the
+  pace. Only a subset rewritten as its own shards reads fewer bytes.}
+\idea{Judge an investment over its lifetime.}{Labels saved count against a budget-matched random
+  baseline after scoring; a pipeline against every run that reuses it.}
+\end{ideas}
+\vspace{12pt}
+\sheetsec{Where one epoch's time goes}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\u{0.6}
+  \foreach \lab/\v/\y/\sty in {NVMe read/\val{pstore}/64/nbox, PCIe copy/\val{plink}/48/nbox, host decode/\val{phost}/32/hotbox, compute/\val{pepoch}/16/accbox, {compute, half set}/\val{ppruned}/0/accbox}{
+    \node[lab, anchor=east] at (66,\y+6) {\lab};
+    \draw[\sty] (70,\y) rectangle ({70+\v*\u},\y+12);
+    \node[note, anchor=west] at ({73+\v*\u},\y+6) {\v{} s};}
+\end{tikzpicture}\par}
+\vspace{4pt}
+{\fontsize{8.6}{11}\selectfont ResNet-50, one ImageNet epoch, one H100 accelerator. Host cores decode \val{hostrate} images/s
+against a demand of \val{chdemand}, so the host, not the math, sets the pace.\par}
+\end{leftcol}%
+\begin{rightcol}
+\fcard{Selection inequality}%
+  {\SelectionTime + \TrainingTime(\SubsetDatasetSize) < \TrainingTime(\FullDatasetSize)}%
+  {Scoring plus training on the subset must beat training on all $\FullDatasetSize$ examples, at matched quality and coverage.}%
+  {$\SelectionTime$ counts every scoring pass, proxy training and coordination; rescoring each epoch multiplies it.}{}
+\vspace{10pt}
+\sheetsec{Four more tests}
+\begin{sheettable}{@{}l L@{}}
+\thead{Question} & \thead{Test}\\ \midrule
+Data-starved? & unique tokens per parameter $\DatasetSize/\Parameters$ well below \val{balance}. With training FLOPs $\Operations$, tokens processed $= \Operations/(\val{flopsper}\Parameters)$; passes $=$ processed $\div$ unique. If starved, cut repeats and add new tokens; never shrink the unique pool\\
+Floors fit? & budget $\CoresetBudget \ge$ sum of floors. A uniform random sample keeps (fraction kept) $\times$ (examples in the slice); reserve each floor, fill the rest by score\\
+Host too slow? & $\InputPipelineRatio = \HostPreparationTime/\AcceleratorBatchTime =$ demand $\div$ supply; busy $= 1/\InputPipelineRatio$. Echo each batch a whole number of times $\EchoFactor \ge \InputPipelineRatio$, if repeats still teach\\
+Investment pays? & ROI $=$ ($\TrainingRunCount \times$ saving per run $-$ one-time cost) $\div$ one-time cost; break-even when $\TrainingRunCount =$ cost $\div$ saving\\
+\end{sheettable}
+\vspace{10pt}
+\sheetsec{Three levers, plus unlabeled data}
+\begin{sheettable}{@{}L l l@{}}
+\thead{Lever} & \thead{Saves} & \thead{Risk}\\ \midrule
+Static, before training: dedup, quality, coreset & compute, storage & rare slices dropped\\
+Dynamic, during training: curriculum, active learning & steps, labels & scorer cost\\
+Synthetic: augmentation, generation & collection & domain gap, collapse\\
+Unlabeled data: self- and semi-supervised & labels & extra training compute\\
+\end{sheettable}
+\end{rightcol}
+
+% ===================================================================== BACK
+\backside
+\begin{answers}
+\ans{Finish}{Full \val{yepochs} $\times$ \val{wepoch} $=$ \val{yfull} s. Score once: \val{wscore} $+$ \val{yepochs} $\times$ \val{ysubep}
+  $=$ \val{ystatic} s, \val{ystaticsave}\% less time. Every epoch: \val{yepochs} $\times$ (\val{wscore} $+$ \val{ysubep})
+  $=$ \val{ydyn} s, only \val{ydynsave}\% less. Each rescore costs \val{yrescper} of a subset epoch, so frequency, not fraction, decides.}
+\ans{1}{$\val{q1d}/\val{q1p} = \val{q1have}$ tokens per parameter, below \val{balance}: data-starved (it wants \val{q1need}B unique).
+  Processed $=$ $\val{q1budget} \div$ (\val{flopsper} $\times$ \val{q1p}B) $=$ \val{q1proc}B, \val{q1passes} passes. Spend the FLOPs on new tokens, not repeats; never shrink the unique pool.}
+\columnbreak
+\ans{2}{Supply \val{q2cores} $\times$ \val{q2worker} $=$ \val{q2supply}/s; $\InputPipelineRatio = \val{q2demand}/\val{q2supply} = \val{q2r}$:
+  busy \val{q2util}\%. Echo factor \val{q2e}, the next whole number, if repeats still teach.}
+\ans{3}{Random: \val{q3keep}\% $\times$ \val{q3rare} $=$ \val{q3exp} $<$ \val{q3floor}, fails; if every rare image scores below the cutoff, a ranking keeps none. Reserve the top \val{q3floor} rare, fill
+  \val{q3rest} by score. Evidence: held-out rare-slice accuracy (Floors before scores).}
+\ans{4}{One-time cost \$\val{q4build} $+$ \$\val{q4once} $=$ \$\val{q4inv}; break-even \val{q4inv} $\div$ \val{q4save} $=$ \val{q4even} runs. One run: (\val{q4save} $-$ \val{q4inv})$/$\val{q4inv}
+  $=$ \val{q4roione}\%; \val{q4n} runs: (\val{q4n} $\times$ \val{q4save} $-$ \val{q4inv})$/$\val{q4inv} $=$ \val{q4roin}\%.}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Does a coreset save time once scoring is paid?}
+ResNet-50 on ImageNet, \val{wepochs} epochs on one H100 at \val{wepoch} s of compute per epoch (a fed
+accelerator; the host keeps up); a \val{wkeep}\% coreset scored by a forward pass of the same model.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\u{0.62}
+  \node[lab, anchor=east] at (56,38) {full data};
+  \draw[nbox] (60,32) rectangle ({60+\val{wfull}*\u},44);
+  \node[note, anchor=west] at ({63+\val{wfull}*\u},38) {\val{wfull} min};
+  \node[lab, anchor=east] at (56,22) {score once};
+  \draw[accbox] (60,16) rectangle ({60+\val{wstatic}*\u},28);
+  \node[note, anchor=west] at ({63+\val{wstatic}*\u},22) {\val{wstatic} min};
+  \node[lab, anchor=east] at (56,6) {every epoch};
+  \draw[hotbox] (60,0) rectangle ({60+\val{wresc}*\u},12);
+  \draw[accbox] ({60+\val{wresc}*\u},0) rectangle ({60+\val{wdyn}*\u},12);
+  \node[note, anchor=west] at ({63+\val{wdyn}*\u},6) {\val{wdyn} min, rescoring solid};
+\end{tikzpicture}\par}
+\begin{steps}
+\item Full: \val{wepochs} $\times$ \val{wepoch} s $=$ \res{\val{wfull} min}.
+\item Score once (\val{wepoch}$/$3 $=$ \val{wscore} s); \val{wepochs} $\times$ \val{wsubep} s $=$ \val{wsub} min:
+  \res{\val{wstatic} min}, about \val{wstaticsave}\% saved.
+\item Rescore before every epoch: \val{wepochs} $\times$ \val{wscore} s $=$ \val{wresc} min, plus \val{wsub}:
+  \res{\val{wdyn} min}, \val{wdynsave}\% saved. Scoring is now \val{wratio}$\times$ the training it serves.
+\end{steps}
+\takeaway{Rescoring frequency, not the fraction kept, set the margin. Savings count only at the
+  same accuracy and rare-slice floors.}
+\end{practicebox}
+
+\vspace{12pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{The same test, keeping half}
+\val{yepochs} epochs at \val{wepoch} s; now keep \val{ykeep}\%, so a subset epoch takes \val{ysubep} s; a scoring pass
+still takes \val{wscore} s.\par\vspace{4pt}
+\textbf{You:} the saving when scoring once, and when rescoring before every epoch. Why does
+rescoring cost so much here?
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``A half-size coreset halves the storage read.''}%
+  {Only if the kept images are rewritten as their own shards (\val{materialized} GB). Streaming and discarding
+   reads all \val{archive} GB every epoch.}{}
+\mistake{``The coreset has \val{icrratio}$\times$ the ICR, so it is as good.''}%
+  {Per epoch it gained \val{gainsub} points against \val{gainfull}: more learning per FLOP, less learning. Show equal
+   quality at a common target accuracy, rare slices included.}{}
+\mistake{``Synthetic data is free, so train on it alone.''}%
+  {It can miss the deployment distribution, and recursive generations erode the tails (accuracy \val{m3first}\% to
+   \val{m3last}\% over \val{m3gens} generations in the chapter's example). Validate on curated real data.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} a \val{q1p}B-parameter model, \val{q1d}B unique tokens, a budget of $\val{q1budget}$ FLOPs.
+  Data-starved? How many passes over the corpus? Should selection prune to save time?
+\item \assumed{} the H100 wants \val{q2demand} images/s; \val{q2cores} host cores decode \val{q2worker}/s each.
+  What is $\InputPipelineRatio$, how busy is the accelerator, and what echo factor removes the wait?
+\item \assumed{} \val{q3pool} images, \val{q3share}\% in a rare class, a \val{q3keep}\% coreset, a rare floor of
+  \val{q3floor}. How many rare images does a uniform random sample keep on average?
+  Why can a score ranking keep fewer? How do you fix it, and what evidence shows the fix worked?
+\item \assumed{} a deduplication pipeline costs \$\val{q4build} to build and \$\val{q4once} to run once, and
+  saves \$\val{q4save} per training run. Break-even runs? ROI after one run and after \val{q4n}?
+\end{qs}
+\end{rightcol}
+\end{document}

@@ -197,7 +197,9 @@ def taxonomy_artifacts(root: Path, field: dict, taxonomy: dict | None) -> dict[P
             ttl.append(f'{_uri(collection["id"])} skos:member {_uri(ident)} .')
     def md(value):
         return value.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("#", "\\#").replace("*", "\\*").replace("_", "\\_").replace("<", "&lt;").replace(">", "&gt;")
-    lines = [f'# {md(taxonomy["title"])}', '', '**Editorial draft.** Classification is provisional; collection membership is not a broader/narrower assertion.', '', md(taxonomy["scope"]), '', '## Topic reference']
+    # Quarto front matter: a real page title and an on-page TOC on the site; harmless in the download.
+    lines = ['---', 'title: "ML Systems Taxonomy: Topic reference"', f'subtitle: {json.dumps(taxonomy["title"], ensure_ascii=False)}',
+             'toc: true', 'toc-location: right', '---', '', '**Editorial draft.** Classification is provisional; collection membership is not a broader/narrower assertion.', '', md(taxonomy["scope"]), '', '## Topic reference']
     for topic in taxonomy["topics"]:
         lines.extend(['', f'### {md(topic["label"])}', '', f'Identity: `{topic["id"]}`', '', md(topic["definition"])])
         parent_edges = [e for e in taxonomy["hierarchy"] if e["narrower"] == topic["id"]]

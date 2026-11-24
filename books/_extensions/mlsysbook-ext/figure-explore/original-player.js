@@ -331,13 +331,15 @@
       narration.setAttribute('aria-atomic', 'true');
     }
     const stage = make('div', 'mlsys-original-stage');
-    const details = make('div', 'mlsys-original-details');
+    const detailsWrap = compact ? make('details', 'mlsys-original-details') : null;
+    const details = compact ? make('div', 'mlsys-original-details-body') : make('div', 'mlsys-original-details');
     if (compact) {
+      detailsWrap.append(make('summary', 'mlsys-original-details-summary', 'Inspect the calculation'), details);
       // DOM order is the visual order: Play, status, menu, Back, Next, Restart, Expand, Speed.
       statusChip.after(sequenceLabel);
       controls.append(keysButton);
       dock.append(controls, popover, cue, keysDesc, statusLive, announcer);
-      root.append(heading, introText, assumptions, ...(viewSlot ? [viewSlot] : []), stage, jumpAnchor, dock, narration, details);
+      root.append(heading, introText, assumptions, ...(viewSlot ? [viewSlot] : []), stage, jumpAnchor, dock, narration, detailsWrap);
     } else {
       const hints = make('p', 'mlsys-original-shortcuts', 'Keyboard: N next · P back · K play/pause · R restart · −/+ speed.');
       root.append(heading, assumptions, sequenceLabel, narration, controls, hints, stage, details);
@@ -451,6 +453,10 @@
       target = null;
       phase = 'idle';
       render(index, compact ? { stage, details, assumptions, index, step: steps[index] } : { stage, details, index, step: steps[index] });
+      if (compact) {
+        details.querySelectorAll('details').forEach(d => { d.open = true; });
+        detailsWrap.hidden = !details.children.length && !details.textContent.trim();
+      }
       showNarration(index);
       syncControls();
     }

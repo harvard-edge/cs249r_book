@@ -49,7 +49,10 @@ class IntentCadenceModel(ForwardModel):
     (tracked) off; a stop begins one tick, one bus cycle, and one brake onset
     after expiry.
     """
-    requires = ("target", "cadence", "stop_terms")
+    requires = (
+        "tolerance", "initial_error", "target_speed", "slip_acceleration",
+        "intent_rate", "inference_latency", "stall", "tick", "bus", "brake_onset",
+    )
     produces = IntentCadenceResult
 
     def solve(self, tolerance: Quantity, initial_error: Quantity, target_speed: Quantity,
@@ -161,7 +164,7 @@ class DynamicReachModel(ForwardModel):
     otherwise the reach is staged on at least ``ceil(floor / window)`` fresh
     captures. The reach inside a window at the speed ceiling is ``v_max T``.
     """
-    requires = ("speed_ceiling", "distance", "windows")
+    requires = ("speed_ceiling", "target_distance", "tracked_horizon", "untracked_horizon")
     produces = DynamicReachResult
 
     def solve(self, speed_ceiling: Quantity, target_distance: Quantity, tracked_horizon: Quantity,
@@ -230,7 +233,7 @@ class ForwardOccupancyModel(ForwardModel):
     grows by ``v_h dt`` (before the body envelope and tracking error); past
     ``w / v_h`` one person's growth term alone spans an aisle of width ``w``.
     """
-    requires = ("approach_speed", "aisle_width", "horizons")
+    requires = ("approach_speed", "aisle_width", "untracked_horizon", "tracked_horizon", "forecast_horizon")
     produces = ForwardOccupancyResult
 
     def solve(self, approach_speed: Quantity, aisle_width: Quantity, untracked_horizon: Quantity,
@@ -301,7 +304,10 @@ class IntentLeaseExpiryModel(ForwardModel):
     remaining clearance allows at that speed. With all three countdowns started
     together, the lease expires at the minimum.
     """
-    requires = ("evidence", "administrative_lease", "stop")
+    requires = (
+        "untracked_horizon", "tracked_horizon", "administrative_lease",
+        "stop_onset", "speed_ceiling", "velocity_limit", "worst_stop_time", "clearance",
+    )
     produces = IntentLeaseExpiryResult
 
     def solve(self, untracked_horizon: Quantity, tracked_horizon: Quantity, administrative_lease: Quantity,
@@ -397,7 +403,7 @@ class ReferentSetModel(ForwardModel):
     where ``qhat`` is the calibration score at rank ``ceil((n + 1)(1 - alpha))``.
     A set of any size other than one is refused.
     """
-    requires = ("scores", "calibration")
+    requires = ("scores", "calibration_count", "alpha", "threshold_score")
     produces = ReferentSetResult
 
     def solve(self, scores: Sequence[float], calibration_count: int, alpha: float,
@@ -411,7 +417,7 @@ class ReferentSetModel(ForwardModel):
         calibration_count : int
             Positive exchangeable calibration-set size.
         alpha : float
-            Miscoverage probability strictly between zero and one.
+            Miscoverage probability in the open interval (0, 1).
         threshold_score : float
             Supplied calibrated nonconformity threshold in [0, 1].
 
@@ -486,7 +492,7 @@ class ConfidenceRegionModel(ForwardModel):
         sigmas : sequence of Quantity
             Positive principal-axis standard deviations, length.
         coverage : float
-            Gaussian-region probability strictly between zero and one.
+            Gaussian-region probability in the open interval (0, 1).
         tolerance : Quantity
             Positive allowed spatial error, length.
 

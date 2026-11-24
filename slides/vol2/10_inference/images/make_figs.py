@@ -131,8 +131,8 @@ for k in (1, 2):
 HW = [('h100', 'H100', 'neutral'), ('h200', 'H200', 'memory'), ('mi355x', 'MI355X', 'data'), ('b200', 'B200', 'compute'), ('gb200', 'GB200 NVL72', 'network')]
 b200_peak = (13.34, 6256.29)
 b200_100 = 208.02
-LABX = {'h100': 75, 'h200': 150, 'mi355x': 185, 'b200': 225, 'gb200': 95}
-LABDY = {'h100': 0.4, 'h200': 0.4, 'mi355x': 0.4, 'b200': 2.0, 'gb200': 2.0}
+LABX = {'h100': 120, 'h200': 152, 'mi355x': 195, 'b200': 225, 'gb200': 95}
+LABDY = {'h100': 0.90, 'h200': 0.45, 'mi355x': 0.68, 'b200': 2.0, 'gb200': 2.0}
 
 def ixplot(k):
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
@@ -145,7 +145,7 @@ def ixplot(k):
         ax.plot([p[0] for p in f], [p[1] for p in f], color=C[ck], lw=2.4, alpha=1.0 if vis else 0.0)
         lx = LABX[h]
         ly = max([p[1] for p in f if p[0] >= lx] or [f[-1][1]])
-        ax.text(lx, ly * LABDY[h], lab, ha='left', va='center', fontsize=11, color=C[ck], fontweight='bold', alpha=1.0 if vis else 0.0)
+        ax.text(lx, ly * LABDY[h], lab, ha='right' if h == 'h100' else 'left', va='center', fontsize=11, color=C[ck], fontweight='bold', alpha=1.0 if vis else 0.0)
     if k == 1:
         ax.plot(*b200_peak, 'o', ms=9, color=C['compute'], mec='white')
         ax.annotate('6,256 at 13 tok/s per user', b200_peak, xytext=(25, 2), textcoords='offset points', fontsize=11, fontweight='bold', color=C['compute'])
@@ -172,13 +172,13 @@ for k in (1, 2, 3):
 def knee():
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
     B = np.logspace(0, 3, 300)
-    for lab, kn, ck, xy in (('vision: knee at\n2 ms / 1 ms = 2', 2.0, 'data', (2.6, 0.2)), ('LLM decode: knee at\n40 ms / 0.5 ms = 80', 80.0, 'memory', (120, 0.2))):
+    for lab, kn, ck, xy in (('vision: knee at\n2 ms / 1 ms = 2', 2.0, 'data', (3.4, 0.44)), ('LLM decode: knee at\n40 ms / 0.5 ms = 80', 80.0, 'memory', (115, 0.22))):
         y = B / (kn + B)
         ax.plot(B, y, color=C[ck], lw=3)
         ax.plot([kn], [0.5], 'o', ms=10, color=C[ck], mec='white', mew=1.5)
         ax.text(xy[0], xy[1], lab, fontsize=11, fontweight='bold', color=C[ck], va='center')
     ax.axhline(1.0, color=C['neutral'], ls='--', lw=1.2)
-    ax.text(1.05, 1.03, 'asymptote 1 / t_req', fontsize=10.5, color=C['neutral'])
+    ax.text(1.05, 1.03, r'asymptote $1 / t_{\mathrm{req}}$', fontsize=10.5, color=C['neutral'])
     ax.set_xscale('log')
     ax.set_ylim(0, 1.15)
     ax.set_xlim(1, 1000)
@@ -244,13 +244,17 @@ def cb(k):
         ax.add_patch(Rectangle((0, y), L, 0.7, color=C['memory']))
         ax.text(L / 2, y + 0.35, f'{names[s]}  {L}', ha='center', va='center', color='white', fontsize=11, fontweight='bold')
         if L < LONGEST:
-            if k == 1:
+            refilled = (k == 2 and s == 0) or (k >= 3)
+            if not refilled:
                 ax.add_patch(Rectangle((L, y), LONGEST - L, 0.7, facecolor='white', edgecolor=C['danger'], hatch='///', lw=1.0))
             else:
                 ax.add_patch(Rectangle((L, y), LONGEST - L, 0.7, color=C['data']))
                 ax.text(L + (LONGEST - L) / 2, y + 0.35, nxt[s] if L > 120 else f'{nxt[s]} joins at {L}', ha='center', va='center', color='white', fontsize=11, fontweight='bold')
     if k == 1:
         ax.text(205, 1.9, 'idle: 300 of 800\nslot-iterations\n= 37.5%', fontsize=11, color=C['danger'], fontweight='bold', va='center')
+    elif k == 2:
+        ax.axvline(50, color=C['data'], ls='--', lw=1.4)
+        ax.text(205, 1.9, 'iter 50: R1 ends,\nR5 refills slot 1\nimmediately', fontsize=11, color=C['data'], fontweight='bold', va='center')
     else:
         ax.text(205, 1.9, '7 requests\nadvance in the\nsame 200\niterations', fontsize=11, color=C['data'], fontweight='bold', va='center')
     ax.set_xlim(0, 260)
@@ -260,7 +264,7 @@ def cb(k):
     ax.set_xticks([0, 50, 100, 150, 200])
     ax.set_xlabel('Decode iteration (20 ms each, illustrative)')
     sp.save(fig, out / f'cb_step{k}.svg')
-for k in (1, 2):
+for k in (1, 2, 3):
     cb(k)
 FREE, LONG, N_LONG = (526.0, 42.9, int(12.0))
 
@@ -286,19 +290,18 @@ for k in (1, 2):
     kv(k)
 
 def paging(k):
-    fig, ax = plt.subplots(figsize=(5.8, 2.4))
-    ax.text(-0.3, 1.35, 'Reserve\nmaximum', ha='right', va='center', fontsize=11, fontweight='bold')
+    fig, ax = plt.subplots(figsize=(5.8, 2.85))
+    ax.text(-0.3, 2.25, 'Reserve\nmaximum', ha='right', va='center', fontsize=11, fontweight='bold')
     used = {0: 'A', 1: 'A', 2: 'A', 8: 'B', 9: 'B', 10: 'B', 11: 'B', 12: 'B'}
     for i in range(16):
-        reserved = i < 16
         lab = used.get(i, '')
         col = C['memory'] if lab else 'white'
-        ax.add_patch(Rectangle((i, 1.0), 0.92, 0.7, facecolor=col, edgecolor=C['memory'], hatch='' if lab else '///', lw=1.0))
+        ax.add_patch(Rectangle((i, 1.9), 0.92, 0.7, facecolor=col, edgecolor=C['memory'], hatch='' if lab else '///', lw=1.0))
         if lab:
-            ax.text(i + 0.46, 1.35, lab, ha='center', va='center', color='white', fontsize=11, fontweight='bold')
-    ax.text(16.2, 1.35, f'{len(used)} of 16 slots\nhold tokens', va='center', fontsize=10.5, color=C['danger'], fontweight='bold')
+            ax.text(i + 0.46, 2.25, lab, ha='center', va='center', color='white', fontsize=11, fontweight='bold')
+    ax.text(16.25, 2.25, f'{len(used)} of 16 slots\nhold tokens', va='center', fontsize=10.5, color=C['danger'], fontweight='bold')
     if k >= 2:
-        ax.text(-0.3, -0.05, 'Pages of\n4 slots', ha='right', va='center', fontsize=11, fontweight='bold')
+        ax.text(-0.3, 0.95, 'Pages of\n4 slots', ha='right', va='center', fontsize=11, fontweight='bold')
         layout = ['A', 'B', 'A', 'B', 'C', '', 'C', 'D']
         fill = {'A': 3, 'B': 5, 'C': 6, 'D': 2}
         seen = {}
@@ -311,15 +314,26 @@ def paging(k):
                 n = 0
             for j in range(4):
                 filled = j < n
-                ax.add_patch(Rectangle((x0 + j * 0.45, -0.4), 0.42, 0.7, facecolor=C['data'] if filled else 'white', edgecolor=C['data'], lw=1.0))
+                ax.add_patch(Rectangle((x0 + j * 0.45, 0.6), 0.42, 0.7, facecolor=C['data'] if filled else 'white', edgecolor=C['data'], lw=1.0))
             if who:
-                ax.text(x0 + 0.9, 0.42, who, ha='center', fontsize=10.5, fontweight='bold', color=C['data'])
-        ax.text(16.2, -0.05, 'waste ≤ one\npartly filled page', va='center', fontsize=10.5, color=C['data'], fontweight='bold')
-    ax.set_xlim(-3.2, 20.5)
-    ax.set_ylim(-0.6, 2.0)
+                ax.text(x0 + 0.9, 1.4, who, ha='center', fontsize=10.5, fontweight='bold', color=C['data'])
+        ax.text(16.25, 0.95, 'waste ≤ one\npartly filled page', va='center', fontsize=10.5, color=C['data'], fontweight='bold')
+    if k >= 3:
+        ax.text(-0.3, -0.35, 'Shared\nprefix', ha='right', va='center', fontsize=11, fontweight='bold')
+        shared_layout = [('P', 4, 'compute'), ('P', 4, 'compute'), ('U1', 3, 'data'), ('U2', 4, 'data'), ('U2', 1, 'data'), ('U3', 3, 'data'), ('', 0, 'data'), ('', 0, 'data')]
+        for b, (who, n, ck) in enumerate(shared_layout):
+            x0 = b * 2.0
+            for j in range(4):
+                filled = j < n
+                ax.add_patch(Rectangle((x0 + j * 0.45, -0.7), 0.42, 0.7, facecolor=C[ck] if filled else 'white', edgecolor=C[ck], lw=1.0))
+            if who:
+                ax.text(x0 + 0.9, 0.1, who, ha='center', fontsize=10.0, fontweight='bold', color=C[ck])
+        ax.text(16.25, -0.35, 'prefix stored once\n6.6 $\\rightarrow$ 1.3 TB', va='center', fontsize=10.5, color=C['compute'], fontweight='bold')
+    ax.set_xlim(-3.2, 21.0)
+    ax.set_ylim(-0.9, 2.85)
     hide(ax)
     sp.save(fig, out / f'paging_step{k}.svg')
-for k in (1, 2):
+for k in (1, 2, 3):
     paging(k)
 
 def precision():
@@ -415,21 +429,44 @@ for k in (1, 2):
     chunk(k)
 
 def disagg():
-    fig, axs = plt.subplots(1, 2, figsize=(5.4, 2.9), sharey=True)
+    # Exact top measured output_tok_s_gpu from embedded InferenceX DeepSeek-R1 FP8 rows
+    vals = {
+        ('b200', 25.0): {1.0: 3630.15, 0.0: 1330.04},
+        ('b200', 50.0): {1.0: 2268.81, 0.0: 778.80},
+        ('b200', 100.0): {1.0: 148.18, 0.0: 208.02},
+        ('h200', 25.0): {1.0: 1736.83, 0.0: 890.30},
+        ('h200', 50.0): {1.0: 363.36, 0.0: 218.79},
+        ('h200', 100.0): {1.0: 50.97, 0.0: 52.40},
+    }
+    fig, axs = plt.subplots(1, 2, figsize=(5.8, 2.9), sharey=True)
     for ax, (h, lab) in zip(axs, (('b200', 'B200'), ('h200', 'H200'))):
-        for j, t in enumerate([25.0, 50.0, 100.0]):
-            j = 1.4 * j
-            for d, ck, dx in ((1.0, 'network', -0.22), (0.0, 'neutral', 0.22)):
-                v = {1.0: 3630.15, 0.0: 1330.04}[d]
+        for idx, t in enumerate([25.0, 50.0, 100.0]):
+            j = 2.05 * idx
+            v_sp, v_co = vals[(h, t)][1.0], vals[(h, t)][0.0]
+            close_pair = max(v_sp, v_co) / min(v_sp, v_co) < 1.5
+            for d, ck, dx in ((1.0, 'network', -0.28), (0.0, 'neutral', 0.28)):
+                v = vals[(h, t)][d]
                 ax.bar(j + dx, v, width=0.38, color=C[ck])
-                ax.text(j + dx + (0.19 if dx < 0 else -0.19), v * 1.12, f'{v:,.0f}', ha='right' if dx < 0 else 'left', va='bottom', fontsize=11, fontweight='bold', color=C[ck])
+                if close_pair:
+                    tx = j + dx + (-0.06 if dx < 0 else 0.06)
+                    ha = 'right' if dx < 0 else 'left'
+                elif d == 0.0 and v_co < v_sp:
+                    tx = j + 0.10
+                    ha = 'left'
+                elif d == 1.0 and v_sp < v_co:
+                    tx = j - 0.10
+                    ha = 'right'
+                else:
+                    tx = j + dx
+                    ha = 'center'
+                ax.text(tx, v * 1.15, f'{v:,.0f}', ha=ha, va='bottom', fontsize=10.5, fontweight='bold', color=C[ck])
         ax.set_yscale('log')
         ax.set_ylim(20, 30000)
-        ax.set_xticks([0, 1.4, 2.8])
+        ax.set_xticks([0, 2.05, 4.10])
         ax.set_xticklabels(['25', '50', '100'])
         ax.set_xlabel('tok/s per user, at least')
         ax.set_title(lab, fontsize=13, fontweight='bold', loc='left')
-        ax.set_xlim(-0.95, 3.55)
+        ax.set_xlim(-0.85, 5.05)
         ax.minorticks_off()
     axs[0].set_ylabel('top tok/s per GPU')
     axs[1].text(0.55, 0.93, 'split pools', transform=axs[1].transAxes, color=C['network'], fontsize=11, fontweight='bold')
@@ -495,6 +532,38 @@ def budget(k):
     sp.save(fig, out / f'budget_step{k}.svg')
 for k in (1, 2, 3, 4):
     budget(k)
+
+def spec(k):
+    fig, ax = plt.subplots(figsize=(6.4, 2.75))
+    xs = [1.55 + i * 1.15 for i in range(5)]
+    ax.text(0.0, 2.20, '1. Draft\n(serial)', ha='left', va='center', fontsize=11.0, fontweight='bold', color=C['compute'])
+    for i, x in enumerate(xs):
+        ax.add_patch(FancyBboxPatch((x, 1.92), 0.92, 0.54, boxstyle='round,pad=0.03', fc=C['compute_l'], ec=C['compute'], lw=1.4))
+        ax.text(x + 0.46, 2.19, f'$t_{i + 1}$', ha='center', va='center', fontsize=12.0, fontweight='bold', color=C['compute'])
+        if i < 4:
+            ax.annotate('', xy=(xs[i + 1] - 0.02, 2.19), xytext=(x + 0.94, 2.19), arrowprops=dict(arrowstyle='->', color=C['compute'], lw=1.2))
+    ax.text(7.45, 2.19, 'K = 5 tokens\n4.0 ms total', ha='left', va='center', fontsize=11.0, fontweight='bold', color=C['compute'])
+    if k >= 2:
+        ax.text(0.0, 1.18, '2. Target\n(parallel)', ha='left', va='center', fontsize=11.0, fontweight='bold', color=C['memory'])
+        ax.add_patch(FancyBboxPatch((1.55, 0.84), 5.52, 0.68, boxstyle='round,pad=0.03', fc=C['memory_l'], ec=C['memory'], lw=1.6))
+        ax.text(4.31, 1.18, 'one 70B forward pass verifies\nall 5 tokens (one weight read)', ha='center', va='center', fontsize=11.0, fontweight='bold', color=C['memory'], linespacing=1.15)
+        for x in xs:
+            ax.annotate('', xy=(x + 0.46, 1.56), xytext=(x + 0.46, 1.88), arrowprops=dict(arrowstyle='->', color=C['neutral'], lw=1.1))
+        ax.text(7.45, 1.18, '49.6 ms\n(vs. 248 ms)', ha='left', va='center', fontsize=11.0, fontweight='bold', color=C['memory'])
+    if k >= 3:
+        ax.text(0.0, 0.20, '3. Commit\n(exact)', ha='left', va='center', fontsize=11.0, fontweight='bold', color=C['data'])
+        states = [('acc', 'data', 'data_l'), ('acc', 'data', 'data_l'), ('acc', 'data', 'data_l'), ('fix $t_4^*$', 'danger', 'danger_l'), ('drop', 'neutral', 'neutral_l')]
+        for x, (lab, ck, fck) in zip(xs, states):
+            ax.add_patch(FancyBboxPatch((x, -0.07), 0.92, 0.54, boxstyle='round,pad=0.03', fc=C[fck], ec=C[ck], lw=1.4))
+            ax.text(x + 0.46, 0.20, lab, ha='center', va='center', fontsize=10.5, fontweight='bold', color=C[ck])
+        ax.text(7.45, 0.20, 'E = 3.52 tok\n15.2 ms mean', ha='left', va='center', fontsize=11.0, fontweight='bold', color=C['data'])
+        ax.text(4.31, -0.45, 'exact target distribution; 3.26× faster mean TPOT, 53.6 ms burst TBT', ha='center', va='center', fontsize=10.5, fontweight='bold', color=C['danger'])
+    ax.set_xlim(-0.08, 9.65)
+    ax.set_ylim(-0.68, 2.68)
+    hide(ax)
+    sp.save(fig, out / f'spec_step{k}.svg')
+for k in (1, 2, 3):
+    spec(k)
 NS, R1, R2 = ([10, 100, 1000, 10000, 100000], [2.35, 4.05, 5.35, 6.6, 7.6], [2.05, 2.55, 3.0, 3.0, 3.6])
 
 def p2c():
@@ -565,26 +634,95 @@ def traffic():
 traffic()
 sp.hbars(out / 'quota.svg', [('no quota', 45.0, 'danger', '22 to 45 ms'), ('quota at 120 QPS', 15.0, 'data', '15 ms')], 'ms', log=False, size=(3.0, 1.5), fontsize=15, xlabel="other tenants' p99 (ms); SLO 50 ms")
 
-def breaker():
+def breaker(k):
     fig, ax = plt.subplots(figsize=(5.6, 2.2))
     xs = (0.9, 4.2, 7.5)
     nodes = [(xs[0], 'Closed', 'data', 'normal traffic'), (xs[1], 'Open', 'danger', 'fail fast,\nreroute within budget'), (xs[2], 'Half-open', 'compute', 'a few probes')]
-    for x, lab, ck, sub in nodes:
+    show_nodes = nodes[:2] if k == 1 else nodes
+    for x, lab, ck, sub in show_nodes:
         ax.add_patch(FancyBboxPatch((x - 0.85, 0.55), 1.7, 0.7, boxstyle='round,pad=0.05', fc=C[ck + '_l'], ec=C[ck], lw=2))
         ax.text(x, 0.9, lab, ha='center', va='center', fontsize=12.5, fontweight='bold', color=C[ck])
         ax.text(x, 0.3, sub, ha='center', va='top', fontsize=10, color=C['text'])
-    for a, b, lab in ((xs[0], xs[1], 'errors or\nlatency high'), (xs[1], xs[2], 'after an\ninterval')):
-        ax.annotate('', xy=(b - 0.95, 0.9), xytext=(a + 0.95, 0.9), arrowprops=dict(arrowstyle='->', lw=1.6))
-        ax.text((a + b) / 2, 1.05, lab, ha='center', va='bottom', fontsize=9.5)
-    ax.annotate('', xy=(xs[0], 1.35), xytext=(xs[2], 1.35), arrowprops=dict(arrowstyle='->', lw=1.4, connectionstyle='arc3,rad=0.28', color=C['data']))
-    ax.text(xs[1], 2.45, 'probes succeed', ha='center', fontsize=9.5, color=C['data'], fontweight='bold')
+    ax.annotate('', xy=(xs[1] - 0.95, 0.9), xytext=(xs[0] + 0.95, 0.9), arrowprops=dict(arrowstyle='->', lw=1.6))
+    ax.text((xs[0] + xs[1]) / 2, 1.05, 'errors or\nlatency high', ha='center', va='bottom', fontsize=9.5)
+    if k >= 2:
+        ax.annotate('', xy=(xs[2] - 0.95, 0.9), xytext=(xs[1] + 0.95, 0.9), arrowprops=dict(arrowstyle='->', lw=1.6))
+        ax.text((xs[1] + xs[2]) / 2, 1.05, 'after an\ninterval', ha='center', va='bottom', fontsize=9.5)
+        ax.annotate('', xy=(xs[0], 1.35), xytext=(xs[2], 1.35), arrowprops=dict(arrowstyle='->', lw=1.4, connectionstyle='arc3,rad=0.28', color=C['data']))
+        ax.text(xs[1], 2.45, 'probes succeed', ha='center', fontsize=9.5, color=C['data'], fontweight='bold')
     ax.set_xlim(-0.1, 8.5)
     ax.set_ylim(-0.4, 2.7)
     hide(ax)
-    sp.save(fig, out / 'breaker.svg')
-breaker()
+    sp.save(fig, out / f'breaker_step{k}.svg')
+for k in (1, 2):
+    breaker(k)
 
 def synth():
     rows = [('13 tok/s\nper user', 2.321925712, 'data', '\\$2.32  (479 tok/s/GPU)'), ('50 tok/s\nper user', 13.53363107, 'compute', '\\$13.53  (82 tok/s/GPU)'), ('100 tok/s\nper user', 80.45699574, 'danger', '\\$80.46  (14 tok/s/GPU)')]
     sp.hbars(out / 'synth_cost.svg', rows, '', log=True, size=(5.8, 1.9), xlabel='\\$ per million output tokens, H100 (derived)')
 synth()
+
+# P4 Recall visual: S x R x P -> SLO filter -> SLO goodput
+def recall_slo_filter():
+    fig, ax = plt.subplots(figsize=(3.6, 1.65))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 4.4)
+    ax.axis('off')
+    ax.add_patch(FancyBboxPatch((0.2, 2.65), 9.6, 1.45, boxstyle='round,pad=0.05,rounding_size=0.22', fc=C['memory_l'], ec=C['memory'], lw=1.8))
+    ax.text(5.0, 3.65, 'Lecture 9: ML goodput', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['memory'])
+    ax.text(5.0, 3.05, 'S × R × P  (no deadline)', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['text'])
+    ax.annotate('', xy=(5.0, 1.75), xytext=(5.0, 2.58), arrowprops=dict(arrowstyle='-|>', color=C['compute'], lw=2.2))
+    ax.add_patch(FancyBboxPatch((0.2, 0.2), 9.6, 1.45, boxstyle='round,pad=0.05,rounding_size=0.22', fc=C['data_l'], ec=C['data'], lw=2.0))
+    ax.text(5.0, 1.2, 'Lecture 10: SLO filter', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['data'])
+    ax.text(5.0, 0.6, 'on-time TTFT & TPOT only', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['text'])
+    sp.save(fig, out / 'recall_slo_filter.svg')
+
+# P8 Vote visual: X (1,200 total, 840 SLO) vs Y (1,000 total, 950 SLO)
+def slo_vote():
+    for k in (1, 2):
+        fig, ax = plt.subplots(figsize=(3.3, 1.05))
+        if k == 1:
+            ax.barh(1, 1200, color=C['neutral_l'], edgecolor=C['neutral'], height=0.58, lw=1.4)
+            ax.barh(0, 1000, color=C['neutral_l'], edgecolor=C['neutral'], height=0.58, lw=1.4)
+            ax.text(600, 1, '1,200/s (70%)', ha='center', va='center', fontsize=16.0, fontweight='bold', color=C['text'])
+            ax.text(500, 0, '1,000/s (95%)', ha='center', va='center', fontsize=16.0, fontweight='bold', color=C['text'])
+        else:
+            ax.barh(1, 840, color=C['compute'], height=0.58)
+            ax.barh(1, 360, left=840, color=C['danger_l'], edgecolor=C['danger'], hatch='//', height=0.58, lw=1.2)
+            ax.text(420, 1, '840 SLO', ha='center', va='center', fontsize=16.0, fontweight='bold', color='white')
+            ax.text(1245, 1, '360 late', ha='left', va='center', fontsize=15.5, fontweight='bold', color=C['danger'])
+            ax.barh(0, 950, color=C['data'], height=0.58)
+            ax.barh(0, 50, left=950, color=C['danger_l'], edgecolor=C['danger'], height=0.58, lw=1.2)
+            ax.text(475, 0, '950 SLO', ha='center', va='center', fontsize=16.0, fontweight='bold', color='white')
+        ax.set_yticks([0, 1])
+        ax.set_yticklabels(['Y', 'X'], fontsize=16.5, fontweight='bold')
+        ax.set_xlim(0, 1850)
+        ax.set_ylim(-0.5, 1.5)
+        ax.set_xticks([0, 500, 1000])
+        ax.tick_params(axis='x', labelsize=15.5)
+        ax.set_xlabel('requests / s', fontsize=15.5)
+        ax.spines['left'].set_visible(False)
+        sp.save(fig, out / f'slo_vote_step{k}.svg')
+
+# P14 Estimate visual: Little's Law log bar (Vision 100 vs Chat 10,550 in flight)
+def littles_law_bars():
+    fig, ax = plt.subplots(figsize=(3.2, 0.95))
+    ax.barh(1, 100, color=C['memory'], height=0.58)
+    ax.barh(0, 10550, color=C['danger'], height=0.58)
+    ax.text(165, 1, '100', va='center', ha='left', fontsize=16.5, fontweight='bold', color=C['memory'])
+    ax.text(16500, 0, '10,550 (106×)', va='center', ha='left', fontsize=16.5, fontweight='bold', color=C['danger'])
+    ax.set_xscale('log')
+    ax.set_xlim(1, 3.5e6)
+    ax.set_ylim(-0.5, 1.5)
+    ax.set_yticks([0, 1])
+    ax.set_yticklabels(['Chat decode\n10.55 s', 'Vision\n0.10 s'], fontsize=15.5, fontweight='bold')
+    ax.set_xticks([10, 1000, 100000])
+    ax.set_xticklabels(['10', '10³', '10⁵'], fontsize=16.0)
+    ax.minorticks_off()
+    ax.spines['left'].set_visible(False)
+    ax.set_xlabel('in-flight requests (log)', fontsize=16.0)
+    sp.save(fig, out / 'littles_law_bars.svg')
+
+recall_slo_filter()
+slo_vote()
+littles_law_bars()

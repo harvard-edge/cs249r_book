@@ -133,8 +133,8 @@ break and rebuild. Each is engineered through a *predict-then-reveal* structure.
    decode is memory-bound, and memory bandwidth only improved ~1.7x.
 
 2. **Aha #2 -- "KV-cache eats all my memory"** (11:00 AM)
-   Attendees predict they can serve 200+ concurrent LLM requests on an 80 GB GPU.
-   They sweep batch sizes and discover OOM at ~64 because KV-cache grows linearly
+   Attendees predict they can serve 200+ concurrent LLM requests on an 80 GiB GPU.
+   They sweep batch sizes and discover OOM above ~128 requests (`64 GiB` KV-cache vs. `15 GiB` weights) because KV-cache grows linearly
    with batch size and dominates memory at high concurrency.
 
 3. **Aha #3 -- "Adding GPUs made it SLOWER"** (1:30 PM)
@@ -242,7 +242,7 @@ and the binding constraint that limits further optimization.
 | 10:55 | **The KV-cache equation** | Lecture + whiteboard (10 min) | Derive the KV-cache formula: `2 x L x H_kv x D_head x S x B x bytes`. Walk through each term. "Each active request carries its own memory of the conversation." |
 | 11:05 | **Prediction exercise** | Paper (pair, 3 min) | "Llama-3-8B on H100 (80 GB), FP16 weights = 16 GB. How many concurrent 4K-context requests can you serve? Write your prediction." Most will guess 100+. |
 | 11:08 | **Exercise 2: Serving capacity sweep** | Hands-on (pair, 12 min) | Run Exercise 2. Sweep batch_size from 1 to 128 at seq_len=4096. Find where `feasible` flips to False. Record weight memory vs KV-cache memory at each point. |
-| 11:20 | **Reveal: "Where did the memory go?"** | Facilitated discussion (10 min) | Show that at batch=64, KV-cache is ~64 GB while weights are only ~16 GB. KV-cache dominates. This is why PagedAttention was invented. This is why context length is expensive. |
+| 11:20 | **Reveal: "Where did the memory go?"** | Facilitated discussion (10 min) | Show that at batch=128, KV-cache is 64 GiB while weights are ~15 GiB (and past bs=130 it OOMs). KV-cache dominates. This is why PagedAttention and GQA were invented, and why context length is expensive. |
 | 11:30 | **Extension: What does quantization do to serving capacity?** | Hands-on + discussion (10 min) | "Switch from FP16 to INT8. How many more requests fit?" Both weights AND KV-cache shrink. Double benefit. Connect to U4 (compression as architecture). |
 | 11:40 | **Recap + bridge** | Lecture (5 min) | "We can now model one GPU. But real systems use many GPUs. What happens when you add communication?" |
 

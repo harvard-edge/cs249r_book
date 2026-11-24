@@ -1,0 +1,84 @@
+{
+  "schema": "mlsysim-gpu-energy-plan/1",
+  "purpose": "Board energy of single-GPU inference and training, measured against MLSys·im's two device-power assumptions: rated TDP and Engine.solve's energy-proportional rule.",
+  "declared": "2026-11-12",
+  "declaration_note": "Every efficiency below is a value the package already uses (engine/empirical.py anchors); none is fitted to these measurements. Commit this file before any run: each run manifest records its SHA-256, and the analysis refuses runs measured under a different plan.",
+  "boundary": "GPU board only, as reported by NVML. Excludes host CPU, DRAM, NICs, fans outside the board, power-supply losses, and facility overhead (PUE).",
+  "trials": 10,
+  "warmup_trials": 1,
+  "idle_seconds": 5.0,
+  "phase_min_seconds": 5.0,
+  "sample_interval_s": 0.05,
+  "counter_probe_seconds": 2.0,
+  "seed": 2193,
+  "split_note": "Calibration: H100 at the five smaller Llama configurations and ResNet-50. Held out: the largest H100 Llama configuration (batch 16, 2048-token prompts) and every A100 configuration, so a later fitted parameter is tested on an unseen operating point and an unseen device.",
+  "revision_note": "Changed once, after the pilot run pilot-h100-20261112T201829Z-1 (kept under runs/ and excluded as measured under the earlier plan): it measured a 100 ms energy-counter refresh, so training steps went from 50 to 150 to stretch the training phase from about 2.7 s to about 8 s and cut the boundary error per trial from up to 4% to about 1%. No measured energy or estimate entered the change.",
+  "analysis_note": "Declared before any run: besides each estimate's error, the analysis compares devices. For every configuration measured on both GPUs it reports which device has the lower energy per unit of work by the meter and by each estimate, and whether they agree (device_choice.csv).",
+  "devices": {
+    "H100": {
+      "registry": "Hardware.Cloud.H100",
+      "modal_gpu": "H100!",
+      "expected_name": "NVIDIA H100 80GB HBM3"
+    },
+    "A100": {
+      "registry": "Hardware.Cloud.A100",
+      "modal_gpu": "A100-80GB",
+      "expected_name": "NVIDIA A100-SXM4-80GB"
+    }
+  },
+  "workloads": {
+    "llama31_8b": {
+      "kind": "generate",
+      "registry": "Models.Language.Llama3_8B",
+      "hf_model": "NousResearch/Meta-Llama-3.1-8B",
+      "hf_revision": "1f47e50cdbe801ad8a5174156ec3a0655108fb9f",
+      "weights_sha256": {
+        "model-00001-of-00004.safetensors": "f8b9704ab09cdeb097aa4a0a24bca96f906eec36bad63ab495bc21475058601b",
+        "model-00002-of-00004.safetensors": "c28b25e7541751056ee126627e007f8d4288319733285e9f7b17b9ff6eb313f0",
+        "model-00003-of-00004.safetensors": "d8e9504dd4e4a146d484c52a97584ec14dac92237c46b064934af67a85e7d383",
+        "model-00004-of-00004.safetensors": "e4486f35c040f683f7d790354f66c169c109eb9fa0954a4a35d7c458a108405d"
+      },
+      "weights_note": "An ungated mirror of meta-llama/Llama-3.1-8B, used under the Llama 3.1 Community License. At these revisions its config, generation config, tokenizer, and weight index are byte-identical to meta-llama/Llama-3.1-8B@d04e592bb4f6aa9cfee91e2e20afa771667e1d4b (equal git blob ids), and its four weight shards match that revision's sizes and the SHA-256 of unsloth/Meta-Llama-3.1-8B. Meta does not publish the shard hashes without a license acceptance. The download is checked against weights_sha256 before any GPU starts.",
+      "precision": "fp16",
+      "engine": "vLLM offline engine (LLM.generate), one GPU, CUDA graphs for decode, greedy, ignore_eos, random prompt tokens, all requests of a batch submitted together",
+      "attention_backend": "FLASH_ATTN",
+      "vllm": {
+        "max_model_len": 2560,
+        "max_num_seqs": 16,
+        "max_num_batched_tokens": 32768,
+        "gpu_memory_utilization": 0.85,
+        "swap_space": 0,
+        "enforce_eager": false,
+        "enable_prefix_caching": false,
+        "enable_chunked_prefill": false
+      },
+      "efficiency": 0.5,
+      "model_seq_len": "mean_context",
+      "model_seq_len_note": "ServingModel is evaluated at seq_len = prompt_tokens + output_tokens // 2, the mean context length over the decode phase, for ITL; prefill uses seq_len = prompt_tokens."
+    },
+    "resnet50_train": {
+      "kind": "train",
+      "registry": "Models.Vision.ResNet50",
+      "precision": "fp16",
+      "engine": "torchvision resnet50, SGD, torch.autocast fp16, channels_last, synthetic on-device data",
+      "warmup_steps": 10,
+      "steps": 150
+    }
+  },
+  "configs": [
+    {"id": "h100-llama-b1-p128", "device": "H100", "workload": "llama31_8b", "batch": 1, "prompt_tokens": 128, "output_tokens": 512, "split": "calibration"},
+    {"id": "h100-llama-b8-p128", "device": "H100", "workload": "llama31_8b", "batch": 8, "prompt_tokens": 128, "output_tokens": 512, "split": "calibration"},
+    {"id": "h100-llama-b16-p128", "device": "H100", "workload": "llama31_8b", "batch": 16, "prompt_tokens": 128, "output_tokens": 512, "split": "calibration"},
+    {"id": "h100-llama-b1-p2048", "device": "H100", "workload": "llama31_8b", "batch": 1, "prompt_tokens": 2048, "output_tokens": 512, "split": "calibration"},
+    {"id": "h100-llama-b8-p2048", "device": "H100", "workload": "llama31_8b", "batch": 8, "prompt_tokens": 2048, "output_tokens": 512, "split": "calibration"},
+    {"id": "h100-llama-b16-p2048", "device": "H100", "workload": "llama31_8b", "batch": 16, "prompt_tokens": 2048, "output_tokens": 512, "split": "heldout"},
+    {"id": "h100-resnet50-train-b256", "device": "H100", "workload": "resnet50_train", "batch": 256, "efficiency": 0.13, "split": "calibration"},
+    {"id": "a100-llama-b1-p128", "device": "A100", "workload": "llama31_8b", "batch": 1, "prompt_tokens": 128, "output_tokens": 512, "split": "heldout"},
+    {"id": "a100-llama-b8-p128", "device": "A100", "workload": "llama31_8b", "batch": 8, "prompt_tokens": 128, "output_tokens": 512, "split": "heldout"},
+    {"id": "a100-llama-b16-p128", "device": "A100", "workload": "llama31_8b", "batch": 16, "prompt_tokens": 128, "output_tokens": 512, "split": "heldout"},
+    {"id": "a100-llama-b1-p2048", "device": "A100", "workload": "llama31_8b", "batch": 1, "prompt_tokens": 2048, "output_tokens": 512, "split": "heldout"},
+    {"id": "a100-llama-b8-p2048", "device": "A100", "workload": "llama31_8b", "batch": 8, "prompt_tokens": 2048, "output_tokens": 512, "split": "heldout"},
+    {"id": "a100-llama-b16-p2048", "device": "A100", "workload": "llama31_8b", "batch": 16, "prompt_tokens": 2048, "output_tokens": 512, "split": "heldout"},
+    {"id": "a100-resnet50-train-b256", "device": "A100", "workload": "resnet50_train", "batch": 256, "efficiency": 0.26, "split": "heldout"}
+  ]
+}

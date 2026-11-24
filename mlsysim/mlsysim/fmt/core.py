@@ -140,7 +140,7 @@ def _check_fmt_precision(val, precision, result):
             f"non-zero value as zero."
         )
 
-    # Mode 2 — silent integer rounding: precision=0 on a genuinely fractional
+    # Mode 2 — silent integer rounding: precision=0 on a non-integer fractional
     # value (10.7 -> "11") corrupts arithmetic quoted in prose without any
     # visible symptom. The 1e-9 tolerance forgives float noise on true ints.
     if precision == 0 and abs(val) > 1e-12:
@@ -495,16 +495,25 @@ def _usd_amount_magnitude(amount, per):
     if not isinstance(amount, ureg.Quantity):
         return amount
 
-    unit_label = f"{amount.units}"
-    if "dollar" not in unit_label:
+    unit_map = getattr(amount.units, "_units", {})
+    has_usd_unit = any(
+        ("dollar" in name or name.endswith("USD")) and exp == 1
+        for name, exp in unit_map.items()
+    )
+    has_eur_unit = any(
+        ("euro" in name.lower() or name.endswith("EUR"))
+        for name in unit_map
+    )
+    if not has_usd_unit or has_eur_unit:
         raise ValueError(
             f"fmt_usd expects a dollar Quantity, got units {amount.units}. "
             "Pass a plain numeric dollar magnitude only at an intentional "
             "scalar boundary."
         )
 
+    is_pure_usd = len(unit_map) == 1
     if per is None:
-        if unit_label != "dollar":
+        if not is_pure_usd:
             raise ValueError(
                 f"fmt_usd received a dollar rate with units {amount.units} but "
                 "no per= denominator. Pass per= so the formatter owns the "
@@ -518,7 +527,7 @@ def _usd_amount_magnitude(amount, per):
         # Some accepted prose denominators are not physical Pint units
         # ("label", "GPU-hour", "device/year"). They can still decorate a
         # pure dollar quantity, but a Pint rate needs a Pint denominator.
-        if unit_label == "dollar":
+        if is_pure_usd:
             return amount.m_as(USD)
         raise ValueError(
             f"fmt_usd cannot infer a Pint denominator from per={per!r} for "
@@ -774,6 +783,11 @@ def fmt_eur(
     from ..core.units import EUR
 
     if isinstance(amount, ureg.Quantity):
+        if dict(amount.units._units) != {"EUR": 1}:
+            raise ValueError(
+                f"fmt_eur expects an EUR Quantity, got units {amount.units}. "
+                "Pass a plain numeric euro magnitude only at an intentional scalar boundary."
+            )
         amount = amount.to(EUR).magnitude
     if scale is not None:
         divisor, scale_suffix = _resolve_decimal_scale(
@@ -903,7 +917,7 @@ def _percent_ratio_value(ratio, *, max_ratio=1.5, allow_negative=False, what="fm
             f"{what} expects a 0-1 ratio, got {r}. If this is an "
             f"already-scaled 0-100 value, divide by 100 at the source so the "
             f"value flows through {what} as a ratio. If a value above "
-            f"{max_ratio * 100:.0f}% is genuinely intended (e.g. growth), pass "
+            f"{max_ratio * 100:.0f}% is explicitly intended (e.g. growth), pass "
             f"max_ratio= explicitly; if it can be negative (e.g. ROI, a signed "
             f"change), pass allow_negative=True. This guard prevents silent 100x "
             f"errors such as 0.85 -> '8500 percent'."

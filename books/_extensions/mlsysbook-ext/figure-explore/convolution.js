@@ -79,73 +79,132 @@
     orange.forEach(p => windowGroup.append(p));
     const outputLayer = make('g',{}), particles = make('g',{'aria-hidden':'true'});
     const valueLayer=make('g',{'data-values-on-diagram':''});
-    svg.append(outputPlane,outputLayer,valueLayer,particles);
-    const controls = node('div','','life-controls'), buttons={};
-    for (const [id,label] of [['next','Next'],['back','Back'],['play','Play'],['restart','Restart']]) {
-      const b=node('button',label); b.type='button'; b.dataset.control=id;
-      b.setAttribute('aria-keyshortcuts',({next:'N',back:'P',play:'K',restart:'R'})[id]);
-      controls.append(b); buttons[id]=b;
+    svg.append(outputPlane,outputLayer,valueLayer,particles);const __syncFocusGuard=s=>{const b=(s.getAttribute('viewBox')||'').trim().split(/[\s,]+/).map(Number);if(b.length!==4||!b[2]||!b[3])return;let g=s.querySelector(':scope>[data-mlsys-focus-guard]');if(!g){g=document.createElementNS('http://www.w3.org/2000/svg','path');g.setAttribute('fill','none');g.setAttribute('stroke','none');g.setAttribute('data-mlsys-focus','');g.setAttribute('data-mlsys-focus-guard','');s.append(g);}g.setAttribute('d',`M${(b[0]+b[2]*.1).toFixed(2)},${(b[1]+b[3]*.1).toFixed(2)}h${(b[2]*.8).toFixed(2)}v${(b[3]*.8).toFixed(2)}h-${(b[2]*.8).toFixed(2)}z`);};__syncFocusGuard(svg);
+    const titleHeading = node('h4', 'How does a moving input window produce one output while sharing the filter?', 'mlsys-original-title');
+    const introPara = node('p', 'Slide the shared 3 × 3 vertical-edge filter across the 7 × 7 input grid to compute and store all 25 output activations.', 'mlsys-original-intro');
+    const scope = node('p', 'Single input channel · stride 1 · no padding or bias · output before activation. The filter is used without flipping.', 'life-scope');
+    const label = node('label', '', 'life-sequence mlsys-original-sequence'), menu = node('select');
+    menu.setAttribute('aria-label', 'Animation sequence'); label.append(menu);
+    const controls = node('div', '', 'life-controls mlsys-original-controls'), buttons = {}, btnLabels = {};
+    controls.setAttribute('role', 'group'); controls.setAttribute('aria-label', 'Animation controls');
+    const iconPaths = {
+      play: 'M8 5.5v13l10.5-6.5Z',
+      pause: 'M8.5 5.5v13M15.5 5.5v13',
+      replay: 'M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9M4.5 4.5V9H9',
+      back: 'M14.5 6.5 9 12l5.5 5.5',
+      next: 'M9.5 6.5 15 12l-5.5 5.5',
+      restart: 'M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9M4.5 4.5V9H9',
+      expand: 'M14.5 4.5h5v5M19.5 4.5 13 11M9.5 19.5h-5v-5M4.5 19.5 11 13',
+      options: 'M4 7h10M18 7h2M4 17h4M12 17h8M14 5v4M8 15v4'
+    };
+    const svgIcon = glyph => {
+      const s = make('svg', { viewBox: '0 0 24 24', width: '16', height: '16', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', class: 'life-icon' });
+      s.append(make('path', { d: iconPaths[glyph] }));
+      return s;
+    };
+    const decorateBtn = (b, txt, glyph, hint) => {
+      b.classList.add('mlsys-original-btn', 'mlsys-original-btn-' + glyph);
+      b.title = hint;
+      const ic = svgIcon(glyph);
+      const sp = node('span', txt, 'mlsys-original-control-label');
+      b.replaceChildren(ic, sp);
+      return { ic, sp };
+    };
+    for (const [id, btnLabel, hint] of [
+      ['play', 'Play', 'Play or pause (K)'],
+      ['back', 'Back', 'Previous step (P)'],
+      ['next', 'Next', 'Next step (N)'],
+      ['restart', 'Restart', 'Restart (R)']
+    ]) {
+      const b = node('button', '', ''); b.type = 'button'; b.dataset.control = id;
+      b.setAttribute('aria-keyshortcuts', ({ next: 'N', back: 'P', play: 'K', restart: 'R' })[id]);
+      btnLabels[id] = decorateBtn(b, btnLabel, id, hint);
+      buttons[id] = b;
     }
-    const scanButton=node('button','Complete the scan');scanButton.type='button';scanButton.dataset.control='scan';
-    controls.append(scanButton);
-    const expandButton=node('button','Expand');expandButton.type='button';expandButton.setAttribute('aria-haspopup','dialog');controls.append(expandButton);
-    const dialog=node('dialog','','life-expanded'),closeButton=node('button','Close expanded animation','life-expanded-close');closeButton.type='button';
-    dialog.setAttribute('aria-label','Expanded convolution animation');dialog.append(closeButton);outer.append(dialog);
-    const placeholder=document.createComment('Convolution inline position');
-    function restoreInline(){pause();if(placeholder.parentNode)placeholder.after(panel);else dialog.before(panel);expandButton.hidden=false;expandButton.focus();requestAnimationFrame(()=>{if(!dialog.open&&expandButton.isConnected)expandButton.focus();});}
-    expandButton.addEventListener('click',()=>{pause();panel.before(placeholder);expandButton.hidden=true;dialog.append(panel);dialog.showModal();closeButton.focus();},{signal});
-    closeButton.addEventListener('click',()=>dialog.close(),{signal});
-    dialog.addEventListener('close',restoreInline,{signal});
-    const speedLabel=node('label','Speed ','life-speed'),speedMenu=node('select');
-    speedMenu.id=outer.id+'-convolution-speed';speedLabel.htmlFor=speedMenu.id;
-    const rates=[.5,1,1.5,2];let speed=1;
-    rates.forEach(rate=>{const option=node('option',`${rate}×`);option.value=rate;speedMenu.append(option);});speedMenu.value='1';
-    speedMenu.setAttribute('aria-label','Playback speed');speedLabel.append(speedMenu);controls.append(speedLabel);
-    const scope=node('p','Single input channel · stride 1 · no padding or bias · output before activation. The filter is used without flipping.','life-scope');
-    const label=node('label','Step ','life-sequence'), menu=node('select');
-    menu.setAttribute('aria-label','Animation sequence'); label.append(menu);
-    const narration=node('div','','life-narration'), heading=node('strong'), explanation=node('p');
-    narration.setAttribute('aria-live','polite'); narration.append(heading,explanation);
-    const canvas=node('div','','life-art'); canvas.append(svg);
-    const workspace=node('div','','life-workspace'), inset=node('details','','life-values');
-    inset.setAttribute('aria-label','Detailed calculation for the selected window');
-    const example=window.MLSysConvolutionValues;
+    const statusChip = node('span', 'Ready', 'life-status mlsys-original-status');
+    statusChip.setAttribute('aria-hidden', 'true');
+    const scanButton = node('button', 'Complete the scan', 'mlsys-original-btn life-scan-btn'); scanButton.type = 'button'; scanButton.dataset.control = 'scan';
+    const expandButton = node('button', '', ''); expandButton.type = 'button'; expandButton.setAttribute('aria-haspopup', 'dialog');
+    decorateBtn(expandButton, 'Expand', 'expand', 'Expand to the full window');
+    const dialog = node('dialog', '', 'life-expanded'), closeButton = node('button', 'Close expanded animation', 'life-expanded-close'); closeButton.type = 'button';
+    dialog.setAttribute('aria-label', 'Expanded convolution animation'); dialog.append(closeButton); outer.append(dialog);
+    const placeholder = document.createComment('Convolution inline position');
+    function restoreInline() { pause(); if (placeholder.parentNode) placeholder.after(panel); else dialog.before(panel); expandButton.hidden = false; expandButton.focus(); requestAnimationFrame(() => { if (!dialog.open && expandButton.isConnected) expandButton.focus(); }); }
+    expandButton.addEventListener('click', () => { pause(); panel.before(placeholder); expandButton.hidden = true; dialog.append(panel); dialog.showModal(); closeButton.focus(); }, { signal });
+    closeButton.addEventListener('click', () => dialog.close(), { signal });
+    dialog.addEventListener('close', restoreInline, { signal });
+
+    const rates = [.5, 1, 1.5, 2]; let speed = 1;
+    const speedWrap = node('div', '', 'life-speed-wrap');
+    const speedBtn = node('button', '', 'mlsys-original-options-button'); speedBtn.type = 'button';
+    decorateBtn(speedBtn, 'Speed', 'options', 'Playback speed (− / +)');
+    const rateSpan = node('span', '1×', 'life-rate');
+    speedBtn.append(rateSpan);
+    speedBtn.setAttribute('aria-expanded', 'false');
+    const speedPop = node('div', '', 'life-popover'); speedPop.hidden = true;
+    const speedInputs = [];
+    rates.forEach(rate => {
+      const ch = node('label', '', 'life-speed-choice');
+      const inp = node('input'); inp.type = 'radio'; inp.name = (outer.id || 'cnn') + '-speed'; inp.value = String(rate); inp.checked = rate === 1;
+      ch.append(inp, document.createTextNode(`${rate}×`));
+      speedPop.append(ch); speedInputs.push(inp);
+      inp.addEventListener('change', () => { if (inp.checked) setSpeed(rate); }, { signal });
+    });
+    speedBtn.addEventListener('click', () => { speedPop.hidden = !speedPop.hidden; speedBtn.setAttribute('aria-expanded', String(!speedPop.hidden)); }, { signal });
+    document.addEventListener('click', e => { if (!speedPop.hidden && !speedWrap.contains(e.target)) { speedPop.hidden = true; speedBtn.setAttribute('aria-expanded', 'false'); } }, { signal });
+    speedWrap.append(speedBtn, speedPop);
+
+    controls.append(buttons.play, statusChip, label, buttons.back, buttons.next, buttons.restart, expandButton, speedWrap);
+    const narration = node('div', '', 'life-narration mlsys-original-narration'), heading = node('strong'), explanation = node('p');
+    narration.setAttribute('aria-live', 'polite'); narration.append(heading, explanation);
+    const canvas = node('div', '', 'life-art'); canvas.append(svg);
+    const legend = node('div', '', 'life-legend');
+    for (const [text, color] of [['Input window', '#ff8000'], ['Input contributions', '#2455d6'], ['Output activations', '#a64ca6']]) {
+      const chip = node('span', text); chip.style.setProperty('--chip', color); legend.append(chip);
+    }
+    const stageWrap = node('div', '', 'mlsys-original-stage');
+    stageWrap.append(canvas, legend);
+    const dockWrap = node('div', '', 'mlsys-original-dock');
+    const keys = node('p', 'Keys: K Play/Pause · P / N Step · R Restart · −/+ Speed · Expand opens full view', 'life-keys');
+    dockWrap.append(controls, keys);
+    const workspace = node('div', '', 'life-workspace mlsys-original-details'), inset = node('details', '', 'life-values');
+    inset.setAttribute('aria-label', 'Detailed calculation for the selected window');
+    const example = window.MLSysConvolutionValues;
     if (!example || !Array.isArray(example.positions)) throw new Error('Missing convolution example data.');
-    const insetTitle=node('summary','Inspect the calculation');
-    const sourceLink=node('a','Illustrative values from the vertical-line example below','life-value-source'); sourceLink.href='#'+example.source_anchor;
-    const valueScope=node('p',example.scope,'life-value-scope'), valuesBody=node('div');
-    inset.append(insetTitle,valueScope,valuesBody);
-    const calculation=node('section','','life-calculation');
-    calculation.setAttribute('aria-label','Calculation linked to the highlighted row');
-    const calculationLabel=node('strong','Multiply matching cells, then add'), rowControls=node('div','','life-row-controls');
-    rowControls.setAttribute('role','group'); rowControls.setAttribute('aria-label','Inspect a row of the current window');
-    const rowButtons=[];let selectedRow=0;
-    for(let row=0;row<example.weights.length;row++) {
-      const button=node('button',`Row ${row+1}`);button.type='button';rowControls.append(button);rowButtons.push(button);
-      button.addEventListener('click',()=>{selectedRow=row;paintCalculation(states[index]);paintDiagramValues(states[index]);});
+    const insetTitle = node('summary', 'Inspect the calculation');
+    const sourceLink = node('a', 'Illustrative values from the vertical-line example below', 'life-value-source'); sourceLink.href = '#' + example.source_anchor;
+    const valueScope = node('p', example.scope, 'life-value-scope'), valuesBody = node('div');
+    const calculation = node('section', '', 'life-calculation');
+    calculation.setAttribute('aria-label', 'Calculation linked to the highlighted row');
+    const calculationLabel = node('strong', 'Multiply matching cells, then add'), rowControls = node('div', '', 'life-row-controls');
+    rowControls.setAttribute('role', 'group'); rowControls.setAttribute('aria-label', 'Inspect a row of the current window');
+    const rowButtons = []; let selectedRow = 0;
+    for (let row = 0; row < example.weights.length; row++) {
+      const button = node('button', `Row ${row + 1}`); button.type = 'button'; rowControls.append(button); rowButtons.push(button);
+      button.addEventListener('click', () => { selectedRow = row; paintCalculation(states[index]); paintDiagramValues(states[index]); });
     }
-    const equation=node('p','','life-row-equation'), total=node('p','','life-calculation-total');
-    calculation.append(calculationLabel,rowControls,equation,total);
-    workspace.append(canvas,calculation,sourceLink,inset);
-    const keys=node('p','Keyboard: N Next · P Back · K Play/Pause · R Restart · −/+ Speed. Expand opens a full-window view. Focus the animation to use shortcuts.','life-keys');
-    const legend=node('div','','life-legend');
-    for (const [text,color] of [['Input window','#ff8000'],['Input contributions','#2455d6'],['Output activations','#a64ca6']]) {
-      const chip=node('span',text); chip.style.setProperty('--chip',color); legend.append(chip);
-    }
-    const progress=node('p','','life-progress'), checkpoint=node('p','','life-checkpoint'), takeaway=node('p','','life-takeaway');
-    checkpoint.textContent='Two windows show the pattern. Complete the scan applies the same filter at the remaining positions; Next continues the detailed steps.';
-    takeaway.textContent='The same filter weights produce every output. Overlapping windows reuse input values, creating opportunities to reuse data in fast memory. The drawing shows logical computation; the execution schedule determines which data remains on chip.';
-    panel.append(controls,keys,scope,label,narration,workspace,legend,progress,checkpoint,takeaway);
+    const equation = node('p', '', 'life-row-equation'), total = node('p', '', 'life-calculation-total');
+    calculation.append(calculationLabel, rowControls, equation, total);
+    const progressRow = node('div', '', 'life-progress-row');
+    const progress = node('p', '', 'life-progress'), checkpoint = node('p', '', 'life-checkpoint'), takeaway = node('p', '', 'life-takeaway');
+    progressRow.append(progress, scanButton);
+    checkpoint.textContent = 'Two windows show the pattern. Complete the scan applies the same filter at the remaining positions; Next continues the detailed steps.';
+    takeaway.textContent = 'The same filter weights produce every output. Overlapping windows reuse input values, creating opportunities to reuse data in fast memory. The drawing shows logical computation; the execution schedule determines which data remains on chip.';
+    inset.append(insetTitle, calculation, sourceLink, valueScope, valuesBody);
+    workspace.append(inset);
+    panel.append(titleHeading, introPara, scope, stageWrap, dockWrap, narration, progressRow, checkpoint, takeaway, workspace);
     const movement=Number(outer.dataset.mlsysMovementMs), hold=Number(outer.dataset.mlsysReadingPauseMs);
     if (!(movement>0) || !(hold>=0)) throw new Error('Missing build-time timing.');
     const media=matchMedia('(prefers-reduced-motion: reduce)');
-    const states=[{pose:true,title:'The drawing in the chapter',text:'The orange window in the lower input grid determines the violet cell above it. The blue lines connect that window to its output.'}];
+    const states=[{pose:true,title:'The drawing in the chapter',text:'The orange 3 × 3 window in the 7 × 7 input grid determines the single violet cell in the 5 × 5 output grid above it, connected by the four blue projection lines.'}];
     for (let row=0; row<5; row++) for (let col=0; col<5; col++) {
-      states.push({row,col,phase:'move',title:`Position (${row}, ${col}): move the window`,text:'The same 3 × 3 filter moves to this input window. Only the window position changes; the filter weights are reused.'});
-      states.push({row,col,phase:'combine',title:`Position (${row}, ${col}): combine the inputs`,text:'Each of the nine input values is multiplied by its filter weight. The contributions are summed to form one output activation.'});
-      states.push({row,col,phase:'write',title:`Position (${row}, ${col}): store the output`,text:'One activation is now stored in the corresponding output cell. The other input values remain available for overlapping windows.'});
+      const pos=example.positions.find(p=>p.row===row&&p.column===col),count=row*5+col+1;
+      const sumsText=pos.row_sums.map(x=>x<0?`(${x})`:String(x)).join(' + ');
+      states.push({row,col,phase:'move',title:`Position (${row}, ${col}): move the window`,text:`The shared 3 × 3 vertical-edge filter slides to input rows ${row}–${row+2}, columns ${col}–${col+2}. Only the window coordinates change; the 9 filter weights remain stationary.`});
+      states.push({row,col,phase:'combine',title:`Position (${row}, ${col}): combine the inputs`,text:`Each of the 9 active input values is multiplied by its matching filter weight. The three row totals sum to ${sumsText} = ${pos.output}.`});
+      states.push({row,col,phase:'write',title:`Position (${row}, ${col}): store the output`,text:`Output ${pos.output} is stored in cell (${row}, ${col}) of the 5 × 5 output grid (${count} of 25 outputs complete). Adjacent stride-1 windows reuse overlapping input values.`});
     }
-    states.forEach((s,i) => {const o=node('option',`${i+1}. ${s.title}`);o.value=i;menu.append(o);});
+    states.forEach((s,i) => {const o=node('option',`${i+1} / ${states.length} · ${s.title}`);o.value=i;menu.append(o);});
     let index=0, completed=0, running=false, moving=false, motionPaused=false, resumeAutoplay=false, scanning=false, timer=null, effects=[], finishAction=null, motionFrame=null, motionTick=null, holdRemaining=null, holdStarted=null;
     const coordinates=s => {
       if(s.pose) return {window:[orangeOrigin,add(orangeOrigin,scale(lower.x,3)),add(orangeOrigin,scale(add(lower.x,lower.y),3)),add(orangeOrigin,scale(lower.y,3))],output:originalOutput,shift:{x:0,y:0}};
@@ -185,7 +244,11 @@
       scanButton.title=index<6?'Available after the first two output values are stored.':'Apply the shared filter at the remaining positions.';
       buttons.back.disabled=index===0; buttons.restart.disabled=index===0&&!moving;
       buttons.next.disabled=index===states.length-1&&!moving;
-      buttons.next.textContent=moving?'Finish':'Next'; buttons.play.textContent=running||(moving&&!motionPaused)?'Pause':index===states.length-1?'Replay':'Play';
+      btnLabels.next.sp.textContent='Next';
+      const playMode=running||(moving&&!motionPaused)?'pause':index===states.length-1?'replay':'play';
+      btnLabels.play.sp.textContent=playMode==='pause'?'Pause':playMode==='replay'?'Replay':'Play';
+      btnLabels.play.ic.firstChild.setAttribute('d',iconPaths[playMode]);
+      statusChip.textContent=moving?'In motion':running?'Playing':index===0?'Ready':index===states.length-1?'Complete':'';
       Object.assign(panel.dataset,{step:String(index),committed:String(completed),moving:String(moving),running:String(running)});
     }
     function paintDiagramValues(s) {
@@ -305,10 +368,11 @@
       if(!rates.includes(value))return;
       const waiting=holdStarted!==null;settleHold();speed=value;
       effects.forEach(effect=>{const time=effect.currentTime;effect.updatePlaybackRate(speed);if(motionPaused){effect.pause();if(time!==null)effect.currentTime=time;}});
-      speedMenu.value=String(speed);panel.dataset.speed=String(speed);
+      rateSpan.textContent=`${speed}×`;
+      speedInputs.forEach(inp=>{inp.checked=Number(inp.value)===speed;});
+      panel.dataset.speed=String(speed);
       if(waiting&&running)schedule(true);
     }
-    speedMenu.addEventListener('change',()=>setSpeed(Number(speedMenu.value)),{signal});
     function advance(autoplay=false) {
       if(!autoplay)scanning=false;
       if(moving){running=false;finishAction?.();return;}
@@ -380,7 +444,7 @@
       if(event.shiftKey||!['n','p','k','r'].includes(key))return;
       event.preventDefault();if(key==='n')advance();else if(key==='p')seek(Math.max(0,index-1));else if(key==='r')seek(0);else play();
     },{signal});
-    figure.addEventListener('mlsys-view-change',e=>{if(e.detail.view!=='explore'){pause();if(dialog.open)dialog.close();}else requestAnimationFrame(()=>{position();outer.scrollIntoView({block:'start'});});},{signal});
+    figure.addEventListener('mlsys-view-change',e=>{if(e.detail.view!=='explore'){pause();if(dialog.open)dialog.close();}else requestAnimationFrame(()=>position());},{signal});
     document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();},{signal});
     const visibilityObserver=new IntersectionObserver(entries=>{if(!dialog.open&&!entries[0].isIntersecting)pause();});visibilityObserver.observe(outer);
     media.addEventListener('change',()=>{if(media.matches&&moving){running=false;finishAction?.();}},{signal});

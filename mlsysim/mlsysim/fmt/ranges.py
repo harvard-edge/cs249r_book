@@ -114,7 +114,15 @@ def fmt_pp(points, precision=None, commas=False, style="prose", attributive=Fals
     noun; use the default noun form everywhere else.
     """
     if isinstance(points, ureg.Quantity):
-        v = float(points.m_as(""))
+        unit_map = dict(points.units._units)
+        if unit_map == {"percent": 1}:
+            v = float(points.to("percent").magnitude)
+        elif not unit_map and points.dimensionless:
+            v = float(points.magnitude)
+        else:
+            raise ValueError(
+                f"fmt_pp expects percentage points or a dimensionless scalar, got units {points.units}."
+            )
     else:
         v = float(points)
     _require_finite(v, "percentage points")
@@ -305,12 +313,22 @@ def _fmt_scaled_count_quantity(
     precision,
     commas,
     what,
+    allowed_unit_names,
     scale_style="symbol",
     attributive=False,
     approx=False,
     lower_bound=False,
 ):
-    raw_v = _numeric_magnitude(value.to(unit) if isinstance(value, ureg.Quantity) else value)
+    if isinstance(value, ureg.Quantity):
+        unit_keys = set(value.units._units.keys())
+        if not value.dimensionless or not unit_keys.issubset(allowed_unit_names):
+            raise ValueError(
+                f"{what} expects a count quantity with units in {sorted(allowed_unit_names)}, "
+                f"got units {value.units}."
+            )
+        raw_v = _numeric_magnitude(value.to(unit))
+    else:
+        raw_v = _numeric_magnitude(value)
     _validate_count_value(raw_v, allow_fractional=False, require_integer=True)
     auto_scaled = scale == "auto"
     scale = _auto_decimal_scale(raw_v) if auto_scaled else scale
@@ -382,6 +400,7 @@ def fmt_params(
         precision=precision,
         commas=commas,
         what="fmt_params",
+        allowed_unit_names={"param", "Kparam", "Mparam", "Bparam", "Tparam", "count"},
         scale_style=scale_style,
         attributive=attributive,
         approx=approx,
@@ -410,6 +429,7 @@ def fmt_tokens(
         precision=precision,
         commas=commas,
         what="fmt_tokens",
+        allowed_unit_names={"token", "Ktoken", "Mtoken", "Btoken", "Ttoken", "count"},
         scale_style=scale_style,
         attributive=attributive,
         approx=approx,
@@ -491,7 +511,7 @@ def fmt_rate(
     if v < 0 and not allow_negative:
         raise ValueError(
             f"fmt_rate expects a non-negative rate, got {v}. Pass "
-            f"allow_negative=True if a signed rate is genuinely intended."
+            f"allow_negative=True if a signed rate is explicitly intended."
         )
     scale_suffix = ""
     if scale is not None:
@@ -526,7 +546,7 @@ def fmt_fps(
     if v < 0 and not allow_negative:
         raise ValueError(
             f"fmt_fps expects a non-negative rate, got {v}. Pass "
-            f"allow_negative=True if a signed frame-rate delta is genuinely intended."
+            f"allow_negative=True if a signed frame-rate delta is explicitly intended."
         )
     if precision == 0:
         return fmt_int(
@@ -573,7 +593,7 @@ def fmt_ratio(value, precision=1, commas=False, allow_negative=False):
     if v < 0 and not allow_negative:
         raise ValueError(
             f"fmt_ratio expects a non-negative ratio, got {v}. Pass "
-            f"allow_negative=True if a signed ratio is genuinely intended."
+            f"allow_negative=True if a signed ratio is explicitly intended."
         )
     return fmt(v, precision=precision, commas=commas)
 
@@ -796,12 +816,12 @@ def fmt_usd_range(
     repeat_symbol=True,
 ):
     """Format a currency range with optional scale and one denominator."""
-    from ..core.units import USD
+    from .core import _usd_amount_magnitude
 
     if isinstance(lo, ureg.Quantity):
-        lo = lo.m_as(USD)
+        lo = _usd_amount_magnitude(lo, per)
     if isinstance(hi, ureg.Quantity):
-        hi = hi.m_as(USD)
+        hi = _usd_amount_magnitude(hi, per)
     lo_v = _numeric_magnitude(lo)
     hi_v = _numeric_magnitude(hi)
     if hi_v < lo_v:

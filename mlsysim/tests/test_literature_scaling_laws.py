@@ -103,7 +103,13 @@ def test_robot_trajectory_series_agrees_with_scalar_registries():
     series = viz.load_series("vol4/05_data/data/robot_trajectory_datasets.csv")
     assert any(c.startswith("# Source:") for c in series.provenance_comments)
     traj = {r["dataset"]: r for r in series.entries}
-    oxe_total = sum(r["episodes"] for r in load_series("vol4/05_data/data/open_x_embodiment_composition.csv").entries if r["episodes"])
+    oxe_total = sum(
+        r["episodes"]
+        for r in load_series("vol4/05_data/data/open_x_embodiment_composition.csv").entries
+        if r["episodes"]
+    )
+    assert traj
+    assert oxe_total > 0
 
     assert all("arXiv:" in str(r["source"]) for r in series.entries)
 
@@ -125,6 +131,7 @@ def test_models_scale_by_domain_agrees_with_vla_and_token_series():
     assert all("Cosmos" not in str(r["model"]) for r in rob)
 
     by_model = {r["model"]: r for r in rob}
+    assert by_model
 
     toks = {r["model"]: r["tokens"] for r in load_series("vol1/04_data_engineering/data/pretraining_tokens.csv").entries}
     notable_ds = {r["model"]: r["training_dataset_size"] for r in viz.load_series("vol1/04_data_engineering/data/notable_model_datasets.csv").entries}

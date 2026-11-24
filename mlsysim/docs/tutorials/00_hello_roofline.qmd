@@ -104,6 +104,8 @@ _p1 = Engine.solve(model=_m, hardware=_hw, batch_size=1, precision="fp16", effic
 _ai_b1 = _p1.arithmetic_intensity.to("flop/byte").magnitude
 _t_mem_ms = ((_m.parameters * mlsysim.Q_("2 byte")) / _hw.memory.bandwidth).to("ms").magnitude
 _t_cmp_ms = (_m.inference_flops / _hw.compute.peak_flops).to("ms").magnitude
+_tax_ms = _hw.dispatch_tax.to("ms").magnitude
+_t_mem_tot_ms = (_p1.latency - _hw.dispatch_tax).to("ms").magnitude
 ```
 
 After `pip install mlsysim`, the import is two lines:
@@ -161,20 +163,20 @@ info(Bottleneck=profile.bottleneck,
      Throughput=f"{profile.throughput.to('1/s').magnitude:.0f} images/sec")
 ```
 
-At batch size 1, ResNet-50 performs `{python} f"{_flops_g:.1f} GFLOP"` and transfers both model weights (`{python} f"{_weight_mb:.1f} MB"` at 2 bytes per parameter) and intermediate activations, yielding an arithmetic intensity of `{python} f"{_ai_b1:.1f} FLOP/byte"`. That sits just below the A100's theoretical ridge point of `{python} f"{_ridge:.1f} FLOP/byte"`, making batch-1 inference **memory-bound**.
+At batch size 1, ResNet-50 performs `{python} f"{_flops_g:.1f} GFLOP"` and transfers both model weights (`{python} f"{_weight_mb:.1f} MB"` at 2 bytes per parameter) and intermediate residual feature maps, yielding an arithmetic intensity of `{python} f"{_ai_b1:.1f} FLOP/byte"`. Because `{python} f"{_ai_b1:.1f} FLOP/byte"` sits well below the A100's theoretical ridge point of `{python} f"{_ridge:.1f} FLOP/byte"`, batch-1 inference is **memory-bound**.
 
-**Sanity check:** The weight-transfer and compute bounds from the Background equations confirm why the two ceilings are nearly balanced at batch size 1:
+**Sanity check:** Comparing the memory-transfer and compute bounds from the Background equations shows why memory traffic governs batch-1 latency:
 
 - $T_{\text{memory (weights)}} = `{python} f"{_weight_mb:.1f}"`\;\text{MB} \div `{python} f"{_bw_tbs:.2f}"`\;\text{TB/s} = `{python} f"{_t_mem_ms:.3f}"`\;\text{ms}$
 - $T_{\text{compute}} = `{python} f"{_flops_g:.1f}"`\;\text{GFLOP} \div `{python} f"{_peak_tflops:.0f}"`\;\text{TFLOP/s} = `{python} f"{_t_cmp_ms:.3f}"`\;\text{ms}$
-- Including activation traffic brings total memory time to $`{python} f"{_p1.latency.to('ms').magnitude:.3f}"`\;\text{ms} > T_{\text{compute}}$, placing the operating point just on the memory-bound side of the ridge.
+- Including intermediate feature-map reads and writes raises total HBM transfer time to $`{python} f"{_t_mem_tot_ms:.3f}"`\;\text{ms} > T_{\text{compute}}$, and adding the GPU's $`{python} f"{_tax_ms:.3f}"`\;\text{ms}$ hardware dispatch overhead gives the reported $`{python} f"{_p1.latency.to('ms').magnitude:.3f}"`\;\text{ms}$ latency.
 
-ResNet-50 at batch 1 sits right next to the ridge point. When $T_{\text{compute}} \approx T_{\text{memory}}$, the operating point is near the boundary between the two regimes.
+ResNet-50 at batch 1 sits at roughly half the A100's ridge point (`{python} f"{_ai_b1:.1f}"` vs. `{python} f"{_ridge:.1f} FLOP/byte"`), so a modest increase in batch size (between batch 4 and batch 16) amortizes weight loads enough to cross into the compute-bound regime.
 
 **Computing arithmetic intensity from first principles:** This ratio extends the analysis
 to any model, not only those in the Zoo. The formula is FLOPs ÷ Bytes. Compare two different workloads at batch size 1:
 
-- **ResNet-50 (batch 1):** `{python} f"{_flops_g:.1f} GFLOP"` across weights and activations = **`{python} f"{_ai_b1:.1f} FLOP/byte"`** → just below the A100 ridge (`{python} f"{_ridge:.1f} FLOP/byte"`), near the crossover
+- **ResNet-50 (batch 1):** `{python} f"{_flops_g:.1f} GFLOP"` across weights and feature maps = **`{python} f"{_ai_b1:.1f} FLOP/byte"`** → moderately memory-bound on A100 (`{python} f"{_ridge:.1f} FLOP/byte"` ridge), crossing into compute-bound by batch 16
 - **LLM decode (batch 1):** Each token performs 2 FLOPs per parameter and loads 2 bytes per parameter = **1.0 FLOP/byte** → deeply memory-bound (explored in [Tutorial 2](02_two_phases.qmd))
 
 For an unfamiliar model, compute this ratio first. It reveals the regime
@@ -242,6 +244,18 @@ check the regime before comparing specs.
 :::
 
 ---
+
+## Where This Clicks in the Textbook
+
+```{python}
+#| echo: false
+#| output: asis
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path("../scripts").resolve()))
+from curriculum_links import render_tutorial_links
+print(render_tutorial_links("00_hello_roofline"))
+```
 
 ## Next Steps
 

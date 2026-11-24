@@ -32,7 +32,7 @@ Each solver implements equations from the [Math Foundations](math.qmd) page. For
 
 ## Quick Start: Roofline Analysis
 
-The `Engine` implements the [Roofline Performance Model]({{< var slides_latest >}}/vol1_11_hw_acceleration.pdf){target="_blank"} (Williams et al. 2009) to classify workloads as compute-bound or memory-bound.
+The `Engine` implements the Roofline Performance Model ([Vol I · Ch 11: Hardware Acceleration](https://mlsysbook.ai/vol1/11_hw_acceleration/11_hw_acceleration.html) · [Lab](https://mlsysbook.ai/labs/vol1/lab_11_hw_accel/) · [Slides](https://mlsysbook.ai/slides/vol1.html#ch-11), Williams et al. 2009) to classify workloads as compute-bound or memory-bound.
 
 ```{python}
 import mlsysim
@@ -54,26 +54,29 @@ The returned `PerformanceProfile` reports latency, throughput, bottleneck classi
 
 ## LLM Serving Analysis
 
-The `ServingModel` models the [two-phase LLM inference lifecycle]({{< var slides_latest >}}/vol1_13_model_serving.pdf){target="_blank"}: compute-bound pre-fill and memory-bound decoding.
+The `ServingModel` models the two-phase LLM inference lifecycle ([Vol I · Ch 13: Model Serving](https://mlsysbook.ai/vol1/13_model_serving/13_model_serving.html) · [Lab](https://mlsysbook.ai/labs/vol1/lab_13_model_serving/) · [Slides](https://mlsysbook.ai/slides/vol1.html#ch-13)): compute-bound prefill and memory-bound autoregressive decoding on a single device.
 
 ```{python}
 import mlsysim
 from mlsysim.solvers import ServingModel
 
 serving = ServingModel()
-result = serving.solve(
+fp16_res = serving.solve(
     model=mlsysim.Models.Language.Llama3_70B,
     hardware=mlsysim.Hardware.Cloud.H100,
-    seq_len=4096, batch_size=1
+    seq_len=4096, batch_size=1, precision="fp16",
 )
-print(f"TTFT:       {result.ttft.to('ms'):~.1f}")
-print(f"ITL:        {result.itl.to('ms'):~.2f}")
-print(f"KV-cache:   {result.kv_cache_size.to('GB'):~.1f}")
-print(f"Feasible:   {result.feasible}")
-print(f"Mem util:   {result.memory_utilization:.0%}")
+int4_res = serving.solve(
+    model=mlsysim.Models.Language.Llama3_70B,
+    hardware=mlsysim.Hardware.Cloud.H100,
+    seq_len=4096, batch_size=1, precision="int4",
+)
+print(f"FP16 on 1xH100 -> Feasible: {fp16_res.feasible} (Mem util: {fp16_res.memory_utilization:.0%})")
+print(f"INT4 on 1xH100 -> Feasible: {int4_res.feasible} (Mem util: {int4_res.memory_utilization:.0%})")
+print(f"INT4 TTFT: {int4_res.ttft.to('ms'):~.1f}, ITL: {int4_res.itl.to('ms'):~.2f}, KV-cache: {int4_res.kv_cache_size.to('GB'):~.2f}")
 ```
 
-The feasibility check shows immediately whether the model plus its KV-cache fit in device memory, before an out-of-memory error appears in production.
+`ServingModel` immediately flags that unquantized FP16 `Llama-3.1-70B` exceeds a single 80 GB H100 (`Feasible: False`), whereas INT4 quantization fits comfortably on one H100 (or FP16 can be sharded across a multi-GPU node).
 
 ---
 
@@ -99,7 +102,7 @@ for hw in [mlsysim.Hardware.Cloud.H100,
 
 ## Distributed Training Analysis
 
-The `DistributedModel` models [3D parallelism]({{< var slides_latest >}}/vol2_06_distributed_training.pdf){target="_blank"} (data, tensor, pipeline) with communication overhead from [ring all-reduce]({{< var slides_latest >}}/vol2_05_collective_communication.pdf){target="_blank"} and pipeline bubbles.
+The `DistributedModel` models 4D parallelism ([Vol II · Ch 6: Distributed Training](https://mlsysbook.ai/vol2/06_distributed_training/06_distributed_training.html) · [Lab](https://mlsysbook.ai/labs/vol2/lab_06_dist_train/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-06)) with communication overhead from collective reductions ([Vol II · Ch 5: Collective Communication](https://mlsysbook.ai/vol2/05_collective_communication/05_collective_communication.html) · [Lab](https://mlsysbook.ai/labs/vol2/lab_05_collective_communication/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-05)) and 1F1B pipeline bubbles.
 
 ```{python}
 import mlsysim
@@ -130,27 +133,38 @@ The core solvers are designed to chain. Three common engineering workflows follo
 ### Serving Llama-70B on H100s within budget
 
 ```{python}
+import math
 import mlsysim
-from mlsysim.solvers import ServingModel, EconomicsModel
+from mlsysim.solvers import EconomicsModel, ServingCapacityModel
+from mlsysim.systems.types import Fleet
 
-# Step 1: Does it fit and what's the latency?
-serving = ServingModel()
-result = serving.solve(
+# Step 1: Size INT4 H100 replicas for 40 QPS under a 2,500 ms P99 SLA
+cap = ServingCapacityModel().solve(
     model=mlsysim.Models.Language.Llama3_70B,
     hardware=mlsysim.Hardware.Cloud.H100,
-    seq_len=4096, batch_size=1
+    qps=40.0,
+    target_p99_latency_ms=2500.0,
+    max_seq_len=4096,
+    mean_request_tokens=1024,
+    output_tokens=256,
+    precision="int4",
 )
 
-# Step 2: What does that fleet cost?
-econ = EconomicsModel()
-cost = econ.solve(
-    fleet=mlsysim.Systems.Clusters.Research_256,
-    duration_days=365,
-    kwh_price=0.08
+# Step 2: Pack replicas onto 8-GPU DGX H100 nodes and compute annual TCO
+nodes_needed = math.ceil(cap.required_replicas / mlsysim.Systems.Nodes.DGX_H100.accelerators_per_node)
+serving_fleet = Fleet(
+    name="Serving Pod",
+    node=mlsysim.Systems.Nodes.DGX_H100,
+    count=nodes_needed,
+    fabric=mlsysim.Systems.Fabrics.InfiniBand_NDR,
 )
-print(f"Annual TCO: ${cost.tco_usd:,.0f}")
-print(f"  CapEx:    ${cost.capex_usd:,.0f}")
-print(f"  OpEx:     ${cost.total_opex_usd:,.0f}")
+cost = EconomicsModel().solve(
+    fleet=serving_fleet,
+    duration_days=365,
+    kwh_price=0.08,
+)
+print(f"Replicas needed: {cap.required_replicas} GPUs ({nodes_needed}x DGX H100 nodes)")
+print(f"Annual TCO:      ${cost.tco_usd:,.0f} (CapEx ${cost.capex_usd:,.0f} + OpEx ${cost.total_opex_usd:,.0f})")
 ```
 
 ### Choosing a training region to minimize carbon
@@ -172,7 +186,7 @@ for grid in [mlsysim.Infrastructure.Grids.Quebec, mlsysim.Infrastructure.Grids.U
           f"PUE={r.pue:.2f}  Water={r.water_usage_liters:,.0f} L")
 ```
 
-For the theory behind PUE, carbon intensity, and the energy hierarchy, see the [Sustainable AI]({{< var slides_latest >}}/vol2_15_sustainable_ai.pdf){target="_blank"} slide deck.
+For the theory behind PUE, WUE, carbon intensity, and the energy hierarchy, see [Vol II · Ch 15: Sustainable AI](https://mlsysbook.ai/vol2/15_sustainable_ai/15_sustainable_ai.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_15_sustainable_ai/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-15)).
 
 ### Reliability of a 30-day training run on 256 GPUs
 
@@ -192,24 +206,29 @@ print(f"Optimal ckpt interval:   {result.optimal_checkpoint_interval.to('minute'
 print(f"Expected failures:       {result.expected_failures:.1f}")
 ```
 
-This solver implements the [Young-Daly checkpoint model]({{< var slides_latest >}}/vol2_07_fault_tolerance.pdf){target="_blank"}, which sets the checkpoint interval for long training jobs.
+This solver implements the Young-Daly checkpoint model ([Vol II · Ch 7: Fault Tolerance](https://mlsysbook.ai/vol2/07_fault_tolerance/07_fault_tolerance.html) · [Lab](https://mlsysbook.ai/labs/vol2/lab_07_fault_tolerance/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-07)), which sets the optimal checkpoint interval for long training jobs.
 
 ---
 
 ## Writing Custom Solvers
 
-Follow the built-in solver pattern to create a new analysis:
+Subclass `ForwardModel` and return a frozen Pydantic result model to integrate cleanly with pipelines and differential explainers:
 
 ```python
+import pint
+from pydantic import BaseModel, ConfigDict
 from mlsysim.hardware.types import HardwareNode
+from mlsysim.solvers import ForwardModel
 
-class PowerEfficiencyModel:
-    def solve(self, hardware: HardwareNode) -> dict:
-        flops_per_watt = hardware.compute.peak_flops / hardware.tdp
-        return {
-            "device": hardware.name,
-            "flops_per_watt": flops_per_watt.to("TFLOPs/s/kW"),
-        }
+class PowerEfficiencyResult(BaseModel):
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+    device: str
+    flops_per_watt: pint.Quantity
+
+class PowerEfficiencyModel(ForwardModel):
+    def solve(self, hardware: HardwareNode) -> PowerEfficiencyResult:
+        flops_per_watt = (hardware.compute.peak_flops / hardware.tdp).to("TFLOPs/s/kW")
+        return PowerEfficiencyResult(device=hardware.name, flops_per_watt=flops_per_watt)
 ```
 
 See [Writing a Custom Solver](solver-guide.qmd#writing-a-custom-solver) for the full guide.
@@ -257,33 +276,50 @@ field declared as memory bandwidth rejects a count rate, and vice versa.
 
 ---
 
-## Solver-to-Slides Map {#solver-to-slides-map}
+## Solver-to-Curriculum Map {#solver-to-slides-map}
 
-Each MLSys·im solver maps to specific chapters and slide decks from the [Machine Learning Systems](https://mlsysbook.ai) textbook. Use these for the full theoretical grounding behind each solver.
+Each MLSys·im solver maps to canonical chapters, interactive Marimo labs, and lecture decks in the [Machine Learning Systems](https://mlsysbook.ai) textbook (see the [Cross-Volume Textbook Map](curriculum-map.qmd) for all chapters and physics threads).
 
-| MLSys·im Solver | What It Models | Slide Deck |
-|:---------------|:---------------|:-----------|
-| Engine / SingleNodeModel | Roofline analysis, compute vs. memory bottleneck | [Hardware Acceleration (Vol I, Ch 11)]({{< var slides_latest >}}/vol1_11_hw_acceleration.pdf){target="_blank"} |
-| ServingModel | TTFT, ITL, KV-cache memory | [Model Serving (Vol I, Ch 13)]({{< var slides_latest >}}/vol1_13_model_serving.pdf){target="_blank"} and [Inference at Scale (Vol II, Ch 10)]({{< var slides_latest >}}/vol2_10_inference.pdf){target="_blank"} |
-| DistributedModel | 3D parallelism, all-reduce, pipeline bubbles | [Distributed Training (Vol II, Ch 6)]({{< var slides_latest >}}/vol2_06_distributed_training.pdf){target="_blank"} and [Collective Communication (Vol II, Ch 5)]({{< var slides_latest >}}/vol2_05_collective_communication.pdf){target="_blank"} |
-| EconomicsModel | CapEx, OpEx, total cost of ownership | [Compute Infrastructure (Vol II, Ch 2)]({{< var slides_latest >}}/vol2_02_compute_infrastructure.pdf){target="_blank"} |
-| SustainabilityModel | Energy, carbon footprint, water usage | [Sustainable AI (Vol II, Ch 15)]({{< var slides_latest >}}/vol2_15_sustainable_ai.pdf){target="_blank"} |
-| ReliabilityModel | MTBF, Young-Daly checkpointing | [Fault Tolerance (Vol II, Ch 7)]({{< var slides_latest >}}/vol2_07_fault_tolerance.pdf){target="_blank"} |
+| MLSys·im Solver | What It Models | Textbook · Lab · Slides |
+|:---------------|:---------------|:------------------------|
+| `Engine` / `SingleNodeModel` | Roofline analysis, compute vs. memory bottleneck | [Vol I · Ch 11: Hardware Acceleration](https://mlsysbook.ai/vol1/11_hw_acceleration/11_hw_acceleration.html) ([Lab](https://mlsysbook.ai/labs/vol1/lab_11_hw_accel/) · [Slides](https://mlsysbook.ai/slides/vol1.html#ch-11)) |
+| `CompressionModel` | Group quantization overhead, sparsity, accuracy delta | [Vol I · Ch 10: Model Compression](https://mlsysbook.ai/vol1/10_model_compression/10_model_compression.html) ([Lab](https://mlsysbook.ai/labs/vol1/lab_10_model_compress/) · [Slides](https://mlsysbook.ai/slides/vol1.html#ch-10)) |
+| `ServingModel` / `ServingCapacityModel` | TTFT, ITL, KV-cache memory, QPS/P99 replica sizing | [Vol I · Ch 13: Model Serving](https://mlsysbook.ai/vol1/13_model_serving/13_model_serving.html) ([Lab](https://mlsysbook.ai/labs/vol1/lab_13_model_serving/) · [Slides](https://mlsysbook.ai/slides/vol1.html#ch-13)), [Vol II · Ch 10: Serving at Scale](https://mlsysbook.ai/vol2/10_inference/10_inference.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_10_inference/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-10)) |
+| `DistributedModel` | 4D parallelism, all-reduce, 1F1B pipeline bubbles | [Vol II · Ch 6: Distributed Training](https://mlsysbook.ai/vol2/06_distributed_training/06_distributed_training.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_06_dist_train/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-06)), [Vol II · Ch 5: Collective Communication](https://mlsysbook.ai/vol2/05_collective_communication/05_collective_communication.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_05_collective_communication/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-05)) |
+| `EconomicsModel` | CapEx, OpEx, total cost of ownership, cloud break-even | [Vol II · Ch 2: Compute Infrastructure](https://mlsysbook.ai/vol2/02_compute_infrastructure/02_compute_infrastructure.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_02_compute_infra/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-02)) |
+| `SustainabilityModel` | Energy, carbon footprint, site water usage | [Vol II · Ch 15: Sustainable AI](https://mlsysbook.ai/vol2/15_sustainable_ai/15_sustainable_ai.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_15_sustainable_ai/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-15)) |
+| `ReliabilityModel` | Fleet MTBF, Young-Daly checkpointing & waste | [Vol II · Ch 7: Fault Tolerance](https://mlsysbook.ai/vol2/07_fault_tolerance/07_fault_tolerance.html) ([Lab](https://mlsysbook.ai/labs/vol2/lab_07_fault_tolerance/) · [Slides](https://mlsysbook.ai/slides/vol2.html#ch-07)) |
 
-: {tbl-colwidths="[20,30,50]"}
+: {tbl-colwidths="[24,30,46]"}
 
 :::: {.columns}
 
 ::: {.column width="50%"}
 **Volume I: Introduction to Machine Learning Systems**
 
-[Browse Vol I Decks](https://mlsysbook.ai/slides/vol1.html){target="_blank"} | [Download All (PDF)]({{< var slides_latest >}}/MLSysBook-Slides-Vol1-PDF.zip){target="_blank"}
+[Read Vol I](https://mlsysbook.ai/vol1/){target="_blank"} | [Labs](https://mlsysbook.ai/labs/vol1/){target="_blank"} | [Slides](https://mlsysbook.ai/slides/vol1.html){target="_blank"} | [PDF Zip]({{< var slides_latest >}}/MLSysBook-Slides-Vol1-PDF.zip){target="_blank"}
 :::
 
 ::: {.column width="50%"}
 **Volume II: Scaling Machine Learning Systems**
 
-[Browse Vol II Decks](https://mlsysbook.ai/slides/vol2.html){target="_blank"} | [Download All (PDF)]({{< var slides_latest >}}/MLSysBook-Slides-Vol2-PDF.zip){target="_blank"}
+[Read Vol II](https://mlsysbook.ai/vol2/){target="_blank"} | [Labs](https://mlsysbook.ai/labs/vol2/){target="_blank"} | [Slides](https://mlsysbook.ai/slides/vol2.html){target="_blank"} | [PDF Zip]({{< var slides_latest >}}/MLSysBook-Slides-Vol2-PDF.zip){target="_blank"}
+:::
+
+::::
+
+:::: {.columns .mls-unreleased}
+
+::: {.column width="50%"}
+**Volume III: Agentic Machine Learning Systems**
+
+[Preview Vol III](https://mlsysbook.ai/vol3/){target="_blank"} | [Labs](https://mlsysbook.ai/labs/vol3/){target="_blank"} | [Slides](https://mlsysbook.ai/slides/vol3.html){target="_blank"}
+:::
+
+::: {.column width="50%"}
+**Volume IV: Physical AI: Machine Learning Systems That Sense and Act**
+
+[Preview Vol IV](https://mlsysbook.ai/vol4/){target="_blank"} | [Labs](https://mlsysbook.ai/labs/vol4/){target="_blank"} | [Slides](https://mlsysbook.ai/slides/vol4.html){target="_blank"}
 :::
 
 ::::
@@ -293,9 +329,10 @@ Each MLSys·im solver maps to specific chapters and slide decks from the [Machin
 ## Next Steps
 
 - **[Getting Started](getting-started.qmd)**: Install and run a first analysis
+- **[Cross-Volume Textbook Map](curriculum-map.qmd)**: Connect every solver to its textbook chapters and labs
 - **[Solver Guide](solver-guide.qmd)**: Which solver for which question
-- **[MLSys Zoo](zoo/index.qmd)**: Browse all available hardware, model, and infrastructure specs
+- **[MLSys Zoo](zoo/index.qmd)**: Browse all available hardware, model, infrastructure, agent, and robotics specs
 - **[API Reference](api/index.qmd)**: Full programmatic API documentation
 - **[Accuracy & Validation](accuracy.qmd)**: How analytical bounds compare to empirical measurements
 - **[Math Foundations](math.qmd)**: The equations behind every solver
-- **[All Slide Decks](https://mlsysbook.ai/slides/)**: 35 Beamer decks with speaker notes and original SVG diagrams
+- **[All Slide Decks](https://mlsysbook.ai/slides/)**: 44 Beamer lecture decks across Volumes I and II<span class="mls-unreleased"> (84 across Volumes I–IV)</span> with speaker notes and original SVG diagrams

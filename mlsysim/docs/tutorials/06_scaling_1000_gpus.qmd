@@ -34,7 +34,10 @@ _psu_mttf = Reliability.Psu.mttf_hours
 
 _job_days = 30
 _job_hours = _job_days * 24
-_ckpt_time_s = 60.0
+_ckpt_1h = _ckpt_solver.solve(
+    model=_model, hardware=_dgx.accelerator, optimizer="adam", checkpoint_interval_hours=1.0
+)
+_ckpt_time_s = _ckpt_1h.write_time_seconds.to("second").magnitude
 
 _gpu_counts = [8, 32, 64, 128, 256, 512, 1024]
 _dist_results = {}
@@ -70,10 +73,6 @@ for _n in [64, 256, 512, 1024]:
     _comm_loss[_n] = _cl
     _ckpt_loss[_n] = _tot_ckpt_h
     _ckpt_ratio[_n] = _tot_ckpt_h / _cl if _cl > 0 else 0.0
-
-_ckpt_1h = _ckpt_solver.solve(
-    model=_model, hardware=_dgx.accelerator, optimizer="adam", checkpoint_interval_hours=1.0
-)
 
 _f256 = Fleet(name="256-GPU", node=_dgx, count=32, fabric=_ib)
 _sust = SustainabilityModel()
@@ -234,9 +233,14 @@ A separate question is how often a 64-GPU, 512-GPU, or 1024-GPU cluster experien
 hardware failure. The `ReliabilityModel` computes cluster-level MTBF, expected failures, optimal checkpoint intervals, and steady-state goodput.
 
 ```{python}
-from mlsysim.solvers import ReliabilityModel
+from mlsysim.solvers import ReliabilityModel, CheckpointModel
 
 rel_solver = ReliabilityModel()
+ckpt_solver = CheckpointModel()
+ckpt_write_s = ckpt_solver.solve(
+    model=model, hardware=Systems.Nodes.DGX_H100.accelerator,
+    optimizer="adam", checkpoint_interval_hours=1.0
+).write_time_seconds.to("second").magnitude
 
 rows = []
 rel_results = {}
@@ -248,8 +252,8 @@ for n_gpus in gpu_counts:
         count=n_nodes,
         fabric=Systems.Fabrics.InfiniBand_NDR
     )
-    # 30-day training run, 60-second checkpoint write time
-    r = rel_solver.solve(fleet=fleet, job_duration_hours=30*24, checkpoint_time_s=60.0)
+    # 30-day training run, using CheckpointModel's synchronous write time (~141 s)
+    r = rel_solver.solve(fleet=fleet, job_duration_hours=30*24, checkpoint_time_s=ckpt_write_s)
     rel_results[n_gpus] = r
     mtbf_h = r.fleet_mtbf.to("hour").magnitude
     rows.append([
@@ -343,6 +347,18 @@ info("Checkpoint Analysis",
 A single mixed-precision Adam checkpoint for `{python} _model.name` (`{python} f"{_params_b:.1f}B"` parameters at 14 bytes per parameter) is `{python} f"{_ckpt_1h.checkpoint_size.to('GB').magnitude:.1f} GB"` and requires `{python} f"{_ckpt_1h.write_time_seconds.to('second').magnitude:.1f} s"` of synchronous storage write time. At a 1-hour interval, checkpoint I/O alone imposes a `{python} f"{_ckpt_1h.mfu_penalty_pct:.2%}"` MFU penalty.
 
 ---
+
+## Where This Clicks in the Textbook
+
+```{python}
+#| echo: false
+#| output: asis
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path("../scripts").resolve()))
+from curriculum_links import render_tutorial_links
+print(render_tutorial_links("06_scaling_1000_gpus"))
+```
 
 ## Next Steps
 

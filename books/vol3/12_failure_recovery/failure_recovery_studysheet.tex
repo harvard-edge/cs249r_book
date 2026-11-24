@@ -1,0 +1,188 @@
+% Study sheet: Volume III, Chapter 12, Failure Recovery.
+% Numbers: \val{...} from failure_recovery_studysheet_numbers.tex, written by failure_recovery_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{failure_recovery_studysheet_numbers}
+\sheetvolume{3}
+\sheetchapter{12}{Failure Recovery}
+\sheetsources{Numbers from the chapter's mlsysim scenarios (hypothetical prices, times and loss rates); questions marked assumed use new inputs.}
+
+\begin{document}
+% ===================================================================== FRONT: LEARN
+\frontside
+\begin{bigidea}
+A durable log records intent; it cannot change the world. Over a long \hl{horizon}, each effect its
+\hl{authority} produced becomes an obligation: cleanup registered before dispatch, outcomes kept
+\hl{unknown} until evidence settles them, and bounds enforced at the admission gate.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{A timeout settles nothing.}{Outcomes are established, established absent, or unknown; unknown keeps its
+  reservation and owner and blocks dependents.}
+\idea{Cleanup is owed before the effect.}{Register compensation before dispatch. Compensation is a new operation
+  restoring declared postconditions; it can fail.}
+\idea{Cleanup is a graph, not a stack.}{Release waits until the test stops and logs are saved; an
+  unresolved node blocks only its dependents.}
+\idea{Check before the pivot.}{The one irreversible step of its region, under this grant.
+  Hoist every check that can precede it; cleanup survives it.}
+\idea{Watch progress, not liveness.}{A loop stays busy and green. Compare state digests and verifier results;
+  enforce with an admission hold.}
+\idea{Stopping is not recovering.}{An incident hold stops model dispatch; cleanup runs on a narrow
+  grant. Recovered: tasks accepted, nothing owed or unknown.}
+\end{ideas}
+
+\vspace{16pt}
+\sheetsec{Choosing a recovery: three checks, in order}
+{\centering
+\begin{tikzpicture}[sheet]
+  \node[nbox, minimum width=96pt, minimum height=14pt] (ev) at (52,96) {failure evidence recorded};
+  \node[accbox, minimum width=96pt, minimum height=17pt, align=center] (g1) at (52,70) {evidence class};
+  \node[accbox, minimum width=96pt, minimum height=17pt, align=center] (g2) at (52,39) {admissible?};
+  \node[accbox, minimum width=96pt, minimum height=17pt, align=center] (g3) at (52,8) {expected cost, per axis};
+  \node[nbox, text width=98pt, align=left] (o1) at (184,70) {keep owner, probe; repeat only under the repeat contract};
+  \node[nbox, text width=98pt, align=left] (o2) at (184,39) {hold or escalate};
+  \node[hotbox, text width=98pt, align=left] (o3) at (184,8) {cheapest of: new proposal, repair if $\RepairSuccessProbability > \RepairSuccessProbability^*$, compensate};
+  \draw[arr] (ev) -- (g1);
+  \draw[arr] (g1) -- (g2) node[midway, right, note, xshift=3pt] {established or established absent};
+  \draw[arr] (g2) -- (g3) node[midway, right, note, xshift=3pt] {survivors only};
+  \draw[arr] (g1) -- (o1) node[midway, above, note, yshift=2pt] {unknown};
+  \draw[arr] (g2) -- (o2) node[midway, above, note, yshift=2pt] {none};
+  \draw[arr] (g3) -- (o3);
+\end{tikzpicture}\par}
+\vspace{4pt}
+{\fontsize{8.6}{11}\selectfont\color{muted}Admissible: authority, \emph{worst-case} charge within the allowance
+(reserve intact), time. Sunk cost never counts.\par}
+
+
+\end{leftcol}%
+\begin{rightcol}
+\fcard{Repair first or unwind?}%
+  {\begin{gathered}\mathbb{E}[\RepairFirstCost] = \RepairAttemptCost + (1-\RepairSuccessProbability)\FallbackCost\\[2pt]
+   \text{repair first if } \RepairSuccessProbability > \RepairSuccessProbability^* = \RepairAttemptCost/\FallbackCost\end{gathered}}%
+  {$\RepairAttemptCost$: one bounded attempt; $\FallbackCost$: compensate and rebuild to the \emph{same}
+   endpoint; $\RepairSuccessProbability$: measured success rate. Seconds and dollars: separate thresholds.}%
+  {A failed repair must leave the fallback intact.}{}
+\fcard{Expected irreversible loss}%
+  {\ExpectedIrreversibleLoss = \DefectiveActionProbability \cdot \text{consequence}(\PlanAction)\cdot(1-\PrePivotCatchRate\RevertFidelity)}%
+  {$\DefectiveActionProbability$: change is wrong; $\PrePivotCatchRate$: share a pre-pivot check catches;
+   $\RevertFidelity$: harm of a caught change the revert avoids; consequence($\PlanAction$): harm of change $\PlanAction$ if defective and committed. Misses,
+   $\DefectiveActionProbability(1-\PrePivotCatchRate)\,\text{consequence}(\PlanAction)$, cost in full.}%
+  {After the pivot, $\PrePivotCatchRate$ = 0.}{}
+\fcard{What an undetected loop costs}%
+  {\PromptTokensSent = \TurnHorizon\,\BasePromptLength + \TurnAppendLength\,\frac{\TurnHorizon(\TurnHorizon-1)}{2}}%
+  {Input re-sent over $\TurnHorizon$ append-only turns ($\BasePromptLength$ first, $+\TurnAppendLength$ a turn)
+   grows quadratically.}%
+  {}%
+  {\begin{tikzpicture}[sheet]
+     \pgfmathsetmacro\ys{50/\val{curvecap}}
+     \draw[gridline] (30,0) -- (230,0);
+     \draw[gridline] (30,50) -- (230,50);
+     \foreach \h in {0,10,20,30,40,50}{\node[small, anchor=north] at ({30+4*\h},-3) {\h};}
+     \node[small, anchor=east] at (27,0) {0};
+     \node[small, anchor=east] at (27,50) {\val{loopcapk}M};
+     \node[note, anchor=west] at (34,58) {input tokens re-sent};
+     \draw[accent, line width=1.1pt] plot[domain=0:50, samples=60, smooth]
+       ({30+4*\x},{(\x*\val{curvefirst}+\val{curvegrow}*\x*(\x-1)/2)*\ys});
+     \filldraw[fill=accentsoft, draw=accent] ({30+4*\val{loopstop}},{\val{curvestop}*\ys}) circle (2pt);
+     \filldraw[fill=accent, draw=accent] (230,50) circle (2pt);
+     \node[lab, anchor=south west, fill=white, inner sep=1pt] at ({36+4*\val{loopstop}},4) {stop after turn \val{loopstop}: \val{loopinstop} tokens, \$\val{loopusdstop}};
+     \node[lab, anchor=east, fill=white, inner sep=1pt] at (224,47) {ceiling, turn \val{loopcap}: \val{loopincap} tokens, \$\val{loopusdcap}};
+     \node[note, anchor=north] at (130,-12) {turns; first input \val{loopfirst}, +\val{loopgrow} per turn (\val{loopout} output); \$\val{pin}/\$\val{pout} per million in/out};
+   \end{tikzpicture}}
+
+
+\vspace{8pt}
+\sheetsec{What each dependency control bounds}
+\begin{sheettable}{@{}l L@{}}
+\thead{Control} & \thead{Bounds \textendash{} not}\\ \midrule
+One retry owner & attempts: \val{layers} layers of \val{attempts} send \val{layered}; one owner, \val{coordinated}\\
+Scoped breaker & new calls to a failing scope \textendash{} not calls in flight\\
+Full jitter & spreads arrivals \textendash{} not the peak\\
+Bulkhead cap & slots one tool holds (\val{bhcap} of \val{bhworkers}) \textendash{} not remote jobs\\
+\end{sheettable}
+\end{rightcol}
+
+% ===================================================================== BACK: PRACTICE
+\backside
+\begin{answers}
+\ans{Finish}{Time: $\val{reps} + \val{compturn} \times \val{fbs}$ = \val{turnexps} s, \val{turnsaves} s under:
+  time favors repair. Dollars: $\val{repusd} + \val{compturn} \times \val{fbusd}$ = \$\val{turnexpusd},
+  \$\val{turnlossusd} over: unwind. A failed repair takes \val{reps} + \val{fbs} = \val{turnworst} s; a hard
+  deadline under \val{turnworst} s rules repair out (repair card).}
+\ans{1}{(a) $\val{qbadfrac} \times \val{qimpact}$ = \$\val{qfirst}; $\PrePivotCatchRate\RevertFidelity$ = \val{qvr}, so
+  \val{qfirst} $\times$ \val{qcompvr} = \$\val{qcanary}, \val{qreduce}$\times$ less. (b) $\val{qbadfrac} \times \val{qmisscompfrac}
+  \times \val{qimpact}$ = \$\val{qmissed}, \val{qmissshare}\%. (c) Still \$\val{qfirst} (loss card).}
+\ans{2}{(a) $\val{lcapq} \times \val{lfirstq} + \val{lgrowq} \times \val{lcapq} \times \val{lcapmq}/\val{two}$ = \val{scapq};
+  stop: \val{sstopq} tokens; \val{sratioq}$\times$. (b) \val{sstoptwo} tokens, \val{stworatio}$\times$: quadratic (loop card).}
+\columnbreak
+\ans{3}{(a) Evidence: established absent (rejected before dispatch); a feedback repair, priced against
+  $\RepairSuccessProbability^*$, re-admitted. (b) Admission: inadmissible whatever its expected cost: compensate, or hold
+  and escalate (three checks). (c) Log saving and scratch deletion run; release waits on the stop,
+  which stays unknown, owned and reserved; release stays registered, never marked clean (graph).
+  (d) Counts of accepted tasks, residual obligations, unknown outcomes; green proves none (stopping idea).}
+\ans{4}{(a) \val{qlayered}, not \val{qatt}. (b) Uncapped: \val{qpool} $-$ \val{qcalls} = \val{qfree} free; capped: at most
+  \val{qcap} held, \val{qprotected} free. (c) Remote jobs outliving a local timeout (table).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{Repair the configuration, or tear down and rebuild?}
+Validation rejects a test configuration before dispatch; the environment is up. Fallback: unwind
+\val{unwind} s, rebuild \val{rebuild} s with \val{rebin} in, \val{rebout} out tokens (\$\val{pin}, \$\val{pout} per
+million). Repair: \val{repin} in, \val{repout} out, \val{startup} s start, \val{tps} tokens/s, \val{valid} s check;
+\val{passume}\% succeed.\par\vspace{5pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\sc{130/\val{fbs}}
+  \node[lab, anchor=east] at (78,23) {unwind now};
+  \draw[nbox] (82,17) rectangle ({82+\val{fbs}*\sc},29);
+  \node[note, anchor=west] at ({86+\val{fbs}*\sc},23) {\val{fbs} s};
+  \node[lab, anchor=east] at (78,6) {repair first};
+  \draw[hotbox] (82,0) rectangle ({82+\val{exps}*\sc},12);
+  \node[note, anchor=west] at ({86+\val{exps}*\sc},6) {\val{exps} s expected};
+\end{tikzpicture}\par}\vspace{4pt}
+\begin{steps}
+\item $\FallbackCost$: \val{unwind} + \val{rebuild} = \res{\val{fbs} s}; (\val{rebin} $\times$ \val{pin} + \val{rebout}
+  $\times$ \val{pout})/$10^6$ = \res{\$\val{fbusd}}.
+\item $\RepairAttemptCost$: \val{startup} + \val{repout}/\val{tps} + \val{valid} = \res{\val{reps} s};
+  (\val{repin} $\times$ \val{pin} + \val{repout} $\times$ \val{pout})/$10^6$ = \res{\$\val{repusd}}.
+\item $\RepairSuccessProbability^*$: \val{reps}/\val{fbs} = \res{\val{pstars}\%} (time); \val{repusd}/\val{fbusd} = \res{\val{pstarusd}\%} (dollars).
+\item At \val{passume}\%: \val{reps} + \val{compassume} $\times$ \val{fbs} = \res{\val{exps} s}, \val{saves}\% less;
+  \res{\$\val{expusd}} vs.\ \$\val{fbusd}.
+\end{steps}
+\takeaway{A costly fallback makes unlikely repairs pay.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Same repair, a harder failure class}
+\assumed{} this failure class succeeds only \val{pturn}\%.\par\vspace{4pt}
+\textbf{Given:} $\RepairSuccessProbability^*$ = \val{pstars}\% (time), \val{pstarusd}\% (dollars).\par
+\textbf{You:} expected cost of repair first on each axis; which axis favors it? Worst case in time?\par\vspace{30pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``The provisioning call timed out, so it failed; send a new one.''}%
+  {It may still complete: two billed environments, one unowned. Keep it unknown and probe.}{}
+\mistake{``The \val{loopcap}-turn budget ceiling will catch a looping agent.''}%
+  {Late: \$\val{loopusdcap} at the ceiling vs.\ \$\val{loopusdstop} stopped after turn \val{loopstop},
+   about \val{loopratio}$\times$. Detection latency sets the cost.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} a fleet change is wrong \val{qbad}\% of the time, costing \$\val{qimpact}; the canary catches
+  \val{qcatch}\%, its revert avoids \val{qrevert}\%. (a) $\ExpectedIrreversibleLoss$, rollout first vs.\ canary
+  first? (b) Share of remaining loss from misses? (c) Same check after rollout?
+\item \assumed{} a loop starts at \val{lfirstq} tokens, adding \val{lgrowq} a turn. (a) Input re-sent by a
+  \val{lcapq}-turn ceiling vs.\ a stop after turn \val{lstopq}? (b) Detection slips to turn \val{lstoptwo}?
+\item Which check decides, and what follows? (a) the validator rejects a configuration before dispatch; (b) a
+  repair cheap on average whose worst-case charge exceeds the allowance. (c) Release needs the test
+  stopped and its logs saved; scratch deletion is independent. The stop times out: what runs, what waits? (d) The fault test then ends idle and green: what proves recovery?
+\item \assumed{} (a) Two layers of \val{qatt} attempts: how many reach a failing tool? (b) \val{qcalls}
+  calls stall on one tool; pool \val{qpool}. Workers free, uncapped vs.\ capped at \val{qcap}? (c) What does the cap miss?
+\end{qs}
+\end{rightcol}
+\end{document}

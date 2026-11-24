@@ -821,6 +821,7 @@ __all__ = [
     "quantity_from_dict",
     "quantity_to_dict",
     "result_to_dict",
+    "sample_fleet_profile",
 ]
 
 

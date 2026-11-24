@@ -1,5 +1,8 @@
 ---
-notation-local: [\BreakEvenParseFailureRate, \CatalogDefinitionTokens, \CatalogStagingCallCount, \ConstrainedCallLatency, \DefinitionSerializedSize, \FirstCatalogDefinitionCount, \FirstCatalogDefinitionSize, \ModelCallIndex, \PerTokenMaskingTime, \RepairTurnLatency, \SecondCatalogDefinitionCount, \SecondCatalogDefinitionSize, \StagedDefinitionCount, \UnconstrainedCallLatency, \UnconstrainedParseFailureRate]
+notation-local: [\BreakEvenParseFailureRate, \CatalogDefinitionTokens, \ConstrainedCallLatency, \FirstCatalogDefinitionCount, \FirstCatalogDefinitionSize, \ModelCallIndex, \PerTokenMaskingTime, \RepairTurnLatency, \SecondCatalogDefinitionCount, \SecondCatalogDefinitionSize, \SelectedDescriptorCount, \ToolDescriptorSize, \UnconstrainedCallLatency, \UnconstrainedParseFailureRate]
+format:
+  html:
+    number-sections: false
 ---
 
 # Typed Tool Interfaces {#sec-vol3-app-b-tool-design}
@@ -18,7 +21,7 @@ Select the section that matches the observed failure at the tool boundary. Each 
 
 ## Schema Rules for Tool Definitions {#sec-vol3-app-b-json-schema}
 
-Writing "path must stay inside the workspace" in a tool description tells the model what to propose, but leaves an unvalidated `../` traversal free to pass unless the schema and runtime enforce the constraint. A tool schema has two readers, since the model uses its names and descriptions to propose arguments while the runtime validates the proposal before considering a grant (@sec-vol3-tool-calling-schemas). Because a description communicates intent without enforcing it, the distinction between assertions and annotations in the JSON Schema validation specification [@wright2022jsonschemavalidation] supports five checks on this boundary:
+Writing "path must stay inside the workspace" in a tool description tells the model what to propose, but leaves an unvalidated `../` traversal free to pass unless the schema and runtime enforce the constraint. A tool schema\index{Argument schema!appendix refresher} has two readers, since the model uses its names and descriptions to propose arguments while the runtime validates the proposal before considering a grant (@sec-vol3-tool-calling-schemas). Because a description communicates intent without enforcing it, the distinction between assertions and annotations in the JSON Schema validation specification\index{JSON Schema!tool arguments} [@wright2022jsonschemavalidation] supports five checks on this boundary:
 
 - Close each fixed argument object with `additionalProperties: false`, so the validator rejects undeclared fields rather than silently forwarding them. A constrained decoder can enforce the same restriction only when its supported schema subset includes it.
 - Put mandatory fields in `required`. An optional field needs explicit absence semantics; the `default` annotation does not insert a missing value during validation [@jsonschemaUnderstanding]. Any defaulting step is part of the runtime's argument-normalization contract.
@@ -26,26 +29,32 @@ Writing "path must stay inside the workspace" in a tool description tells the mo
 - State units and conventions in field names and descriptions. A name such as `timeout_ms` reduces ambiguity, but a range check cannot detect that a plausible number was intended in seconds. Conversion and interpretation must agree across the caller, adapter, and implementation.
 - For object variants, prefer a required tag with a distinct `const` value in each branch when it clarifies the operation. A tag is a design aid, not a prerequisite for validation: `anyOf` accepts one or more matching branches, while `oneOf` requires exactly one [@jsonschemaUnderstanding]. The selected decoder and validator must support the chosen construction.
 
-Descriptors may also state side effects and repeat behavior. These are separate from authority: a read can disclose sensitive information, an idempotent update can be unauthorized, and a permitted mutation may still be unsafe to repeat. Runtime policy and the endpoint's implemented contract determine approval and retry handling, not an annotation alone (@sec-vol3-tool-calling-schemas).
+Descriptors may also state side effects and repeat behavior. These behavioral annotations are separate from authority: a read can disclose sensitive information, an idempotent update can be unauthorized, and a permitted mutation may still be unsafe to repeat. Runtime policy and the endpoint's implemented contract determine approval and retry handling, not an annotation alone (@sec-vol3-tool-calling-schemas).
 
 ### A reference tool definition
 
 An exact-replacement file tool can express a small edit without requiring the model to reproduce the whole file, and the teaching descriptor in @lst-vol3-app-b-golden-schema bounds every variable-length argument with an explicit finite limit. Those limits are illustrative policy choices, not recommended universal values. The outer `name`, `description`, and `parameters` fields form a teaching descriptor, not a standardized tool protocol. The `$schema` declaration [@jsonschemaUnderstanding] belongs to the argument schema inside `parameters`; the runtime validates the proposed argument object against that schema, not against the outer descriptor.
 
-::: {#lst-vol3-app-b-golden-schema lst-cap="**Bounded edit arguments**: A teaching descriptor with a closed argument object and finite string limits; authorization and atomic mutation remain implementation obligations."}
+::: {#lst-vol3-app-b-golden-schema lst-cap="**Bounded edit arguments**: A teaching descriptor with a closed argument object, workspace-relative path, revision precondition, and finite string limits; authorization, canonical confinement, and atomic mutation remain implementation obligations."}
 ```json
 {
   "name": "file_edit",
-  "description": "Replaces an exact block in an existing workspace file. Match counting uses the original file and non-overlapping matches. Zero matches fail; multiple matches fail unless allow_multiple is true. Match-check failure leaves the file unchanged.",
+  "description": "Replaces an exact block in an existing workspace file when its current revision matches expected_version. Match counting uses the original file and non-overlapping matches. Zero matches fail; multiple matches fail unless allow_multiple is true. Version or match failure leaves the file unchanged.",
   "parameters": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
       "path": {
         "type": "string",
-        "description": "Absolute path to the target file, inside the workspace root.",
-        "pattern": "^/([a-zA-Z0-9_.-]+/)*[a-zA-Z0-9_.-]+$",
+        "description": "Workspace-relative path to the target file, with no leading slash or dot segments.",
+        "pattern": "^([a-zA-Z0-9_-][a-zA-Z0-9_.-]*)(/[a-zA-Z0-9_-][a-zA-Z0-9_.-]*)*$",
         "maxLength": 1024
+      },
+      "expected_version": {
+        "type": "string",
+        "description": "Source revision token returned when the file was last read; the edit fails if the file has changed.",
+        "minLength": 1,
+        "maxLength": 128
       },
       "old_str": {
         "type": "string",
@@ -63,16 +72,16 @@ An exact-replacement file tool can express a small edit without requiring the mo
         "description": "If true, replace every non-overlapping match in the original file; if false, fail unless exactly one match exists."
       }
     },
-    "required": ["path", "old_str", "new_str", "allow_multiple"],
+    "required": ["path", "expected_version", "old_str", "new_str", "allow_multiple"],
     "additionalProperties": false
   }
 }
 ```
 :::
 
-The required Boolean makes repeat-match intent explicit; a descriptor with an optional Boolean would instead need a documented normalization rule. JSON Schema measures `maxLength` in characters, not serialized bytes or model tokens. The request transport therefore needs its own byte bound, while context construction needs its own token accounting. Replacement size also differs from result-file size: repeated replacements can expand a file beyond either string bound.
+Within that argument schema, the required Boolean makes repeat-match intent explicit; a descriptor with an optional Boolean would instead need a documented normalization rule. JSON Schema measures `maxLength` in characters, not serialized bytes or model tokens. The request transport therefore needs its own byte bound, while context construction needs its own token accounting. Replacement size also differs from result-file size: repeated replacements can expand a file beyond either string bound.
 
-The implementation must enforce the advertised match behavior and workspace boundary: because a path pattern does not establish confinement and checking a unique match before an uncoordinated write does not prevent a concurrent change, the endpoint must resolve and authorize the actual target, enforce the match precondition together with the mutation, and bound both the resulting file and the returned observation. Even then, a missing response still requires the operation-identity contract below, because a schema cannot establish whether an edit committed.
+Beyond those schema bounds, the implementation must enforce the advertised version precondition, match behavior, and workspace boundary: although the relative-path pattern syntactically rejects leading slashes and `.` or `..` segments, a lexical pattern does not establish confinement against symbolic links or path aliases, and checking `expected_version` or a unique match before an uncoordinated write does not prevent a concurrent change. The endpoint must therefore canonicalize and authorize the resolved target inside the workspace, enforce both the revision precondition and the match check atomically with the mutation (@sec-vol3-tool-calling-conditional-updates), and bound both the resulting file and the returned observation. Even then, a missing response still requires a separate operation-identity contract, because a schema cannot establish whether an edit committed.
 
 Keep the published schema, normalization rules, and implementation version together. Generating a schema from a typed argument model can reduce transcription drift, but it does not prove that a decoder, validator, and implementation accept the same inputs. Contract tests should include missing required fields, extra fields, oversized strings, wrong types, and valid boundary values. Tests must also exercise advertised behavior outside the schema, including concurrent edits and uncertain outcomes.
 
@@ -94,7 +103,7 @@ The last row can matter for latency when generated output lies on the critical p
 
 ## When Constrained Decoding Pays for Itself {#sec-vol3-app-b-logit-masking}
 
-A model that samples freely can emit malformed arguments. Under a supported grammar and correct masking, a generation that reaches an accepting completion belongs to that grammar; truncation or interruption does not supply a complete valid call (@sec-vol3-foundation-model-grammar-constrained, @sec-vol3-appendix-math-dfa). @Sec-vol3-appendix-inference-decode-loop develops mask placement and storage. Here the narrower question is whether masking overhead is lower than the expected latency of one repair under a stipulated comparison.
+Even with a hardened schema, a model that samples freely can emit malformed arguments. Under a supported grammar and correct masking\index{Grammar-constrained decoding!break-even latency}, a generation that reaches an accepting completion belongs to that grammar; truncation or interruption does not supply a complete valid call (@sec-vol3-foundation-model-grammar-constrained, @sec-vol3-appendix-math-dfa). @Sec-vol3-appendix-inference-decode-loop develops mask placement and storage. Here the narrower question is whether masking overhead is lower than the expected latency of one repair under a stipulated comparison.
 
 Let a tool call carry $\OutputLength$ output tokens at $\PerTokenDecodeTime$ per token, let masking add $\PerTokenMaskingTime$ per token, let $\UnconstrainedParseFailureRate$ be the rate at which unconstrained calls fail to parse, and let a repair turn cost $\RepairTurnLatency$ of latency, including the re-sent context and the regenerated call. The expected latency without constraints, allowing one repair, is
 
@@ -116,7 +125,7 @@ Even an accepting, syntactically valid call can name a nonexistent file, exceed 
 
 ## Idempotency Keys and Capabilities {#sec-vol3-app-b-idempotency-leases}
 
-Operation identity and authorization solve different problems. An idempotency key identifies an intended operation across attempts; safe deduplication depends on the endpoint's effect and result contract (@sec-vol3-tool-calling-idempotency). A capability represents scoped authority whose enforcement is developed in @sec-vol3-sandboxes-least-privilege. Neither artifact, by its presence alone, establishes that a call is safe.
+Operation identity and authorization solve different problems. An idempotency key\index{Idempotency!tool endpoint contract} identifies an intended operation across attempts; safe deduplication depends on the endpoint's effect and result contract (@sec-vol3-tool-calling-idempotency). A capability\index{Capability!appendix refresher} represents scoped authority whose enforcement is developed in @sec-vol3-sandboxes-least-privilege. Neither artifact, by its presence alone, establishes that a call is safe.
 
 ### Retaining operation identity
 
@@ -141,7 +150,7 @@ A reconciliation probe supplies scoped evidence. Finding the pre-dispatch state 
 
 ### The capability check
 
-An idempotency key prevents duplicate execution of the same request, but does not check whether the caller is allowed to touch the target object in the first place. The capability tuple $\CapabilityGrant=(\GrantRights,\mathcal{O}_\CapabilityGrant,\GrantCondition,\GrantExpiryTime)$ in @sec-vol3-sandboxes-least-privilege describes the rights $\GrantRights$, objects $\mathcal{O}_\CapabilityGrant$, condition predicate $\GrantCondition$, and expiry time $\GrantExpiryTime$ that govern access. A protected handle or verified token can represent the grant; the tuple alone is not its enforcement. The runtime binds each use to the task and caller, resolves the actual target within the permitted scope, and checks the operation and current conditions. A lexical path prefix does not establish confinement against indirection or concurrent changes.
+An idempotency key prevents duplicate execution of the same request, but does not check whether the caller is allowed to touch the target object in the first place. The capability tuple $\CapabilityGrant=(\GrantRights,\CapabilityObjectScope,\GrantCondition,\GrantExpiryTime)$ in @sec-vol3-sandboxes-least-privilege describes the rights $\GrantRights$, objects $\CapabilityObjectScope$, condition predicate $\GrantCondition$, and expiry time $\GrantExpiryTime$ that govern access. A protected handle or verified token can represent the grant; the tuple alone is not its enforcement. The runtime binds each use to the task and caller, resolves the actual target within the permitted scope, and checks the operation and current conditions. A lexical path prefix does not establish confinement against indirection or concurrent changes.
 
 For delegation, let $\GrantAllowedAccesses(\CapabilityGrant)$ denote the accesses a grant permits. A derived child must satisfy
 
@@ -155,29 +164,29 @@ These requirements are an implementation checklist, not a complete authorization
 
 ## Catalog Cost and Comparison {#sec-vol3-app-b-deep-vs-shallow}
 
-A catalog can expose separate service operations or combine work behind more general interfaces. The interface-to-functionality trade-off also appears in modular software design [@ousterhout2018philosophy], but tool count alone does not determine usability or authority. @Sec-vol3-tool-calling-toolkit-design separates granularity from catalog staging and evaluates both under a workload. This section isolates a stipulated token comparison.
+A catalog can expose separate service operations or combine work behind more general interfaces. The interface-to-functionality trade-off also appears in modular software design [@ousterhout2018philosophy], but tool count alone does not determine usability or authority. @Sec-vol3-tool-calling-toolkit-design separates granularity from catalog staging\index{Tool staging!catalog token cost} and evaluates both under a workload. This section isolates a stipulated token comparison.
 
 ### The token cost of a catalog
 
-Suppose every one of $\CatalogStagingCallCount$ model calls stages the same $\StagedDefinitionCount$ definitions, contributing an average of $\DefinitionSerializedSize$ tokens each in the final serialization. Excluding other request content, this fixed-catalog policy sends
+Across a trajectory of $\TurnHorizon$ single-call turns where every call stages the same $\SelectedDescriptorCount$ definitions, contributing an average of $\ToolDescriptorSize$ tokens each in the final serialization, this fixed-catalog policy sends (excluding other request content)
 
-$$\CatalogDefinitionTokens = \CatalogStagingCallCount \cdot \StagedDefinitionCount \cdot \DefinitionSerializedSize$$ {#eq-vol3-app-b-catalog-tokens}
+$$\CatalogDefinitionTokens = \TurnHorizon \cdot \SelectedDescriptorCount \cdot \ToolDescriptorSize$$ {#eq-vol3-app-b-catalog-tokens}
 
-tokens of tool definitions. For two fixed catalogs under the same call count, their token ratio is $\FirstCatalogDefinitionCount \FirstCatalogDefinitionSize/(\SecondCatalogDefinitionCount \SecondCatalogDefinitionSize)$. Fewer definitions reduce catalog tokens only when their combined serialized size is smaller. A general interface with a long instruction manual can cost more than several concise specialized interfaces.
+tokens of tool definitions. For two fixed catalogs with staged counts $\FirstCatalogDefinitionCount, \SecondCatalogDefinitionCount$ and mean serialized sizes $\FirstCatalogDefinitionSize, \SecondCatalogDefinitionSize$ under the same call count, their token ratio is $\FirstCatalogDefinitionCount \FirstCatalogDefinitionSize/(\SecondCatalogDefinitionCount \SecondCatalogDefinitionSize)$. Fewer definitions reduce catalog tokens only when their combined serialized size is smaller. A general interface with a long instruction manual can cost more than several concise specialized interfaces.
 
-On-demand staging changes the per-call count. If call $\ModelCallIndex$ stages ${\StagedDefinitionCount}_i$ definitions with mean serialized contribution $\DefinitionSerializedSize_i$, replace the product in @eq-vol3-app-b-catalog-tokens with $\sum_{i=1}^{\CatalogStagingCallCount} {\StagedDefinitionCount}_i \DefinitionSerializedSize_i$. Record the tokenizer and serialization convention, including any shared framing, so the estimates can be checked against actual requests. Selection calls and catalog-discovery observations need separate accounting. Neither formula establishes equal functionality, grants, selection quality, or task outcomes.
+On-demand staging changes the per-call count. If call $\ModelCallIndex$ stages ${\SelectedDescriptorCount}_i$ definitions with mean serialized contribution ${\ToolDescriptorSize}_i$, replace the product in @eq-vol3-app-b-catalog-tokens with $\sum_{i=1}^{\TurnHorizon} {\SelectedDescriptorCount}_i {\ToolDescriptorSize}_i$. Record the tokenizer and serialization convention, including any shared framing, so the estimates can be checked against actual requests. Selection calls and catalog-discovery observations need separate accounting. Neither formula establishes equal functionality, grants, selection quality, or task outcomes.
 
-Compatible available prefix state can reduce recomputation, and qualifying cached-input billing can reduce price, without releasing logical context capacity. A changed descriptor affects reuse from its first divergence, not necessarily the entire earlier prefix (@sec-vol3-context-engineering-staging).
+Beyond raw token counts, compatible available prefix state can reduce recomputation, and qualifying cached-input billing can reduce price, without releasing logical context capacity. A changed descriptor affects reuse from its first divergence, not necessarily the entire earlier prefix (@sec-vol3-context-engineering-staging).
 
 Comparing narrow and general catalogs across definition cost, tool selection, observation shape, and enforcement (@tbl-vol3-app-b-deep-vs-shallow) separates the surface property of a catalog from the underlying runtime measurement or authority obligation.
 
-| Dimension             | Many narrow tools                                        | A few general tools                                            | Consequence                                                                                                 |
-|:----------------------|:---------------------------------------------------------|:---------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------|
-| **Interface surface** | More operation-specific names                            | Fewer names with more expressive arguments                     | Count alternatives and argument complexity separately                                                       |
-| **Definition tokens** | Depends on staged count and serialized size              | Depends on staged count and serialized size                    | Measure ${\StagedDefinitionCount}_i \DefinitionSerializedSize_i$ rather than inferring cost from tool count |
-| **Selection**         | More interfaces may offer task-specific choices          | Fewer interfaces may require more argument composition         | Compare selection and argument errors under the same workload                                               |
-| **Observations**      | Can expose task-specific structured results              | Can expose a shared result envelope                            | Either design must preserve status, scope, and omissions                                                    |
-| **Enforcement**       | Per-operation checks can coexist with shared containment | Expressive operations require limits on their possible effects | Both need authorization and execution enforcement                                                           |
+| Dimension             | Many narrow tools                                        | A few general tools                                            | Consequence                                                                                               |
+|:----------------------|:---------------------------------------------------------|:---------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------|
+| **Interface surface** | More operation-specific names                            | Fewer names with more expressive arguments                     | Count alternatives and argument complexity separately                                                     |
+| **Definition tokens** | Depends on staged count and serialized size              | Depends on staged count and serialized size                    | Measure ${\SelectedDescriptorCount}_i {\ToolDescriptorSize}_i$ rather than inferring cost from tool count |
+| **Selection**         | More interfaces may offer task-specific choices          | Fewer interfaces may require more argument composition         | Compare selection and argument errors under the same workload                                             |
+| **Observations**      | Can expose task-specific structured results              | Can expose a shared result envelope                            | Either design must preserve status, scope, and omissions                                                  |
+| **Enforcement**       | Per-operation checks can coexist with shared containment | Expressive operations require limits on their possible effects | Both need authorization and execution enforcement                                                         |
 
 : **Narrow Versus General Tool Catalogs**: How catalog shape affects definition tokens, tool selection, observations, and where authority is enforced. {#tbl-vol3-app-b-deep-vs-shallow tbl-colwidths="[18,26,26,30]"}
 
@@ -199,6 +208,6 @@ A catalog comparison needs a fixed workload and acceptance policy. For coding ta
 
 : **Catalog comparison worksheet**: Fields that make a workload-specific comparison interpretable rather than equating fewer tool names with a better interface. {#tbl-vol3-app-b-catalog-worksheet tbl-colwidths="[22,40,38]"}
 
-Each operation also needs explicit input, execution, and observation bounds that match its mechanics: a file viewer's line window does not bound its returned bytes because one line can be arbitrarily long, whereas a search tool needs limits on its input expression as well as its work, matches, and captured output; similarly, an editor needs a resulting-file bound in addition to bounded replacement strings, while a command runner needs containment and resource accounting beyond a timeout argument. These remain endpoint obligations even when several operations share one implementation.
+Each operation also needs explicit input, execution, and observation bounds that match its mechanics: a file viewer's line window does not bound its returned bytes because one line can be arbitrarily long, whereas a search tool needs limits on its input expression as well as its work, matches, and captured output; similarly, an editor needs a resulting-file bound in addition to bounded replacement strings, while a command runner needs containment and resource accounting beyond a timeout argument. These resource bounds remain endpoint obligations even when several operations share one implementation.
 
 A compact catalog is useful when it reduces the total work required to finish the specified tasks without weakening the acceptance or authority contract. Specialized interfaces can instead reduce ambiguity and expose narrower effects. The worksheet supports that decision; it does not prescribe a catalog size.

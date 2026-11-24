@@ -1,17 +1,175 @@
-/* Reviewed original artwork plus an explicitly scoped temporal trace. */
-(()=>{'use strict';window.MLSysFigureLessons=window.MLSysFigureLessons||{};
-window.MLSysFigureLessons["original-v1-allocator-live-cached-blocks"]=async(root,{outer,verifiedArtwork})=>{
- if(!verifiedArtwork||!window.MLSysOriginalPlayer)throw Error('Verified artwork and shared player required');
- root.classList.add("original-v1-allocator-live-cached-blocks");const make=(tag,cl,text)=>{const n=document.createElement(tag);if(cl)n.className=cl;if(text!=null)n.textContent=text;return n;};
- const reference=make('details','vb-reference'),summary=make('summary','','Inspect complete original figure');reference.append(summary,verifiedArtwork.cloneNode(true));
- const scene=make('div','vb-scene'),readout=make('p','vb-readout'),motion=make('div','vb-motion','');motion.setAttribute('aria-hidden','true');
- const card=(parent,title,contents,kind='')=>{const n=make('section','vb-card '+kind);n.append(make('strong','',title));const body=make('div','vb-items');for(const c of contents)body.append(make('span','vb-token',c));n.append(body);parent.append(n);return n;};
- const steps=[["All three tensors live", "A, B, and C each own one contiguous block. Every reserved unit is live."], ["Release B", "B has no remaining consumers. Its four units become cached and reusable; reservation stays unchanged."], ["Reuse two units for D", "D occupies the first half of B\u2019s cached block. The unused remainder stays cached."], ["Release A", "A\u2019s final consumer finishes. Its block becomes reusable, but D separates it from the other free region."], ["Request six contiguous units", "The allocator cannot combine separated free regions into one contiguous allocation under this fixed-pool policy."]].map(([label,description])=>({label,description}));
- const baseDescriptions=steps.map(s=>s.description);function pending(to){steps[to].description='On completion: '+baseDescriptions[to];const p=root.querySelector('.mlsys-original-narration p');if(p)p.textContent=steps[to].description;}
-function render(i,{stage,details}){steps.forEach((s,j)=>s.description=baseDescriptions[j]);if(!scene.isConnected)stage.append(scene);if(!reference.isConnected)details.append(readout,reference);scene.replaceChildren();motion.remove();
- const blocks=i===0?[['A',4],['B',4],['C',4]]:i===1?[['A',4],['Cached',4],['C',4]]:i===2?[['A',4],['D',2],['Cached',2],['C',4]]:[['Cached',4],['D',2],['Cached',2],['C',4]];
- const direction=make('p','vb-address','Increasing virtual address →');direction.setAttribute('data-mlsys-keep','');const bar=make('div','vb-bar');bar.setAttribute('data-mlsys-focus','');scene.append(direction,bar);let live=0,free=0,largest=0;for(const [id,n]of blocks){const isFree=id==='Cached';isFree?(free+=n,largest=Math.max(largest,n)):live+=n;const b=make('div','vb-block'+(isFree?' free':''),`${isFree?"Cached":id}: ${n}`);b.style.flex=String(n);if(isFree)b.replaceChildren(make('span','vb-block-label','Cached'),make('span','vb-block-units',String(n)));bar.append(b);}const legend=make('div','vb-legend');legend.setAttribute('data-mlsys-keep','');legend.append(make('span','vb-legend-live','Live tensor'),make('span','vb-legend-cached','Cached / reusable'));scene.append(legend);if(i===4){const request=make('div','vb-request','6 contiguous units');request.style.width='50%';request.setAttribute('data-mlsys-focus','');scene.append(request);card(scene,'Cannot fit',['Largest cached gap '+largest+'; D separates the reusable regions'],'compute');}
- root.dataset.live=String(live);root.dataset.reserved='12';root.dataset.reusable=String(free);root.dataset.largest=String(largest);readout.textContent=`Reserved: 12 · Live: ${live} · Reusable: ${free} · Largest contiguous gap: ${largest}. Cached blocks remain reserved by this allocator; they have not been returned to the device.`;
- root.dataset.endpoint=String(i);}
- return window.MLSysOriginalPlayer.create({root,outer,title:"Why can six free units fail a six-unit request?",scope:"Original fixed virtual-address pool, expressed in the same twelve illustrative units. No growth, compaction, remapping, or pending device consumers. Snapshot (c) is split into two causal actions.",steps,render,transition:({to,onFrame})=>{pending(to);const bar=scene.querySelector('.vb-bar');if(!bar)return;bar.style.position='relative';const n=make('div','vb-changing');bar.append(n);n.style.left=(to===1||to===2?'33.333333%':'0');n.style.width=to===2?'0':to===4?'50%':'33.333333%';n.textContent=to===1?'B → cached':to===2?'D: 2':to===3?'A → cached':'6 contiguous units';n.classList.toggle('vb-releasing',to===1||to===3);n.classList.toggle('vb-denied',to===4);onFrame(p=>{if(to===2){n.style.width=(p*100*2/12)+'%';n.style.opacity='1';}else n.style.opacity=String(p);});}});
-};})();
+(() => {
+  'use strict';
+  window.MLSysFigureLessons = window.MLSysFigureLessons || {};
+  window.MLSysFigureLessons['original-v1-allocator-live-cached-blocks'] = async (root, { outer, verifiedArtwork }) => {
+    if (!verifiedArtwork || !window.MLSysOriginalPlayer) {
+      throw new Error('Verified artwork and shared player required');
+    }
+    root.classList.add('original-v1-allocator-live-cached-blocks');
+
+    const NS = 'http://www.w3.org/2000/svg';
+    const svgNode = (tag, attrs, txt) => {
+      const n = document.createElementNS(NS, tag);
+      if (attrs) Object.entries(attrs).forEach(([k, v]) => n.setAttribute(k, String(v)));
+      if (txt != null) n.textContent = txt;
+      return n;
+    };
+    const htmlNode = (tag, cls, txt) => {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (txt != null) n.textContent = txt;
+      return n;
+    };
+
+    const steps = [
+      {
+        label: 'Snapshot (a): all three tensors live',
+        description: 'Tensors A, B, and C each occupy 4 contiguous units in the 12-unit virtual-address pool. Reserved: 12 units, Live: 12 units, Cached reusable: 0 units (largest free block: 0).',
+        live: 12, free: 0, largest: 0
+      },
+      {
+        label: 'Snapshot (b): release B into the cache',
+        description: 'Tensor B finishes its last consumer, so its 4 middle units become cached and reusable inside the allocator pool rather than returning to the OS/driver. Live: 8, Cached: 4 (largest free block: 4).',
+        live: 8, free: 4, largest: 4
+      },
+      {
+        label: 'Carve 2 units from cached B for Tensor D',
+        description: 'Before A is released, Tensor D allocates 2 units at the front of B’s 4-unit cached block ([4..6]), leaving a 2-unit cached remainder ([6..8]). Live: 10, Cached: 2 (largest free block: 2).',
+        live: 10, free: 2, largest: 2
+      },
+      {
+        label: 'Snapshot (c): release A into a split pool',
+        description: 'Tensor A finishes and returns its 4 front units ([0..4]) to the cache. Total reusable memory is now 4 + 2 = 6 units, but live Tensor D ([4..6]) splits the two free blocks (largest free block: 4).',
+        live: 6, free: 6, largest: 4
+      },
+      {
+        label: 'Fail the 6-unit contiguous request',
+        description: 'A new tensor requests 6 contiguous units. Sliding the 6-unit span hits live Tensor D after 4 units at [0..6] and hits live Tensor C after 2 units at [6..12], causing external fragmentation OOM.',
+        live: 6, free: 6, largest: 4
+      }
+    ];
+
+    // Canonical SVG (0 0 340.954 246.548):
+    // Row (a): y=16.79, h=19.81; Row (b): y=83.29, h=19.81; Row (c): y=149.78, h=19.80; Request: y=200.71, h=19.80
+    // Unit width = 339.54 / 12 = 28.295, x0 = 0.71
+    const X0 = 0.71;
+    const UW = 28.295;
+
+    const svg = verifiedArtwork.cloneNode(true);
+    svg.removeAttribute('width');
+    svg.removeAttribute('height');
+    svg.setAttribute('viewBox', '-12 -10 365 266');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'Caching allocator pool fragmentation across snapshots a, b, and c');
+    svg.prepend(svgNode('rect', { x: -12, y: -10, width: 365, height: 266, fill: '#ffffff' }));
+
+    const overlay = svgNode('g', { class: 'alloc-overlay' });
+    const dimBands = [
+      svgNode('rect', { x: -2, y: 1, width: 345, height: 42, fill: '#ffffff', 'fill-opacity': '0.68' }),
+      svgNode('rect', { x: -2, y: 67, width: 345, height: 42, fill: '#ffffff', 'fill-opacity': '0.68' }),
+      svgNode('rect', { x: -2, y: 134, width: 345, height: 42, fill: '#ffffff', 'fill-opacity': '0.68' }),
+      svgNode('rect', { x: -2, y: 184, width: 345, height: 42, fill: '#ffffff', 'fill-opacity': '0.74' })
+    ];
+    // Step 2 intermediate overlay on Row (c) showing A still live before release
+    const liveAPatch = svgNode('g', {});
+    liveAPatch.append(
+      svgNode('rect', { x: X0, y: 149.78, width: (4 * UW).toFixed(2), height: 19.8, fill: '#d1f3ff', stroke: '#006395', 'stroke-width': 1.2 }),
+      svgNode('text', { x: (X0 + 2 * UW).toFixed(2), y: 159.7, 'text-anchor': 'middle', 'dominant-baseline': 'central', 'font-family': 'system-ui, sans-serif', 'font-size': 8.2, 'font-weight': '700', fill: '#00486e' }, 'Live A (4) — still in use')
+    );
+    const activeFrame = svgNode('rect', { rx: 3, fill: 'none', stroke: '#006395', 'stroke-width': 2.4 });
+    const caliper = svgNode('g', {});
+    const caliperRect = svgNode('rect', { y: 147.8, width: (6 * UW).toFixed(2), height: 23.8, rx: 2, fill: 'rgba(203,32,45,0.12)', stroke: '#CB202D', 'stroke-width': 2.2, 'stroke-dasharray': '5 3' });
+    const caliperTag = svgNode('text', { y: 181.5, 'text-anchor': 'middle', 'font-family': 'system-ui, sans-serif', 'font-size': 7.8, 'font-weight': '700', fill: '#CB202D', stroke: '#ffffff', 'stroke-width': 2.6, 'paint-order': 'stroke' }, 'Need 6 contiguous → blocked by D!');
+    caliper.append(caliperRect, caliperTag);
+
+    const focusBox = svgNode('rect', { fill: 'none', stroke: 'none', 'pointer-events': 'none', 'data-mlsys-focus': '' });
+    overlay.append(...dimBands, liveAPatch, activeFrame, caliper, focusBox);
+    svg.append(overlay);
+
+    const surface = htmlNode('div', 'vb-surface');
+    surface.append(svg);
+    const readout = htmlNode('p', 'vb-readout');
+    const metrics = htmlNode('div', 'vb-metrics');
+    const mkMetric = (kind, label) => {
+      const m = htmlNode('div', 'vb-metric');
+      m.dataset.kind = kind;
+      const h = htmlNode('strong', '', label);
+      const v = htmlNode('span', '');
+      m.append(h, v);
+      metrics.append(m);
+      return v;
+    };
+    const vals = {
+      reserved: mkMetric('res', 'Reserved Pool'),
+      live: mkMetric('live', 'Live Tensors'),
+      free: mkMetric('free', 'Cached Free'),
+      gap: mkMetric('gap', 'Max Contiguous')
+    };
+
+    function setCaliperX(x) {
+      caliperRect.setAttribute('x', x.toFixed(2));
+      caliperTag.setAttribute('x', (x + 3 * UW).toFixed(2));
+    }
+
+    function paintEndpoint(i) {
+      const s = steps[i];
+      const activeRows = i === 0 ? [0] : i === 1 ? [1] : i === 4 ? [2, 3] : [2];
+      dimBands.forEach((b, idx) => b.setAttribute('visibility', activeRows.includes(idx) ? 'hidden' : 'visible'));
+      liveAPatch.setAttribute('visibility', i === 2 ? 'visible' : 'hidden');
+      caliper.setAttribute('visibility', i === 4 ? 'visible' : 'hidden');
+      if (i === 4) setCaliperX(X0);
+
+      const fy = i === 0 ? 14.5 : i === 1 ? 81.0 : 147.5;
+      const fh = i === 4 ? 75.5 : 24.4;
+      activeFrame.setAttribute('x', '-1.5');
+      activeFrame.setAttribute('y', String(fy));
+      activeFrame.setAttribute('width', '344');
+      activeFrame.setAttribute('height', String(fh));
+      activeFrame.setAttribute('stroke', i === 4 ? '#CB202D' : (i === 2 ? '#E67817' : '#006395'));
+
+      focusBox.setAttribute('x', '0');
+      focusBox.setAttribute('y', String(Math.max(4, fy - 4)));
+      focusBox.setAttribute('width', '341');
+      focusBox.setAttribute('height', String(fh + 8));
+
+      vals.reserved.textContent = '12 units';
+      vals.live.textContent = `${s.live} units`;
+      vals.free.textContent = `${s.free} units`;
+      vals.gap.textContent = `${s.largest} units${i === 4 ? ' < 6 needed' : ''}`;
+      readout.textContent = `Reserved: 12 · Live: ${s.live} · Cached reusable: ${s.free} · Largest contiguous gap: ${s.largest} units.`;
+
+      root.dataset.live = String(s.live);
+      root.dataset.reserved = '12';
+      root.dataset.reusable = String(s.free);
+      root.dataset.largest = String(s.largest);
+      root.dataset.endpoint = String(i);
+    }
+
+    return window.MLSysOriginalPlayer.create({
+      root,
+      outer,
+      layout: 'compact',
+      intro: 'Trace 12 reserved pool units through tensor releases and partial reuse to see why 6 cached units split into blocks of 4 and 2 fail a 6-unit request.',
+      title: 'Why can six free units fail a six-unit request?',
+      scope: 'Original fixed 12-unit virtual-address pool across snapshots (a), (b), and (c) without compaction or virtual-memory remapping. Cached blocks remain reserved inside the framework allocator.',
+      steps,
+      render(i, { stage, details }) {
+        if (!surface.isConnected) stage.replaceChildren(surface);
+        if (details && !readout.isConnected) details.replaceChildren(readout, metrics);
+        paintEndpoint(i);
+      },
+      transition({ to, onFrame }) {
+        if (to === 4) {
+          caliper.setAttribute('visibility', 'visible');
+          onFrame(p => {
+            // Probe [0..6] then [6..12] then settle back on [0..6]
+            const x = p < 0.5
+              ? X0 + (6 * UW) * (p * 2)
+              : X0 + (6 * UW) * (1 - (p - 0.5) * 2);
+            setCaliperX(x);
+          });
+        }
+      }
+    });
+  };
+})();

@@ -1,0 +1,904 @@
+"""GPU energy measurement protocol: plan rules, energy accounting, integrity checks, and analysis.
+
+No GPU is needed. Measured-looking records here are constructed fixtures with
+round numbers, so each expected ratio can be checked by hand. They are not data.
+"""
+
+from __future__ import annotations
+
+import ast
+import copy
+import csv
+import importlib.util
+import io
+import json
+import math
+import os
+import re
+import sys
+import time
+import types
+from pathlib import Path
+
+import pytest
+
+SCRIPTS = Path(__file__).resolve().parents[1] / "paper/scripts"
+PLAN_PATH = Path(__file__).resolve().parents[1] / "paper/data/gpu-energy/plan.json"
+WORKLOADS_PLAN_PATH = Path(__file__).resolve().parents[1] / "paper/data/gpu-energy-workloads/plan.json"
+BOARDS_PLAN_PATH = Path(__file__).resolve().parents[1] / "paper/data/gpu-energy-boards/plan.json"
+SEED_PLAN_PATHS = [Path(__file__).resolve().parents[1] / f"paper/data/gpu-energy-seeds/seed-{s}/plan.json"
+                   for s in (2193, 2198)]
+sys.path.insert(0, str(SCRIPTS))
+
+
+def _load(name):
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+protocol = _load("gpu_energy_protocol")
+analysis = _load("analyze_gpu_energy")
+runner = _load("measure_gpu_energy")
+boards = _load("compare_gpu_energy_boards")
+seeds = _load("compare_gpu_energy_seeds")
+
+UUID = "GPU-constructed-0000"
+
+
+def _plan(**overrides):
+    plan = {
+        "schema": protocol.PLAN_SCHEMA,
+        "boundary": "GPU board only (constructed fixture)",
+        "trials": 3, "warmup_trials": 1, "idle_seconds": 0.05,
+        "phase_min_seconds": 0.05, "sample_interval_s": 0.01, "counter_probe_seconds": 0.2, "seed": 1,
+        "devices": {"H100": {"registry": "Hardware.Cloud.H100", "modal_gpu": "H100!",
+                             "expected_name": "NVIDIA H100 80GB HBM3"}},
+        "workloads": {
+            "llama": {"kind": "generate", "registry": "Models.Language.Llama3_8B", "hf_model": "x/y",
+                      "hf_revision": "0" * 40, "weights_sha256": {"model.safetensors": "0" * 64},
+                      "precision": "fp16", "efficiency": 0.5,
+                      "model_seq_len": "mean_context", "attention_backend": "FLASH_ATTN",
+                      "vllm": {"max_model_len": 2560, "max_num_seqs": 16, "max_num_batched_tokens": 32768,
+                               "enable_prefix_caching": False, "enable_chunked_prefill": False}},
+            "resnet": {"kind": "train", "registry": "Models.Vision.ResNet50", "precision": "fp16", "steps": 50},
+        },
+        "configs": [
+            {"id": "llama-b1", "device": "H100", "workload": "llama", "batch": 1,
+             "prompt_tokens": 128, "output_tokens": 101, "split": "calibration"},
+            {"id": "resnet-b256", "device": "H100", "workload": "resnet", "batch": 256,
+             "efficiency": 0.13, "split": "heldout"},
+        ],
+    }
+    plan.update(overrides)
+    return plan
+
+
+def _phase(t0, seconds, start_mj, units=1, watts=None, joules=None):
+    joules = watts * seconds if joules is None else joules
+    return {"t0": t0, "t1": t0 + seconds, "energy_mj_start": start_mj,
+            "energy_mj_end": start_mj + round(joules * 1000), "units": units}
+
+
+def _decode_record(trial, warmup=False, status="ok", decode_seconds=10.0, uuid=UUID, config_id="llama-b1",
+                   device_name="NVIDIA H100 80GB HBM3", prefill_watts=500.0, decode_watts=350.0):
+    """One-token calls take 0.01 s (5 J at 500 W). A full call adds 100 decode steps (350 W by default)."""
+    idle = _phase(0.0, 5.0, 1_000_000, watts=80.0)
+    prefill = _phase(5.0, 3.0, idle["energy_mj_end"], units=300, watts=prefill_watts)
+    generate = _phase(8.0, 0.01 + decode_seconds, prefill["energy_mj_end"], units=1,
+                      joules=prefill_watts * 0.01 + decode_watts * decode_seconds)
+    samples = [[t / 10, 80_000.0 if t < 50 else 500_000.0 if t < 80 else 350_000.0]
+               for t in range(int((8.01 + decode_seconds) * 10) + 1)]
+    return {"schema": protocol.RECORD_SCHEMA, "config_id": config_id, "trial": trial, "warmup": warmup,
+            "device": {"name": device_name, "uuid": uuid}, "workload": {},
+            "phases": {} if status != "ok" else {"idle": idle, "prefill": prefill, "generate": generate},
+            "samples": samples, "status": status, "error": None if status == "ok" else "boom"}
+
+
+def _probe(refresh_s):
+    """A counter that changed every ``refresh_s`` seconds for one second."""
+    steps = int(round(1 / refresh_s))
+    return {"seconds": 1.0, "polls": 1000,
+            "energy_changes": [[i * refresh_s, 1_000_000 + 80 * i] for i in range(steps + 1)],
+            "power_changes": [[0.0, 80_000.0]]}
+
+
+def _write_run(root, plan, records, name="run-a", device_name="NVIDIA H100 80GB HBM3", uuid=UUID, refresh_s=0.1,
+               device_key="H100", power_limit_mw=None, started_utc=None):
+    (root / "plan.json").write_text(json.dumps(plan))
+    run = root / "runs" / name
+    run.mkdir(parents=True)
+    for r in records:
+        protocol.append_trial(run, r)
+    device = {"name": device_name, "uuid": uuid, "enforced_power_limit_mw": power_limit_mw}
+    header = {"device_key": device_key, "device": device, "plan_sha256": protocol.sha256_file(root / "plan.json"),
+              "counter_probe": _probe(refresh_s)}
+    if started_utc is not None:
+        header["started_utc"] = started_utc
+    protocol.write_manifest(run, header)
+    return run
+
+
+@pytest.fixture
+def measured_root(tmp_path):
+    records = [_decode_record(0, warmup=True, decode_seconds=99.0)]
+    records += [_decode_record(i) for i in (1, 2, 3)]
+    records += [_decode_record(4, status="failed")]
+    _write_run(tmp_path, _plan(), records)
+    return tmp_path
+
+
+def _rows(root):
+    text, provenance, _ = analysis.summarize(root)
+    lines = text.strip().splitlines()
+    header = lines[0].split(",")
+    return [dict(zip(header, line.split(","))) for line in lines[1:]], provenance
+
+
+def test_committed_plan_is_valid_and_declares_every_efficiency():
+    plan = protocol.load_plan(PLAN_PATH)
+    assert {c["split"] for c in plan["configs"]} == {"calibration", "heldout"}
+    for config in plan["configs"]:
+        assert 0 < protocol.efficiency_of(plan, config) <= 1
+        analysis.resolve(plan["devices"][config["device"]]["registry"])
+        analysis.resolve(plan["workloads"][config["workload"]]["registry"])
+
+
+def test_workloads_plan_is_valid_and_holds_out_every_configuration():
+    plan = protocol.load_plan(WORKLOADS_PLAN_PATH)
+    assert {c["split"] for c in plan["configs"]} == {"heldout"}
+    for config in plan["configs"]:
+        assert 0 < protocol.efficiency_of(plan, config) <= 1
+        analysis.resolve(plan["devices"][config["device"]]["registry"])
+        analysis.resolve(plan["workloads"][config["workload"]]["registry"])
+
+
+def test_workloads_plan_repeats_the_first_plan_apart_from_the_seed():
+    plan, first = protocol.load_plan(WORKLOADS_PLAN_PATH), protocol.load_plan(PLAN_PATH)
+    for key in ("schema", "trials", "warmup_trials", "phase_min_seconds", "idle_seconds",
+                "sample_interval_s", "counter_probe_seconds", "boundary"):
+        assert plan[key] == first[key], key
+    assert plan["seed"] != first["seed"]
+    for name in ("llama31_8b", "resnet50_train"):
+        assert plan["workloads"][name] == first["workloads"][name]
+    for key in ("H100", "A100"):
+        assert plan["devices"][key] == first["devices"][key]
+
+    def shape(p, name):
+        return sorted((c["device"], c["batch"], c.get("prompt_tokens"), c.get("output_tokens"),
+                       protocol.efficiency_of(p, c)) for c in p["configs"]
+                      if c["workload"] == name and c["device"] in ("H100", "A100"))
+
+    for name in ("llama31_8b", "resnet50_train"):
+        assert shape(plan, name) == shape(first, name)
+
+
+def test_boards_plan_repeats_the_workloads_plan_with_the_first_seed():
+    plan = protocol.load_plan(BOARDS_PLAN_PATH)
+    workloads, first = protocol.load_plan(WORKLOADS_PLAN_PATH), protocol.load_plan(PLAN_PATH)
+    assert protocol.plan_problems(plan) == []
+    for key in ("schema", "trials", "warmup_trials", "phase_min_seconds", "idle_seconds",
+                "sample_interval_s", "counter_probe_seconds", "boundary", "devices"):
+        assert plan[key] == workloads[key], key
+    assert plan["seed"] == first["seed"] != workloads["seed"]
+    assert plan["workloads"] == {k: workloads["workloads"][k] for k in ("llama31_8b", "resnet50_train")}
+    assert plan["configs"] == [c for c in workloads["configs"] if c["workload"] in plan["workloads"]]
+    assert {c["split"] for c in plan["configs"]} == {"heldout"}
+
+
+A100 = {"registry": "Hardware.Cloud.A100", "modal_gpu": "A100-80GB", "expected_name": "NVIDIA A100-SXM4-80GB"}
+
+
+def _board_test(root, seed, runs, name="llama", other=True):
+    """One test folder with one decode configuration per device. ``runs`` is (device, uuid, decode watts).
+
+    Every run also has a warm-up at 900 W and a failed trial, which must not count. With ``other``,
+    the plan has a second model that the boards plan lacks, and a run on the wrong device is
+    added. Neither must count.
+    """
+    llama = _plan()["workloads"]["llama"]
+    models = (name, "other") if other else (name,)
+    plan = _plan(seed=seed, devices={**_plan()["devices"], "A100": A100},
+                 workloads={name: llama, "other": {**llama, "registry": "Models.Language.Llama2_7B"}},
+                 configs=[{"id": f"{device.lower()}-{model}-b1", "device": device, "workload": model, "batch": 1,
+                           "prompt_tokens": 128, "output_tokens": 101, "split": "heldout"}
+                          for device in ("H100", "A100") for model in models])
+    root.mkdir()
+    runs = [*runs, ("H100", "wrong-device", 100)] if other else runs
+    for n, (device, uuid, watts) in enumerate(runs):
+        expected = plan["devices"][device]["expected_name"]
+        reported = "NVIDIA H200" if uuid == "wrong-device" else expected
+        records = [_decode_record(0, warmup=True, uuid=uuid, config_id=f"{device.lower()}-{name}-b1",
+                                  device_name=reported, decode_watts=900)]
+        records += [_decode_record(i, uuid=uuid, config_id=f"{device.lower()}-{name}-b1", device_name=reported,
+                                   decode_watts=watts) for i in (1, 2)]
+        records += [_decode_record(3, status="failed", uuid=uuid, config_id=f"{device.lower()}-{name}-b1",
+                                   device_name=reported)]
+        if other:
+            records += [_decode_record(4, uuid=uuid, config_id=f"{device.lower()}-other-b1", device_name=reported,
+                                       decode_watts=100)]
+        _write_run(root, plan, records, name=f"run-{n}", device_name=reported, uuid=uuid, device_key=device)
+
+
+def test_board_comparison_counts_spread_other_seed_and_pairings(tmp_path):
+    # A decode step is 100 steps over 10 s, so 300 W is 30 J per step. The first test names its
+    # workload and configurations differently, as gpu-energy/ does.
+    _board_test(tmp_path / "gpu-energy", 1, [("H100", "h1", 310), ("A100", "a1", 330)], name="llama3")
+    _board_test(tmp_path / "gpu-energy-workloads", 2, [("H100", "h2", 400), ("A100", "a2", 320)])
+    _board_test(tmp_path / "gpu-energy-boards", 1,
+                [("H100", "h3", 300), ("H100", "h4", 320), ("A100", "a3", 310), ("A100", "a4", 340)], other=False)
+    energy, summary = boards.compare(tmp_path)
+    runs = list(csv.DictReader(io.StringIO(energy)))
+    assert len(runs) == 8 * 2  # prefill and decode for every verified run, of the plan's model only
+    decode_run = next(r for r in runs if r["gpu_uuid"] == "h3" and r["phase"] == "decode")
+    assert float(decode_run["power_w"]) == pytest.approx(300.0) and float(decode_run["s_per_unit"]) == pytest.approx(0.1)
+    assert {r["trials"] for r in runs} == {"2"} and "wrong-device" not in {r["gpu_uuid"] for r in runs}
+    decode = next(r for r in csv.DictReader(io.StringIO(summary)) if r["phase"] == "decode")
+    # Seed 1: H100 at 30, 31 and 32 J, A100 at 31, 33 and 34 J. Seed 2: H100 at 40 J, A100 at 32 J.
+    assert (decode["H100_runs_same_seed"], decode["H100_boards_same_seed"]) == ("3", "3")
+    assert float(decode["H100_min_j_same_seed"]) == pytest.approx(30)
+    assert float(decode["H100_spread_same_seed"]) == pytest.approx(32 / 30 - 1)
+    assert (decode["H100_other_seed_inside"], decode["A100_other_seed_inside"]) == ("0", "1")
+    # The H100 is lower on 3 of the boards test's 4 pairings and on 9 of all 16.
+    assert (decode["H100_vs_A100_pairs_boards_test"], decode["H100_lower_boards_test"]) == ("4", "3")
+    assert (decode["H100_vs_A100_pairs_all_tests"], decode["H100_lower_all_tests"]) == ("16", "9")
+
+
+def test_board_comparison_does_not_match_another_revision_of_the_same_model(tmp_path):
+    _board_test(tmp_path / "gpu-energy", 1, [("H100", "h1", 310), ("A100", "a1", 330)])
+    plan_path = tmp_path / "gpu-energy" / "plan.json"
+    plan = json.loads(plan_path.read_text())
+    plan["workloads"]["llama"]["hf_revision"] = "1" * 40
+    plan_path.write_text(json.dumps(plan))
+    for run in (tmp_path / "gpu-energy" / "runs").iterdir():  # keep the runs verified under the changed plan
+        manifest = json.loads((run / "manifest.json").read_text())
+        manifest["plan_sha256"] = protocol.sha256_file(plan_path)
+        (run / "manifest.json").write_text(json.dumps(manifest))
+    _board_test(tmp_path / "gpu-energy-workloads", 2, [("H100", "h2", 400), ("A100", "a2", 320)])
+    _board_test(tmp_path / "gpu-energy-boards", 1, [("H100", "h3", 300), ("A100", "a3", 310)], other=False)
+    energy, _ = boards.compare(tmp_path)
+    assert "gpu-energy," not in energy and len(list(csv.DictReader(io.StringIO(energy)))) == 4 * 2
+
+
+def test_board_comparison_counts_a_run_at_the_edge_of_the_range_as_inside(tmp_path):
+    _board_test(tmp_path / "gpu-energy", 1, [("H100", "h1", 300), ("A100", "a1", 300)])
+    _board_test(tmp_path / "gpu-energy-workloads", 2, [("H100", "h2", 320), ("A100", "a2", 300)])
+    _board_test(tmp_path / "gpu-energy-boards", 1, [("H100", "h3", 320), ("A100", "a3", 300)], other=False)
+    _, summary = boards.compare(tmp_path)
+    decode = next(r for r in csv.DictReader(io.StringIO(summary)) if r["phase"] == "decode")
+    assert (decode["H100_other_seed_inside"], decode["A100_other_seed_inside"]) == ("1", "1")
+
+
+def test_seed_plans_differ_only_in_seed_and_repeat_the_board_configurations():
+    first, second = (protocol.load_plan(path) for path in SEED_PLAN_PATHS)
+    board = protocol.load_plan(BOARDS_PLAN_PATH)
+    assert protocol.plan_problems(first) == protocol.plan_problems(second) == []
+    assert (first["seed"], second["seed"]) == (2193, 2198)
+    assert {k: v for k, v in first.items() if k != "seed"} == {k: v for k, v in second.items() if k != "seed"}
+    for key in ("schema", "trials", "warmup_trials", "phase_min_seconds", "idle_seconds", "sample_interval_s",
+                "counter_probe_seconds", "boundary", "seed", "devices", "workloads", "configs"):
+        assert first[key] == board[key], key
+
+
+def _seed_folders(root, runs):
+    """Two seed folders under ``root``. ``runs`` is (name, uuid in seed-2193, uuid in seed-2198, watts a, watts b,
+    which seed ran first). A uuid of None leaves that seed without the run."""
+    for folder, seed in (("seed-2193", 2193), ("seed-2198", 2198)):
+        plan = _plan(seed=seed, configs=[_plan()["configs"][0]])
+        (root / "gpu-energy-seeds" / folder).mkdir(parents=True)
+        for name, uuid_a, uuid_b, watts_a, watts_b, first in runs:
+            uuid, watts = (uuid_a, watts_a) if seed == 2193 else (uuid_b, watts_b)
+            if uuid is None:
+                continue
+            started = "2026-01-01T00:00:00" if (first == 2193) == (seed == 2193) else "2026-01-01T01:00:00"
+            records = [_decode_record(i, warmup=i == 0, uuid=uuid, decode_watts=watts) for i in range(3)]
+            _write_run(root / "gpu-energy-seeds" / folder, plan, records, name=name, uuid=uuid, started_utc=started)
+
+
+def test_seed_comparison_pairs_the_two_runs_of_each_board(tmp_path):
+    # 300 W is 30 J per decode step. Board u1: 30 then 29 J, seed 2193 first. Board u2: 32 and 30.4 J,
+    # seed 2198 first. A third run has no partner and is left out.
+    _seed_folders(tmp_path, [("run-0", "u1", "u1", 300, 290, 2193), ("run-1", "u2", "u2", 320, 304, 2198),
+                             ("run-2", None, "u3", 0, 310, 2198)])
+    (tmp_path / "gpu-energy-boards").mkdir()
+    (tmp_path / "gpu-energy-boards" / "board_energy.csv").write_text(
+        "test,device,workload,phase,batch,prompt_tokens,output_tokens,j_per_unit\n"
+        "gpu-energy-workloads,H100,Models.Language.Llama3_8B,decode,1,128,101,3.0\n"
+        "gpu-energy-boards,H100,Models.Language.Llama3_8B,decode,1,128,101,3.2\n"
+        "gpu-energy-boards,H100,Models.Language.Llama3_8B,decode,1,128,101,3.0\n")
+    pairs, summary = seeds.compare(tmp_path)
+    pairs = [r for r in csv.DictReader(io.StringIO(pairs)) if r["phase"] == "decode"]
+    assert [(r["run"], r["first_seed_run"]) for r in pairs] == [("run-0", "seed-2193"), ("run-1", "seed-2198")]
+    decode = next(r for r in csv.DictReader(io.StringIO(summary)) if r["phase"] == "decode")
+    assert (decode["pairs"], decode["pairs_below_1"], decode["same_board_order"]) == ("2", "2", "True")
+    assert float(decode["mean_ratio"]) == pytest.approx((29 / 30 + 30.4 / 32) / 2)
+    assert float(decode["mean_ratio_a_first"]) == pytest.approx(29 / 30)
+    assert float(decode["mean_ratio_b_first"]) == pytest.approx(30.4 / 32)
+    assert float(decode["spread_a"]) == pytest.approx(32 / 30 - 1)
+    assert float(decode["spread_b"]) == pytest.approx(30.4 / 29 - 1)
+    assert float(decode["workloads_over_boards"]) == pytest.approx(3.0 / 3.1)
+
+
+def test_seed_comparison_reports_boards_that_change_order(tmp_path):
+    _seed_folders(tmp_path, [("run-0", "u1", "u1", 300, 330, 2193), ("run-1", "u2", "u2", 320, 310, 2198)])
+    _, summary = seeds.compare(tmp_path)
+    decode = next(r for r in csv.DictReader(io.StringIO(summary)) if r["phase"] == "decode")
+    assert decode["same_board_order"] == "False" and decode["workloads_over_boards"] == ""
+
+
+def test_seed_comparison_refuses_a_pair_measured_on_two_boards(tmp_path):
+    _seed_folders(tmp_path, [("run-0", "u1", "u2", 300, 290, 2193)])
+    with pytest.raises(SystemExit, match="run-0"):
+        seeds.compare(tmp_path)
+
+
+def test_modal_launcher_requests_the_gpu_the_plan_names():
+    source = (SCRIPTS / "modal_gpu_energy.py").read_text()
+    requested = dict(re.findall(r'@app\.function\(gpu="([^"]+)".*\)\ndef measure_(\w+)', source))
+    launcher = {v.lower(): k for k, v in requested.items()}
+    named = {}
+    for path in (PLAN_PATH, WORKLOADS_PLAN_PATH, BOARDS_PLAN_PATH, *SEED_PLAN_PATHS):
+        plan = protocol.load_plan(path)
+        devices = {key.lower(): device["modal_gpu"] for key, device in plan["devices"].items()}
+        assert devices.items() <= launcher.items()
+        named.update(devices)
+    assert named == launcher
+
+
+def _launcher_tree():
+    return ast.parse((SCRIPTS / "modal_gpu_energy.py").read_text())
+
+
+def test_each_launcher_function_measures_the_device_it_is_named_for():
+    tree = _launcher_tree()
+    functions = next(n.value for n in tree.body if isinstance(n, ast.Assign) and n.targets[0].id == "FUNCTIONS")
+    mapping = {k.value: v.id for k, v in zip(functions.keys, functions.values)}
+    assert mapping == {key: f"measure_{key.lower()}" for key in mapping}
+    for key, function in mapping.items():
+        node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == function)
+        call = next(c for c in ast.walk(node) if isinstance(c, ast.Call) and getattr(c.func, "id", "") == "_measure")
+        assert call.args[0].value == key
+
+
+def test_each_launcher_run_gets_its_own_container_and_output_folder():
+    tree = _launcher_tree()
+    options = next(n.value for n in tree.body if isinstance(n, ast.Assign) and n.targets[0].id == "GPU_OPTIONS")
+    assert any(k.arg == "single_use_containers" and k.value.value is True for k in options.keywords)
+    measure = ast.get_source_segment((SCRIPTS / "modal_gpu_energy.py").read_text(),
+                                     next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_measure"))
+    assert "mkdtemp" in measure and '"/tmp/run"' not in measure
+
+
+def _launcher_functions(*names):
+    # The launcher imports modal at the top, so load its pure helpers on their own.
+    nodes = [n for n in _launcher_tree().body if isinstance(n, ast.FunctionDef) and n.name in names]
+    namespace = {}
+    exec(compile(ast.Module(nodes, type_ignores=[]), "modal_gpu_energy.py", "exec"), namespace)
+    return namespace
+
+
+def _fake_measure(tmp_path):
+    """The launcher's ``_measure`` with stand-ins for Modal, the volume and the runner."""
+    namespace = _launcher_functions("_measure")
+    commands = []
+
+    def run(command, manifest):
+        commands.append(command)
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(json.dumps({"plan": command[command.index("--plan") + 1]}))
+        return 0
+
+    import tempfile
+    namespace.update(Path=Path, REMOTE="/remote", RESULTS=str(tmp_path / "volume"), _run=run,
+                     cache=types.SimpleNamespace(commit=lambda: None),
+                     tempfile=types.SimpleNamespace(mkdtemp=lambda prefix: tempfile.mkdtemp(prefix=prefix,
+                                                                                            dir=tmp_path)))
+    return namespace["_measure"], commands
+
+
+def test_launcher_measures_one_plan_in_a_fresh_folder_and_saves_a_copy(tmp_path):
+    measure, commands = _fake_measure(tmp_path)
+    files = measure("H100", ["h100-x"], "gpu-energy/h100-S-1")
+    assert set(files) == {"manifest.json", "exit_code.txt"} and files["exit_code.txt"] == b"0\n"
+    assert commands[0][commands[0].index("--plan") + 1] == "/remote/plan.json"
+    assert commands[0][-2:] == ["--config", "h100-x"]
+    saved = tmp_path / "volume" / "gpu-energy"
+    assert (saved / "h100-S-1" / "manifest.json").exists() and (saved / "h100-S-1.exit_code").read_text() == "0\n"
+    assert not (saved / "h100-S-1" / "exit_code.txt").exists()  # an extra file would fail verification
+    measure("H100", [], "gpu-energy/h100-S-2")
+    assert len({c[c.index("--out") + 1] for c in commands}) == 2
+
+
+@pytest.mark.parametrize("pair_first", [False, True])
+def test_launcher_measures_both_paired_plans_in_one_container(tmp_path, pair_first):
+    measure, commands = _fake_measure(tmp_path)
+    files = measure("A100", [], "seeds/seed-a/a100-S-1", "seeds/seed-b/a100-S-1", pair_first)
+    plans = [c[c.index("--plan") + 1] for c in commands]
+    assert plans == (["/remote/pair-plan.json", "/remote/plan.json"] if pair_first
+                     else ["/remote/plan.json", "/remote/pair-plan.json"])
+    assert len({c[c.index("--out") + 1] for c in commands}) == 2
+    assert json.loads(files["manifest.json"]) == {"plan": "/remote/plan.json"}
+    assert json.loads(files["pair/manifest.json"]) == {"plan": "/remote/pair-plan.json"}
+    assert files["exit_code.txt"] == files["pair/exit_code.txt"] == b"0\n"
+    for name in ("seed-a", "seed-b"):
+        assert (tmp_path / "volume" / "seeds" / name / "a100-S-1" / "manifest.json").exists()
+
+
+def test_launcher_alternates_which_paired_plan_runs_first():
+    pair_first = _launcher_functions("_pair_first")["_pair_first"]
+    h100, a100 = ("H100", ("llama",)), ("A100", ("llama",))
+    assert pair_first([h100, h100, a100, h100, a100, h100]) == [False, True, False, False, True, True]
+    # With two models per device, as _plan_jobs orders them, each model still gets both orders.
+    jobs = _launcher_functions("_runs_for", "_plan_jobs")["_plan_jobs"](
+        protocol.load_plan(WORKLOADS_PLAN_PATH), ["H200"], 2, [], "", "STAMP")
+    runs = [(key, tuple(sorted({c["workload"] for c in group}))) for key, _, group, _ in jobs]
+    order = pair_first(runs)
+    for run in set(runs):
+        assert sorted(o for r, o in zip(runs, order) if r == run) == [False, True]
+
+
+def test_launcher_keeps_the_first_plans_run_folders_and_runner_arguments():
+    plan_jobs = _launcher_functions("_runs_for", "_plan_jobs")["_plan_jobs"]
+    plan = protocol.load_plan(PLAN_PATH)
+    jobs = plan_jobs(plan, ["H100", "A100"], 2, [], "", "STAMP")
+    assert [folder for *_, folder in jobs] == ["h100-STAMP-1", "h100-STAMP-2", "a100-STAMP-1", "a100-STAMP-2"]
+    assert all(ids == [] for _, ids, _, _ in jobs)
+    h100 = [c for c in plan["configs"] if c["device"] == "H100"]
+    assert sorted(c["id"] for c in jobs[0][2]) == sorted(c["id"] for c in h100)
+    selected = [c["id"] for c in reversed(h100)]
+    _, ids, _, folder = plan_jobs(plan, ["H100"], 1, selected, "pilot", "STAMP")[0]
+    assert folder == "pilot-h100-STAMP-1" and ids == [c["id"] for c in h100]
+
+
+def test_launcher_gives_each_language_model_its_own_named_run():
+    plan_jobs = _launcher_functions("_runs_for", "_plan_jobs")["_plan_jobs"]
+    plan = protocol.load_plan(WORKLOADS_PLAN_PATH)
+    jobs = plan_jobs(plan, ["H200"], 1, [], "", "STAMP")
+    assert [folder for *_, folder in jobs] == [
+        "h200-llama31-8b-STAMP-1", "h200-llama2-7b-STAMP-1", "h200-llama2-13b-STAMP-1", "h200-mixtral-8x7b-STAMP-1"]
+    order = [c["id"] for c in plan["configs"]]
+    for _, ids, group, folder in jobs:
+        assert ids == sorted((c["id"] for c in group), key=order.index)
+        assert {c["workload"] for c in group} - {"resnet50_train"} == {folder.split("-", 1)[1].rsplit("-", 2)[0].replace("-", "_")}
+    assert any(c["workload"] == "resnet50_train" for c in jobs[0][2])
+    assert sum(len(group) for _, _, group, _ in jobs) == sum(c["device"] == "H200" for c in plan["configs"])
+    # A pilot of one model still names it.
+    _, _, _, folder = plan_jobs(plan, ["H100"], 1, ["h100-llama2-7b-b16-p2048"], "pilot", "STAMP")[0]
+    assert folder == "pilot-h100-llama2-7b-STAMP-1"
+
+
+@pytest.mark.parametrize("mutate, message", [
+    (lambda p: p["configs"].append(copy.deepcopy(p["configs"][0])), "duplicated"),
+    (lambda p: p["workloads"]["resnet"].pop("steps"), "steps"),
+    (lambda p: p["configs"][1].pop("efficiency"), "efficiency must be declared"),
+    (lambda p: p["configs"][0].update(split="test"), "split"),
+    (lambda p: p["configs"][0].update(output_tokens=1), "output_tokens"),
+    (lambda p: p.update(trials=1), "trials"),
+    (lambda p: p["workloads"]["llama"].update(model_seq_len="prompt"), "model_seq_len"),
+    (lambda p: p["workloads"]["llama"].pop("attention_backend"), "attention_backend"),
+    (lambda p: p["workloads"]["llama"].update(hf_revision="main"), "commit hash"),
+    (lambda p: p["workloads"]["llama"].update(weights_sha256={"model.safetensors": "abc"}), "weights_sha256"),
+    (lambda p: p["workloads"]["llama"]["vllm"].update(enable_prefix_caching=True), "prefix_caching"),
+    (lambda p: p["workloads"]["llama"]["vllm"].pop("enable_chunked_prefill"), "chunked_prefill"),
+    (lambda p: p["configs"][0].update(batch=32), "max_num_seqs"),
+    (lambda p: p["configs"][0].update(batch=16, prompt_tokens=2100), "max_num_batched_tokens"),
+    (lambda p: p.pop("counter_probe_seconds"), "counter_probe_seconds"),
+])
+def test_plan_rejects_undeclared_or_ambiguous_protocol(mutate, message):
+    plan = _plan()
+    mutate(plan)
+    assert any(message in problem for problem in protocol.plan_problems(plan))
+
+
+def test_energy_counter_delta_allows_one_wraparound():
+    assert protocol.counter_delta_mj(100, 350) == 250
+    assert protocol.counter_delta_mj((1 << 64) - 10, 5) == 15
+    with pytest.raises(ValueError):
+        protocol.counter_delta_mj(-1, 5)
+
+
+def test_sampled_energy_is_trapezoidal_inside_the_window():
+    ramp = [[t, 1000.0 * t] for t in range(11)]  # 0 to 10 W over 10 s
+    assert protocol.integrate_samples(ramp, 0, 10) == pytest.approx(50.0)
+    assert protocol.integrate_samples(ramp, 2, 4) == pytest.approx(6.0)
+    assert protocol.integrate_samples(ramp, 2.5, 2.9) is None
+    with pytest.raises(ValueError):
+        protocol.integrate_samples([[1, 0], [0, 0]], 0, 1)
+
+
+def test_refresh_interval_is_the_median_gap_between_changes():
+    changes = [[0.0, 5], [0.03, 6], [0.13, 7], [0.23, 8], [0.38, 9]]  # first entry is the initial reading
+    assert protocol.refresh_interval_s(changes) == pytest.approx(0.1)
+    assert protocol.refresh_interval_s([[0.0, 5], [0.1, 6]]) is None
+
+
+def test_interval_uses_student_t():
+    mean, half, n = protocol.mean_ci95([1.0, 2.0, 3.0])
+    assert (mean, n) == (2.0, 3)
+    assert half == pytest.approx(4.303 / math.sqrt(3))
+    assert math.isnan(protocol.mean_ci95([5.0])[1])
+
+
+def test_device_identity_must_match_the_plan():
+    assert protocol.device_problems({"name": "NVIDIA H200", "uuid": "x"}, "NVIDIA H100 80GB HBM3")
+    assert not protocol.device_problems({"name": "NVIDIA H100 80GB HBM3", "uuid": "x"}, "NVIDIA H100 80GB HBM3")
+
+
+def test_analysis_compares_board_energy_with_rated_power_accounting(measured_root):
+    rows, provenance = _rows(measured_root)
+    assert [(r["phase"], r["unit"]) for r in rows] == [("prefill", "prefill"), ("decode", "decode step")]
+    decode = rows[1]
+    assert decode["trials_used"] == "3" and decode["trials_failed"] == "1"
+    assert float(decode["measured_s_per_unit"]) == pytest.approx(0.1)
+    assert float(decode["measured_j_per_unit"]) == pytest.approx(35.0)
+    assert float(decode["measured_power_w"]) == pytest.approx(350.0)
+    assert float(decode["idle_power_w"]) == pytest.approx(80.0)
+    assert float(decode["measured_power_over_rated"]) == pytest.approx(350 / 700, rel=1e-5)
+    # Rated power over the measured time overstates board energy by TDP / measured power.
+    assert float(decode["rated_measured_time_over_measured"]) == pytest.approx(700 / 350, rel=1e-5)
+    assert float(decode["rated_measured_time_j_per_unit"]) == pytest.approx(70.0, rel=1e-5)
+    assert decode["measured_j_per_unit_ci95"] == "0"
+    assert 0.9 < float(decode["sampled_over_counter"]) <= 1.0
+    model_s = analysis.modeled_seconds(_plan(), _plan()["configs"][0], "decode")
+    assert float(decode["rated_modeled_time_j_per_unit"]) == pytest.approx(700 * model_s, rel=1e-5)
+    prefill = rows[0]
+    assert float(prefill["measured_j_per_unit"]) == pytest.approx(500 * 3 / 300)
+    assert provenance["runs_excluded"] == [] and provenance["rows"] == 2
+    assert decode["runs"] == "1" and decode["gpus"] == "1"
+    assert float(decode["counter_refresh_ms"]) == pytest.approx(100.0)
+    assert provenance["runs_used"][0]["harness_matches_committed"] is False  # fixture has no runner hashes
+
+
+def test_package_power_rule_at_measured_and_modeled_time(measured_root):
+    rows, provenance = _rows(measured_root)
+    decode = rows[1]
+    assert float(decode["idle_over_rated"]) == pytest.approx(80 / 700, rel=1e-5)
+    plan, config = _plan(), _plan()["configs"][0]
+    work = analysis.work_seconds(plan, config, "decode")
+    u = work / 0.1
+    assert float(decode["utilization_at_measured_time"]) == pytest.approx(u, rel=1e-5)
+    assert float(decode["proportional_measured_time_j_per_unit"]) == pytest.approx(
+        700 * (0.30 + 0.70 * u) * 0.1, rel=1e-5)
+    assert float(decode["proportional_measured_time_over_measured"]) == pytest.approx(
+        700 * (0.30 + 0.70 * u) / 350, rel=1e-5)
+    model_s = analysis.modeled_seconds(plan, config, "decode")
+    assert float(decode["proportional_modeled_time_j_per_unit"]) == pytest.approx(
+        700 * (0.30 + 0.70 * work / model_s) * model_s, rel=1e-5)
+    assert provenance["package_power_rule"]["idle_fraction"] == 0.30
+
+
+def test_work_seconds_count_flops_as_serving_model_does():
+    from mlsysim.solvers import ServingModel
+
+    plan = _plan()
+    config = plan["configs"][0]
+    model = analysis.resolve("Models.Language.Llama3_8B")
+    hardware = analysis.resolve("Hardware.Cloud.H100")
+    ttft = ServingModel().solve(model, hardware, seq_len=128, batch_size=1, precision="fp16", efficiency=0.5).ttft
+    work = analysis.work_seconds(plan, config, "prefill")
+    assert work / 0.5 + hardware.dispatch_tax.m_as("s") == pytest.approx(ttft.m_as("s"), rel=1e-9)
+    # A decode step is one token per sequence: about 2 x parameters FLOPs at batch 1.
+    decode_flops = analysis.work_seconds(plan, config, "decode") * hardware.compute.peak_flops.m_as("flop/s")
+    assert decode_flops == pytest.approx(2 * model.parameters.magnitude, rel=0.01)
+
+
+def test_training_proportional_estimate_is_single_node_models_energy():
+    from mlsysim.solvers import SingleNodeModel
+
+    plan = _plan()
+    config = plan["configs"][1]
+    profile = SingleNodeModel().solve(
+        analysis.resolve("Models.Vision.ResNet50"), analysis.resolve("Hardware.Cloud.H100"),
+        batch_size=256, precision="fp16", efficiency=0.13, is_training=True,
+    )
+    model_s = analysis.modeled_seconds(plan, config, "train")
+    work = analysis.work_seconds(plan, config, "train")
+    tdp = analysis.resolve("Hardware.Cloud.H100").tdp
+    energy = analysis.board_energy_j(model_s, analysis.proportional_power(tdp, work / model_s))
+    assert energy == pytest.approx(profile.energy.m_as("J"), rel=1e-9)
+
+
+def test_runs_and_gpus_are_counted_and_the_slowest_refresh_is_reported(tmp_path):
+    _write_run(tmp_path, _plan(), [_decode_record(i) for i in (1, 2)], name="run-a", power_limit_mw=700_000)
+    other = [_decode_record(i, uuid="GPU-constructed-0001") for i in (1, 2)]
+    _write_run(tmp_path, _plan(), other, name="run-b", uuid="GPU-constructed-0001", refresh_s=0.25,
+               power_limit_mw=650_000)
+    rows, provenance = _rows(tmp_path)
+    decode = rows[1]
+    assert (decode["runs"], decode["gpus"], decode["trials_used"]) == ("2", "2", "4")
+    assert decode["power_limits_w"] == "650/700"  # boards of one model with different limits
+    assert float(decode["counter_refresh_ms"]) == pytest.approx(250.0)
+    assert [r["counter_refresh_ms"] for r in provenance["runs_used"]] == pytest.approx([100.0, 250.0])
+
+
+def test_decode_is_the_generation_minus_its_prefill():
+    record = _decode_record(1)
+    config = _plan()["configs"][0]
+    decode = protocol.reported_summary(record, "decode", config)
+    # 10.01 s and 3505 J per generation, minus one 0.01 s, 5 J prefill, over 100 steps.
+    assert decode["units"] == 100
+    assert decode["seconds"] / decode["units"] == pytest.approx(0.1)
+    assert decode["energy_j"] / decode["units"] == pytest.approx(35.0)
+    short = _decode_record(1, decode_seconds=-0.005)  # a generation faster than its own prefill
+    with pytest.raises(ValueError, match="cannot be derived"):
+        protocol.reported_summary(short, "decode", config)
+
+
+def test_warmup_trials_are_never_averaged(measured_root):
+    rows, _ = _rows(measured_root)
+    # The warm-up decode took 99 s, so including it would move the mean.
+    assert float(rows[1]["measured_s_per_unit"]) == pytest.approx(0.1)
+
+
+def _edit_first_line(run, root):
+    path = run / protocol.TRIALS_FILE
+    lines = path.read_text().splitlines(keepends=True)
+    assert '"trial":0' in lines[0]
+    path.write_text(lines[0].replace('"trial":0', '"trial":9') + "".join(lines[1:]))
+
+
+@pytest.mark.parametrize("tamper, reason", [
+    (_edit_first_line, "sha256"),
+    (lambda run, root: (run / "trial-llama-b1-09.json").write_text("{}"), "not part of the run"),
+    (lambda run, root: (run / protocol.TRIALS_FILE).unlink(), "missing"),
+    (lambda run, root: (root / "plan.json").write_text(json.dumps(_plan(trials=4))), "different plan"),
+])
+def test_runs_that_do_not_verify_are_excluded(measured_root, tamper, reason):
+    tamper(measured_root / "runs/run-a", measured_root)
+    rows, provenance = _rows(measured_root)
+    assert rows == []
+    assert any(reason in p for p in provenance["runs_excluded"][0]["problems"])
+
+
+def test_substituted_gpu_is_excluded(tmp_path):
+    _write_run(tmp_path, _plan(), [_decode_record(1)], device_name="NVIDIA H200")
+    rows, provenance = _rows(tmp_path)
+    assert rows == [] and "NVIDIA H200" in provenance["runs_excluded"][0]["problems"][0]
+
+
+def test_check_mode_detects_a_stale_summary(measured_root):
+    assert analysis.main(["--check", "--root", str(measured_root)]) == 1
+    assert analysis.main(["--root", str(measured_root)]) == 0
+    assert analysis.main(["--check", "--root", str(measured_root)]) == 0
+    (measured_root / "summary.csv").write_text("edited\n")
+    assert analysis.main(["--check", "--root", str(measured_root)]) == 1
+
+
+def test_one_trials_file_per_run_keeps_the_paper_receipt_small(measured_root):
+    run = measured_root / "runs/run-a"
+    assert sorted(p.name for p in run.iterdir()) == ["manifest.json", protocol.TRIALS_FILE]
+    # paper_integrity hashes .json and .csv under paper/data. trials.jsonl is reached through the manifest.
+    manifest = json.loads((run / "manifest.json").read_text())
+    assert manifest["trials_sha256"] == protocol.sha256_file(run / protocol.TRIALS_FILE)
+    assert [t["line"] for t in manifest["trials"]] == list(range(5))
+    (run / ".DS_Store").write_text("")  # Finder metadata must not exclude a run
+    assert _rows(measured_root)[1]["runs_excluded"] == []
+
+
+def test_runner_refuses_a_directory_that_already_has_a_run(tmp_path):
+    out = tmp_path / "runs" / "used"
+    out.mkdir(parents=True)
+    (out / protocol.TRIALS_FILE).write_text("{}\n")
+    with pytest.raises(SystemExit, match="not empty"):
+        runner.measure(PLAN_PATH, "H100", [], out)
+
+
+def test_device_choice_reports_where_an_estimate_picks_the_other_device(tmp_path):
+    plan = _plan()
+    plan["devices"]["A100"] = {"registry": "Hardware.Cloud.A100", "modal_gpu": "A100-80GB",
+                               "expected_name": "NVIDIA A100-SXM4-80GB"}
+    plan["configs"].append(dict(plan["configs"][0], id="llama-b1-a100", device="A100"))
+    _write_run(tmp_path, plan, [_decode_record(i) for i in (1, 2, 3)], name="h100")
+    a100 = dict(config_id="llama-b1-a100", device_name="NVIDIA A100-SXM4-80GB", uuid="GPU-a100")
+    records = [_decode_record(i, prefill_watts=400.0, decode_watts=200.0, decode_seconds=15.0, **a100)
+               for i in (1, 2, 3)]
+    _write_run(tmp_path, plan, records, name="a100", device_key="A100",
+               device_name=a100["device_name"], uuid=a100["uuid"])
+    _, provenance, choice_text = analysis.summarize(tmp_path)
+    choices = {row["phase"]: row for row in csv.DictReader(io.StringIO(choice_text))}
+    assert provenance["device_choice_rows"] == 2
+    decode, prefill = choices["decode"], choices["prefill"]
+    # Decode: 35 J per step on the H100 (350 W x 0.1 s), 30 J on the A100 (200 W x 0.15 s).
+    assert (decode["H100_config"], decode["A100_config"]) == ("llama-b1", "llama-b1-a100")
+    assert decode["measured_preferred"] == "A100" and decode["measured_clear"] == "True"
+    assert decode["measured_every_run_pair"] == "True"
+    assert float(decode["measured_margin"]) == pytest.approx(35 / 30 - 1, rel=1e-5)
+    # Prefill: 5 J vs 4 J measured, but TDP over modeled TTFT (700 W x 4.2 ms vs 400 W x 13.2 ms) picks the H100.
+    assert prefill["measured_preferred"] == "A100"
+    assert prefill["rated_modeled_time_preferred"] == "H100" and prefill["rated_modeled_time_agrees"] == "False"
+
+
+def test_check_mode_without_runs_or_summary_passes(tmp_path):
+    (tmp_path / "plan.json").write_text(json.dumps(_plan()))
+    assert analysis.main(["--check", "--root", str(tmp_path)]) == 0
+
+
+class _FakeNvml(types.ModuleType):
+    """A board that draws a constant 250 W, with an energy counter that refreshes every 20 ms."""
+
+    NVML_CLOCK_SM, NVML_CLOCK_MEM, NVML_TEMPERATURE_GPU = 0, 1, 0
+
+    class NVMLError(Exception):
+        pass
+
+    def __init__(self, name):
+        super().__init__("pynvml")
+        self._name = name
+        self._t0 = time.perf_counter()
+
+    def nvmlInit(self): pass
+    def nvmlDeviceGetHandleByIndex(self, i): return i
+    def nvmlDeviceGetTotalEnergyConsumption(self, h):
+        return int((time.perf_counter() - self._t0) // 0.02 * 0.02 * 250_000)
+    def nvmlDeviceGetPowerUsage(self, h): return 250_000
+    def nvmlDeviceGetName(self, h): return self._name
+    def nvmlDeviceGetUUID(self, h): return UUID
+    def nvmlDeviceGetPciInfo(self, h): return types.SimpleNamespace(busId=b"00000000:01:00.0")
+    def nvmlSystemGetDriverVersion(self): return "560.35.03"
+    def nvmlSystemGetCudaDriverVersion(self): return 12060
+    def nvmlDeviceGetMemoryInfo(self, h): return types.SimpleNamespace(total=80 * 2**30)
+    def nvmlDeviceGetPowerManagementLimit(self, h): return 700_000
+    def nvmlDeviceGetEnforcedPowerLimit(self, h): return 700_000
+    def nvmlDeviceGetPowerManagementDefaultLimit(self, h): return 700_000
+    def nvmlDeviceGetMaxClockInfo(self, h, c): return 1980
+    def nvmlDeviceGetPersistenceMode(self, h): raise self.NVMLError("not supported")
+    def nvmlDeviceGetClockInfo(self, h, c): return 1755
+    def nvmlDeviceGetTemperature(self, h, s): return 40
+    def nvmlDeviceGetCurrentClocksEventReasons(self, h): return 0
+    def nvmlDeviceGetComputeRunningProcesses(self, h): return []
+
+
+class _FakeGenerate:
+    started: list[str] = []
+
+    def __init__(self, spec, config, seed):
+        self.started.append(config["id"])
+        if config["batch"] > 1:
+            raise RuntimeError("constructed load failure")
+        self.details = {"fake": True}
+
+    def sync(self):
+        pass
+
+    def run(self, meter, record, plan):
+        with meter.phase(record, "idle", self.sync):
+            time.sleep(plan["idle_seconds"])
+        # Long against the fake counter's 20 ms refresh, so the derived decode
+        # (0.4 s - 0.2 s / 2) is within about 10% even before averaging.
+        with meter.phase(record, "prefill", self.sync) as phase:
+            time.sleep(0.2)
+            phase["units"] = 2
+        with meter.phase(record, "generate", self.sync) as phase:
+            time.sleep(0.4)
+            phase["units"] = 1
+
+
+class _FakeTrain(_FakeGenerate):
+    def run(self, meter, record, plan):
+        with meter.phase(record, "idle", self.sync):
+            time.sleep(plan["idle_seconds"])
+        with meter.phase(record, "train", self.sync) as phase:
+            time.sleep(0.2)
+            phase["units"] = 4
+
+
+@pytest.mark.parametrize("gpu_name, code", [("NVIDIA H100 80GB HBM3", 0), ("NVIDIA H200", 2)])
+def test_runner_writes_verifiable_runs_and_refuses_a_substituted_gpu(tmp_path, monkeypatch, gpu_name, code):
+    plan = _plan()
+    plan["configs"].append(dict(plan["configs"][0], id="llama-b8", batch=8))
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(plan))
+    monkeypatch.setitem(sys.modules, "pynvml", _FakeNvml(gpu_name))
+    monkeypatch.setitem(runner.WORKLOADS, "generate", _FakeGenerate)
+    out = tmp_path / "runs" / "fake"
+    assert runner.measure(plan_path, "H100", ["llama-b1", "llama-b8"], out) == code
+    manifest = json.loads((out / "manifest.json").read_text())
+    if code:
+        assert manifest["trials"] == [] and manifest["aborted"]
+        return
+    assert protocol.manifest_problems(out, protocol.sha256_file(plan_path), plan) == []
+    statuses = {(t["config_id"], t["status"]) for t in manifest["trials"]}
+    assert statuses == {("llama-b1", "ok"), ("llama-b8", "failed")}
+    assert len(manifest["trials"]) == 2 * (plan["warmup_trials"] + plan["trials"])
+    assert manifest["environment"]["packages"]["pytest"] == pytest.__version__
+    rows, provenance = _rows(tmp_path)
+    assert provenance["runs_used"][0]["harness_matches_committed"] is True
+    assert provenance["runs_used"][0]["counter_refresh_ms"] == pytest.approx(20, abs=2)
+    decode = next(r for r in rows if r["config_id"] == "llama-b1" and r["phase"] == "decode")
+    assert float(decode["measured_power_w"]) == pytest.approx(250, rel=0.15)
+    assert decode["trials_failed"] == "0"
+    assert next(r for r in rows if r["phase"] == "decode")["trials_used"] == "3"
+
+
+def test_runner_measures_training_before_starting_the_language_model(tmp_path, monkeypatch):
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(_plan(trials=2, warmup_trials=0)))
+    monkeypatch.setitem(sys.modules, "pynvml", _FakeNvml("NVIDIA H100 80GB HBM3"))
+    monkeypatch.setitem(runner.WORKLOADS, "generate", _FakeGenerate)
+    monkeypatch.setitem(runner.WORKLOADS, "train", _FakeTrain)
+    monkeypatch.setattr(_FakeGenerate, "started", [])
+    assert runner.measure(plan_path, "H100", [], tmp_path / "runs" / "order") == 0
+    # The plan lists llama-b1 first. vLLM keeps its memory, so training has to run first.
+    assert _FakeGenerate.started == ["resnet-b256", "llama-b1"]
+
+
+def _fake_vllm(monkeypatch, short_by=0, fail=False):
+    """Stand-ins for vllm and torch.cuda. Returns the keyword arguments of every engine built."""
+    built = []
+    ns = types.SimpleNamespace
+
+    class LLM:
+        def __init__(self, **kwargs):
+            if fail:
+                raise RuntimeError("constructed engine failure")
+            built.append(kwargs)
+            self.llm_engine = ns(cache_config=ns(num_gpu_blocks=1234))
+
+        def get_tokenizer(self):
+            return ns(vocab_size=128000)
+
+        def generate(self, prompts, params, use_tqdm=True):
+            assert use_tqdm is False and params.ignore_eos and not params.detokenize
+            time.sleep(0.002)
+            n = params.max_tokens - (short_by if params.max_tokens > 1 else 0)
+            return [ns(outputs=[ns(token_ids=list(range(n)))]) for _ in prompts]
+
+    vllm = types.ModuleType("vllm")
+    vllm.__version__, vllm.LLM, vllm.SamplingParams = "0.6.4.post1", LLM, lambda **kw: ns(**kw)
+    torch = types.ModuleType("torch")
+    torch.cuda = ns(synchronize=lambda: None)
+    monkeypatch.setitem(sys.modules, "vllm", vllm)
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.setitem(sys.modules, "pynvml", _FakeNvml("NVIDIA H100 80GB HBM3"))
+    monkeypatch.setattr(runner.GenerateWorkload, "_engines", {})
+    monkeypatch.setenv("VLLM_ATTENTION_BACKEND", "unset")  # restored after the test
+    return built
+
+
+QUICK = {"idle_seconds": 0.01, "phase_min_seconds": 0.02}
+
+
+def test_vllm_workload_records_prefill_and_full_generations_from_the_committed_plan(monkeypatch):
+    built = _fake_vllm(monkeypatch)
+    plan = protocol.load_plan(PLAN_PATH)
+    spec = plan["workloads"]["llama31_8b"]
+    large = protocol.config_by_id(plan, "h100-llama-b16-p2048")
+    workload = runner.GenerateWorkload(spec, large, plan["seed"])
+    assert len(workload.prompts) == 16
+    assert {len(p["prompt_token_ids"]) for p in workload.prompts} == {2048}
+    assert max(max(p["prompt_token_ids"]) for p in workload.prompts) < 128000
+    record = {"phases": {}}
+    workload.run(runner.Meter(0, 0.01), record, QUICK)
+    phases = record["phases"]
+    assert list(phases) == ["idle", "prefill", "generate"]
+    assert (phases["prefill"]["output_tokens"], phases["generate"]["output_tokens"]) == (1, 512)
+    assert phases["prefill"]["units"] >= 1 and phases["generate"]["units"] >= 1
+    small = protocol.config_by_id(plan, "h100-llama-b1-p128")
+    first = runner.GenerateWorkload(spec, small, plan["seed"])
+    assert first.prompts == runner.GenerateWorkload(spec, small, plan["seed"]).prompts  # fixed seed
+    assert len(built) == 1  # one engine runs every configuration of a run
+    assert built[0] == {"model": spec["hf_model"], "revision": spec["hf_revision"],
+                        "tokenizer_revision": spec["hf_revision"], "dtype": "float16",
+                        "seed": plan["seed"], **spec["vllm"]}
+    assert os.environ["VLLM_ATTENTION_BACKEND"] == "FLASH_ATTN"
+    assert workload.details["kv_cache_gpu_blocks"] == 1234
+
+
+def test_vllm_workload_fails_a_trial_that_stops_early(monkeypatch):
+    _fake_vllm(monkeypatch, short_by=3)
+    plan = protocol.load_plan(PLAN_PATH)
+    config = protocol.config_by_id(plan, "h100-llama-b1-p128")
+    workload = runner.GenerateWorkload(plan["workloads"]["llama31_8b"], config, plan["seed"])
+    with pytest.raises(RuntimeError, match="expected 1 of 512"):
+        workload.run(runner.Meter(0, 0.01), {"phases": {}}, QUICK)
+
+
+def test_vllm_start_failure_is_reported_for_every_later_configuration(monkeypatch):
+    _fake_vllm(monkeypatch, fail=True)
+    plan = protocol.load_plan(PLAN_PATH)
+    spec = plan["workloads"]["llama31_8b"]
+    with pytest.raises(RuntimeError, match="constructed engine failure"):
+        runner.GenerateWorkload(spec, protocol.config_by_id(plan, "h100-llama-b1-p128"), plan["seed"])
+    with pytest.raises(RuntimeError, match="failed to start earlier"):
+        runner.GenerateWorkload(spec, protocol.config_by_id(plan, "h100-llama-b8-p128"), plan["seed"])

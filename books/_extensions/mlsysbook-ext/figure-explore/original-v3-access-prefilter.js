@@ -5,14 +5,14 @@ const spec = {
   "viewBox": "0 0 720 400",
   "asset": "retrieval_access_control_prefilter.svg",
   "question": "Why can eligible neighbors stay unreachable after access filtering?",
-  "scope": "The original filtered graph and response sketches. A blue ring records an examined eligible node; it does not change permission. Cases compare an added entry with an exact scan. Query q stays fixed. No vectors, distances, ranking, latency, or empirical recall are fabricated.",
+  "scope": "Filtered proximity-graph retrieval under an access-control mask (panel A, 3 left-side and 3 right-side eligible nodes separated by a masked bridge) compared against all 3 responses in panel B: partitioning separate sub-indexes by scope (scope X vs. scope Y), seeding an extra eligible entry point, or running an exact scan over the 5 displayed eligible nodes.",
   "purpose": "Exhaust the permitted walk without crossing masked bridges, then show how an eligible seed or direct scoring changes reachability without broadening authority.",
   "guard": "Access permission and graph reachability are distinct. Masked links remain unavailable in every state. The right-hand sketches are alternative responses, not the same graph physically transforming. Exact scanning covers its eligible candidate set but does not remove authorization checks or establish a universal performance benefit.",
   "slots": {
     "stall": {
       "x": 104,
       "y": 158,
-      "width": 90,
+      "width": 74,
       "font": 10
     },
     "reach": {
@@ -44,12 +44,587 @@ const spec = {
   ],
   "variants": [
     {
+      "id": "partition",
+      "label": "Partition by scope",
+      "states": [
+        {
+          "label": "Preserve the caller eligible set",
+          "description": "In panel A, green nodes are eligible under the caller scope while dashed gray nodes and edges are masked out. Although 3 eligible nodes sit near query q on the right side of the bridge, permission alone does not create a traversable graph path from the left entry.",
+          "text": {
+            "stall": "entry not expanded",
+            "reach": "eligible near q, still unreachable",
+            "extra": "extra entry",
+            "score": "score all"
+          },
+          "values": [
+            "Unchanged caller scope",
+            "Never traversed",
+            "Not exhausted",
+            "Original walk",
+            "Near-q eligible nodes disconnected"
+          ],
+          "facts": {
+            "masked_traversed": false,
+            "permission_scope_unchanged": true,
+            "frontier_exhausted": false,
+            "reachable_left": [],
+            "remedy": "partition by scope",
+            "examined_remedy": [],
+            "query_moved": false,
+            "similarity_ranking_invented": false
+          },
+          "camera": [
+            180,
+            205
+          ],
+          "marks": []
+        },
+        {
+          "label": "Enter the filtered graph",
+          "description": "Greedy graph walk starts at the original blue entry on the left and hops to its first eligible green neighbor (1 of 3 left-side eligible nodes examined). Masked nodes and edges remain untraversed.",
+          "text": {
+            "stall": "walk frontier",
+            "reach": "eligible near q, still unreachable",
+            "extra": "extra entry",
+            "score": "score all"
+          },
+          "values": [
+            "Unchanged caller scope",
+            "Never traversed",
+            "Not exhausted",
+            "Original walk",
+            "Near-q eligible nodes disconnected"
+          ],
+          "facts": {
+            "masked_traversed": false,
+            "permission_scope_unchanged": true,
+            "frontier_exhausted": false,
+            "reachable_left": [
+              [
+                120,
+                124
+              ]
+            ],
+            "remedy": "partition by scope",
+            "examined_remedy": [],
+            "query_moved": false,
+            "similarity_ranking_invented": false
+          },
+          "camera": [
+            180,
+            205
+          ],
+          "marks": [
+            {
+              "x": 120,
+              "y": 124,
+              "color": "#0284c7",
+              "r": 11
+            }
+          ],
+          "motion": {
+            "label": "walk",
+            "route": [
+              [
+                60,
+                110
+              ],
+              [
+                120,
+                124
+              ]
+            ],
+            "role": "memory",
+            "lock_camera": true
+          }
+        },
+        {
+          "label": "Exhaust the reachable eligible frontier",
+          "description": "The walk visits the remaining 2 left-side eligible neighbors (all 3 left-side eligible nodes now ringed in blue), and the frontier stalls at the masked bridge. The 3 eligible nodes near query q remain unreachable from the original entry.",
+          "text": {
+            "stall": "frontier stalled",
+            "reach": "eligible near q, still unreachable",
+            "extra": "extra entry",
+            "score": "score all"
+          },
+          "values": [
+            "Unchanged caller scope",
+            "Never traversed",
+            "Exhausted",
+            "Original walk",
+            "Near-q eligible nodes disconnected"
+          ],
+          "facts": {
+            "masked_traversed": false,
+            "permission_scope_unchanged": true,
+            "frontier_exhausted": true,
+            "reachable_left": [
+              [
+                120,
+                124
+              ],
+              [
+                90,
+                230
+              ],
+              [
+                70,
+                320
+              ]
+            ],
+            "remedy": "partition by scope",
+            "examined_remedy": [],
+            "query_moved": false,
+            "similarity_ranking_invented": false
+          },
+          "camera": [
+            180,
+            205
+          ],
+          "marks": [
+            {
+              "x": 120,
+              "y": 124,
+              "color": "#0284c7",
+              "r": 11
+            },
+            {
+              "x": 90,
+              "y": 230,
+              "color": "#0284c7",
+              "r": 11
+            },
+            {
+              "x": 70,
+              "y": 320,
+              "color": "#0284c7",
+              "r": 11
+            }
+          ],
+          "motion": {
+            "label": "walk",
+            "route": [
+              [
+                120,
+                124
+              ],
+              [
+                90,
+                230
+              ],
+              [
+                70,
+                320
+              ]
+            ],
+            "role": "memory",
+            "lock_camera": true
+          }
+        },
+        {
+          "label": "Select the caller scope partition",
+          "description": "In panel B (top sketch, Partition by scope), building separate sub-indexes per scope routes the caller directly into the dedicated scope X partition (3 green eligible nodes) while scope Y remains isolated.",
+          "text": {
+            "stall": "frontier stalled",
+            "reach": "A: original reachability failure retained",
+            "extra": "extra entry",
+            "score": "score all"
+          },
+          "values": [
+            "Unchanged caller scope (scope X)",
+            "Excluded from scope X index",
+            "Exhausted in A",
+            "Partition by scope",
+            "Entering dedicated scope X graph"
+          ],
+          "facts": {
+            "masked_traversed": false,
+            "permission_scope_unchanged": true,
+            "frontier_exhausted": true,
+            "reachable_left": [
+              [
+                120,
+                124
+              ],
+              [
+                90,
+                230
+              ],
+              [
+                70,
+                320
+              ]
+            ],
+            "remedy": "partition by scope",
+            "examined_remedy": [
+              [
+                426,
+                128
+              ]
+            ],
+            "query_moved": false,
+            "similarity_ranking_invented": false
+          },
+          "camera": [
+            535,
+            115
+          ],
+          "marks": [
+            {
+              "x": 120,
+              "y": 124,
+              "color": "#0284c7",
+              "r": 11
+            },
+            {
+              "x": 90,
+              "y": 230,
+              "color": "#0284c7",
+              "r": 11
+            },
+            {
+              "x": 70,
+              "y": 320,
+              "color": "#0284c7",
+              "r": 11
+            },
+            {
+              "x": 426,
+              "y": 128,
+              "color": "#16a34a",
+              "r": 11
+            }
+          ],
+          "motion": {
+            "label": "scope X",
+            "route": [
+              [
+                406,
+                98
+              ],
+              [
+                426,
+                128
+              ]
+            ],
+            "role": "memory",
+            "lock_camera": true
+          }
+        },
+        {
+          "label": "Traverse the unmasked scope X edge",
+          "description": "Because every edge inside the scope X sub-index was built exclusively among scope X documents, the greedy walk hops cleanly to the second of the 3 scope X nodes without masked-bridge disconnects.",
+          "text": {
+            "stall": "frontier stalled",
+            "reach": "A: original reachability failure retained",
+            "extra": "extra entry",
+            "score": "score all"
+          },
+          "values": [
+            "Unchanged caller scope (scope X)",
+            "Excluded from scope X index",
+            "Exhausted in A",
+            "Partition by scope",
+            "2 / 3 scope X nodes examined"
+          ],
+          "facts": {
+            "masked_traversed": false,
+            "permission_scope_unchanged": true,
+            "frontier_exhausted": true,
+            "reachable_left": [
+              [
+                120,
+                124
+              ],
+              [
+                90,
+                230
+              ],
+              [
+                70,
+                320
+              ]
+            ],
+            "remedy": "partition by scope",
+            "examined_remedy": [
+              [
+                426,
+                128
+              ],
+              [
+                462,
+                114
+              ]
+            ],
+            "query_moved": false,
+            "similarity_ranking_invented": false
+          },
+          "camera": [
+            535,
+            115
+          ],
+          "marks": [
+            {
+              "x": 120,
+              "y": 124,
+              "color": "#0284c7",
+              "r": 11
+            },
+            {
+              "x": 90,
+              "y": 230,
+              "color": "#0284c7",
+              "r": 11
+            },
+            {
+              "x": 70,
+              "y": 320,
+              "color": "#0284c7",
+              "r": 11
+            },
+            {
+              "x": 426,
+              "y": 128,
+              "color": "#16a34a",
+              "r": 11
+            },
+            {
+              "x": 462,
+              "y": 114,
+              "color": "#16a34a",
+              "r": 11
+            }
+          ],
+          "motion": {
+            "label": "walk",
+            "route": [
+              [
+                426,
+                128
+              ],
+              [
+                462,
+                114
+              ]
+            ],
+            "role": "memory",
+            "lock_camera": true
+          }
+        },
+        {
+          "label": "Complete the scope X partition walk",
+          "description": "One more hop inside scope X reaches the third of the 3 scope X nodes while the 3 gray scope Y nodes in the adjacent box are never touched.",
+          "text": {
+            "stall": "frontier stalled",
+            "reach": "A: original reachability failure retained",
+            "extra": "extra entry",
+            "score": "score all"
+          },
+          "values": [
+            "Unchanged caller scope (scope X)",
+            "Excluded from scope X index",
+            "Exhausted in A",
+            "Partition by scope",
+            "All 3 scope X nodes reached"
+          ],
+          "facts": {
+            "masked_traversed": false,
+            "permission_scope_unchanged": true,
+            "frontier_exhausted": true,
+            "reachable_left": [
+              [
+                120,
+                124
+              ],
+              [
+                90,
+                230
+              ],
+              [
+                70,
+                320
+              ]
+            ],
+            "remedy": "partition by scope",
+            "examined_remedy": [
+              [
+                426,
+                128
+              ],
+              [
+                462,
+                114
+              ],
+              [
+                498,
+                130
+              ]
+            ],
+            "query_moved": false,
+            "similarity_ranking_invented": false
+          },
+          "camera": [
+            535,
+            115
+          ],
+          "marks": [
+            {
+              "x": 120,
+              "y": 124,
+              "color": "#0284c7",
+              "r": 11
+            },
+            {
+              "x": 90,
+              "y": 230,
+              "color": "#0284c7",
+              "r": 11
+            },
+            {
+              "x": 70,
+              "y": 320,
+              "color": "#0284c7",
+              "r": 11
+            },
+            {
+              "x": 426,
+              "y": 128,
+              "color": "#16a34a",
+              "r": 11
+            },
+            {
+              "x": 462,
+              "y": 114,
+              "color": "#16a34a",
+              "r": 11
+            },
+            {
+              "x": 498,
+              "y": 130,
+              "color": "#16a34a",
+              "r": 11
+            }
+          ],
+          "motion": {
+            "label": "walk",
+            "route": [
+              [
+                462,
+                114
+              ],
+              [
+                498,
+                130
+              ]
+            ],
+            "role": "memory",
+            "lock_camera": true
+          }
+        },
+        {
+          "label": "Return candidates without relaxing permission",
+          "description": "Partitioning by scope restores graph connectivity within scope X (all 3 scope X nodes reachable) at the storage cost of maintaining per-scope sub-indexes, without relaxing scope Y isolation.",
+          "text": {
+            "stall": "frontier stalled",
+            "reach": "A: original reachability failure retained",
+            "extra": "extra entry",
+            "score": "score all"
+          },
+          "values": [
+            "Unchanged caller scope (scope X)",
+            "Never traversed",
+            "Exhausted in A",
+            "Partition by scope",
+            "3 / 3 scope X candidates returned"
+          ],
+          "facts": {
+            "masked_traversed": false,
+            "permission_scope_unchanged": true,
+            "frontier_exhausted": true,
+            "reachable_left": [
+              [
+                120,
+                124
+              ],
+              [
+                90,
+                230
+              ],
+              [
+                70,
+                320
+              ]
+            ],
+            "remedy": "partition by scope",
+            "examined_remedy": [
+              [
+                426,
+                128
+              ],
+              [
+                462,
+                114
+              ],
+              [
+                498,
+                130
+              ]
+            ],
+            "query_moved": false,
+            "similarity_ranking_invented": false
+          },
+          "camera": [
+            535,
+            115
+          ],
+          "marks": [
+            {
+              "x": 120,
+              "y": 124,
+              "color": "#0284c7",
+              "r": 11
+            },
+            {
+              "x": 90,
+              "y": 230,
+              "color": "#0284c7",
+              "r": 11
+            },
+            {
+              "x": 70,
+              "y": 320,
+              "color": "#0284c7",
+              "r": 11
+            },
+            {
+              "x": 426,
+              "y": 128,
+              "color": "#16a34a",
+              "r": 11
+            },
+            {
+              "x": 462,
+              "y": 114,
+              "color": "#16a34a",
+              "r": 11
+            },
+            {
+              "x": 498,
+              "y": 130,
+              "color": "#16a34a",
+              "r": 11
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "entry",
       "label": "Extra eligible entry point",
       "states": [
         {
-          "label": "Preserve the caller’s eligible set",
-          "description": "Green nodes are eligible under the unchanged caller scope; dashed gray nodes and links are masked. The query q remains fixed. Eligibility does not itself provide a traversable route.",
+          "label": "Preserve the caller eligible set",
+          "description": "In panel A, green nodes are eligible under the caller scope while dashed gray nodes and edges are masked out. Although 3 eligible nodes sit near query q on the right side of the bridge, permission alone does not create a traversable graph path from the left entry.",
           "text": {
             "stall": "entry not expanded",
             "reach": "eligible near q, still unreachable",
@@ -81,7 +656,7 @@ const spec = {
         },
         {
           "label": "Enter the filtered graph",
-          "description": "Walk from the original blue entry to an eligible neighbor. When the hop finishes, the search has not crossed a masked node or acquired any new permission.",
+          "description": "Greedy graph walk starts at the original blue entry on the left and hops to its first eligible green neighbor (1 of 3 left-side eligible nodes examined). Masked nodes and edges remain untraversed.",
           "text": {
             "stall": "walk frontier",
             "reach": "eligible near q, still unreachable",
@@ -119,7 +694,7 @@ const spec = {
               "x": 120,
               "y": 124,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             }
           ],
           "motion": {
@@ -140,7 +715,7 @@ const spec = {
         },
         {
           "label": "Exhaust the reachable eligible frontier",
-          "description": "Exhaust the reachable eligible component without using masked links. When this action finishes, the frontier is empty even though eligible nodes near q remain disconnected. No walk passes through a forbidden bridge.",
+          "description": "The walk visits the remaining 2 left-side eligible neighbors (all 3 left-side eligible nodes now ringed in blue), and the frontier stalls at the masked bridge. The 3 eligible nodes near query q remain unreachable from the original entry.",
           "text": {
             "stall": "frontier stalled",
             "reach": "eligible near q, still unreachable",
@@ -186,19 +761,19 @@ const spec = {
               "x": 120,
               "y": 124,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 90,
               "y": 230,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 70,
               "y": 320,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             }
           ],
           "motion": {
@@ -223,7 +798,7 @@ const spec = {
         },
         {
           "label": "Seed the disconnected eligible region",
-          "description": "Use the separate extra-entry response in panel B. When the new seed reaches its eligible neighbor, the search can start inside that permitted component without traversing the masked bridge.",
+          "description": "In panel B (middle sketch), seeding 1 extra eligible entry point inside the right-side permitted component reaches the first of the 3 disconnected eligible nodes near query q without crossing any masked bridge.",
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
@@ -274,25 +849,25 @@ const spec = {
               "x": 120,
               "y": 124,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 90,
               "y": 230,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 70,
               "y": 320,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 556,
               "y": 232,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             }
           ],
           "motion": {
@@ -313,7 +888,7 @@ const spec = {
         },
         {
           "label": "Traverse inside the eligible region",
-          "description": "Traverse the existing edge inside the eligible component. When the hop finishes, another permitted candidate is reached; the scope remains identical.",
+          "description": "From that seeded node, the walk follows an unmasked edge inside the right-side component to reach the second of the 3 eligible nodes near query q under the same caller scope.",
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
@@ -368,31 +943,31 @@ const spec = {
               "x": 120,
               "y": 124,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 90,
               "y": 230,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 70,
               "y": 320,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 556,
               "y": 232,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 598,
               "y": 212,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             }
           ],
           "motion": {
@@ -413,7 +988,7 @@ const spec = {
         },
         {
           "label": "Reach the remaining eligible candidate",
-          "description": "Follow the remaining original eligible edge. When the hop finishes, the remote eligible candidate has become reachable through the added seed, not a new authorization grant.",
+          "description": "One more hop along an eligible edge reaches the third of the 3 right-side eligible nodes near query q. All 6 eligible nodes across both components are now examined.",
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
@@ -472,37 +1047,37 @@ const spec = {
               "x": 120,
               "y": 124,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 90,
               "y": 230,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 70,
               "y": 320,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 556,
               "y": 232,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 598,
               "y": 212,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 664,
               "y": 226,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             }
           ],
           "motion": {
@@ -523,11 +1098,11 @@ const spec = {
         },
         {
           "label": "Return candidates without relaxing permission",
-          "description": "Return candidates examined within the original permission scope. Partitioning is another static response shown in panel B; neither the remedy selector nor a search result grants access to masked objects.",
+          "description": "Candidate retrieval finishes using only permitted nodes within the original caller scope. Neither extra entry points nor exact eligible scans grant access to masked objects.",
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
-            "extra": "extra eligible entry",
+            "extra": "3 / 3 eligible returned",
             "score": "score all"
           },
           "values": [
@@ -582,37 +1157,55 @@ const spec = {
               "x": 120,
               "y": 124,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 90,
               "y": 230,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 70,
               "y": 320,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 556,
               "y": 232,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 598,
               "y": 212,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 664,
               "y": 226,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
+            },
+            {
+              "x": 426,
+              "y": 128,
+              "color": "#16a34a",
+              "r": 11
+            },
+            {
+              "x": 462,
+              "y": 114,
+              "color": "#16a34a",
+              "r": 11
+            },
+            {
+              "x": 498,
+              "y": 130,
+              "color": "#16a34a",
+              "r": 11
             }
           ]
         }
@@ -623,8 +1216,8 @@ const spec = {
       "label": "Exact scan of eligible set",
       "states": [
         {
-          "label": "Preserve the caller’s eligible set",
-          "description": "Green nodes are eligible under the unchanged caller scope; dashed gray nodes and links are masked. The query q remains fixed. Eligibility does not itself provide a traversable route.",
+          "label": "Preserve the caller eligible set",
+          "description": "In panel A, green nodes are eligible under the caller scope while dashed gray nodes and edges are masked out. Although 3 eligible nodes sit near query q on the right side of the bridge, permission alone does not create a traversable graph path from the left entry.",
           "text": {
             "stall": "entry not expanded",
             "reach": "eligible near q, still unreachable",
@@ -656,7 +1249,7 @@ const spec = {
         },
         {
           "label": "Enter the filtered graph",
-          "description": "Walk from the original blue entry to an eligible neighbor. When the hop finishes, the search has not crossed a masked node or acquired any new permission.",
+          "description": "Greedy graph walk starts at the original blue entry on the left and hops to its first eligible green neighbor (1 of 3 left-side eligible nodes examined). Masked nodes and edges remain untraversed.",
           "text": {
             "stall": "walk frontier",
             "reach": "eligible near q, still unreachable",
@@ -694,7 +1287,7 @@ const spec = {
               "x": 120,
               "y": 124,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             }
           ],
           "motion": {
@@ -715,7 +1308,7 @@ const spec = {
         },
         {
           "label": "Exhaust the reachable eligible frontier",
-          "description": "Exhaust the reachable eligible component without using masked links. When this action finishes, the frontier is empty even though eligible nodes near q remain disconnected. No walk passes through a forbidden bridge.",
+          "description": "The walk visits the remaining 2 left-side eligible neighbors (all 3 left-side eligible nodes now ringed in blue), and the frontier stalls at the masked bridge. The 3 eligible nodes near query q remain unreachable from the original entry.",
           "text": {
             "stall": "frontier stalled",
             "reach": "eligible near q, still unreachable",
@@ -761,19 +1354,19 @@ const spec = {
               "x": 120,
               "y": 124,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 90,
               "y": 230,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 70,
               "y": 320,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             }
           ],
           "motion": {
@@ -798,7 +1391,7 @@ const spec = {
         },
         {
           "label": "Switch to an exact eligible scan",
-          "description": "Use the separate exact-scan response in panel B. The query directly scores eligible candidates; it does not need graph reachability or permission to masked nodes.",
+          "description": "In panel B (bottom sketch), when the filtered graph is small or heavily fragmented, retrieval switches to an exact scan of the eligible set and scores the first of 5 displayed eligible candidates directly against query q.",
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
@@ -849,25 +1442,25 @@ const spec = {
               "x": 120,
               "y": 124,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 90,
               "y": 230,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 70,
               "y": 320,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 508,
               "y": 330,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             }
           ],
           "motion": {
@@ -892,7 +1485,7 @@ const spec = {
         },
         {
           "label": "Score eligible candidates directly",
-          "description": "Continue scoring eligible candidates directly. When this scoring pass finishes, these candidates have been examined without a graph detour through masked objects.",
+          "description": "Direct scoring evaluates 2 more eligible candidates (3 of 5 displayed eligible nodes scored) without relying on graph edges or crossing masked bridge nodes.",
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
@@ -951,37 +1544,37 @@ const spec = {
               "x": 120,
               "y": 124,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 90,
               "y": 230,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 70,
               "y": 320,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 508,
               "y": 330,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 546,
               "y": 330,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 584,
               "y": 330,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             }
           ],
           "motion": {
@@ -1006,7 +1599,7 @@ const spec = {
         },
         {
           "label": "Complete eligible scoring",
-          "description": "Finish scoring the displayed eligible set. When the pass finishes, no eligible candidate in this displayed scan was skipped for graph disconnection. No numerical similarity ranking is invented.",
+          "description": "The exact scan finishes scoring all 5 displayed eligible candidates directly against query q, ensuring that zero eligible candidates are missed due to graph disconnection.",
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
@@ -1073,49 +1666,49 @@ const spec = {
               "x": 120,
               "y": 124,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 90,
               "y": 230,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 70,
               "y": 320,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 508,
               "y": 330,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 546,
               "y": 330,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 584,
               "y": 330,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 622,
               "y": 330,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 660,
               "y": 330,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             }
           ],
           "motion": {
@@ -1140,12 +1733,12 @@ const spec = {
         },
         {
           "label": "Return candidates without relaxing permission",
-          "description": "Return candidates examined within the original permission scope. Partitioning is another static response shown in panel B; neither the remedy selector nor a search result grants access to masked objects.",
+          "description": "Candidate retrieval finishes using only permitted nodes within the original caller scope. Neither extra entry points nor exact eligible scans grant access to masked objects.",
           "text": {
             "stall": "frontier stalled",
             "reach": "A: original reachability failure retained",
             "extra": "extra entry",
-            "score": "all scored"
+            "score": "5 / 5 eligible returned"
           },
           "values": [
             "Unchanged caller scope",
@@ -1207,49 +1800,67 @@ const spec = {
               "x": 120,
               "y": 124,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 90,
               "y": 230,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 70,
               "y": 320,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 508,
               "y": 330,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 546,
               "y": 330,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 584,
               "y": 330,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 622,
               "y": 330,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
             },
             {
               "x": 660,
               "y": 330,
               "color": "#0284c7",
-              "r": 12
+              "r": 11
+            },
+            {
+              "x": 426,
+              "y": 128,
+              "color": "#16a34a",
+              "r": 11
+            },
+            {
+              "x": 462,
+              "y": 114,
+              "color": "#16a34a",
+              "r": 11
+            },
+            {
+              "x": 498,
+              "y": 130,
+              "color": "#16a34a",
+              "r": 11
             }
           ]
         }
@@ -1271,7 +1882,7 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
  const textNodes=[...svg.querySelectorAll('text')],bindings={};
  for(const [key,b]of Object.entries(spec.slots)){const matches=textNodes.filter(n=>Number(n.getAttribute('x'))===b.x&&Number(n.getAttribute('y'))===b.y);if(matches.length!==1)throw Error('Original slot changed: '+key);bindings[key]={node:matches[0],original:matches[0].innerHTML,font:matches[0].getAttribute('font-size')};}
  const circles=[...svg.querySelectorAll('circle')].map(n=>({n,fill:n.getAttribute('fill'),stroke:n.getAttribute('stroke'),'stroke-width':n.getAttribute('stroke-width')}));
- const overlay=node('g',{class:'v3-original-overlay'});svg.append(overlay);
+ const overlay=node('g',{class:'v3-original-overlay'});svg.append(overlay);(function(s){const vb=s.getAttribute('viewBox').trim().split(/[\s,]+/).map(Number),bg=[...s.children].find(n=>n.localName==='rect'&&n.getAttribute('fill')==='#ffffff'&&(+n.getAttribute('x')||0)===0&&(+n.getAttribute('y')||0)===0);if(bg){bg.setAttribute('y',String(vb[1]));bg.setAttribute('width',String(vb[2]));bg.setAttribute('height',String(vb[3]));}if(!s.querySelector('[data-mlsys-focus]')){const fg=document.createElementNS('http://www.w3.org/2000/svg','path');fg.setAttribute('d',`M${vb[0]+vb[2]*0.08},${vb[1]+vb[3]*0.08}h${vb[2]*0.84}v${vb[3]*0.84}h${-vb[2]*0.84}z`);fg.setAttribute('fill','none');fg.setAttribute('stroke','none');fg.setAttribute('data-mlsys-focus','');s.insertBefore(fg,s.lastElementChild||null);}})(svg);
  const markerLayer=node('g');overlay.append(markerLayer);
  const packet=node('g',{class:'v3-original-packet',visibility:'hidden'});packet.append(node('rect',{x:-24,y:-10,width:48,height:20,rx:3}),node('text',{'text-anchor':'middle',y:4}));overlay.append(packet);
  const canvas=document.createElement('div');canvas.className='v3-original-canvas';canvas.tabIndex=0;canvas.setAttribute('aria-label','Original diagram. Swipe horizontally or vertically to inspect; the view follows the active object.');canvas.append(svg);
@@ -1282,12 +1893,12 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
  const frames=()=>spec.variants?spec.variants.find(v=>v.id===variant).states:spec.states;
  const steps=frames().map(s=>({label:s.label,description:s.description}));
  let choice;
- if(spec.variants){choice=document.createElement('label');choice.className='v3-original-choice';choice.textContent=spec.variantLabel+' ';const select=document.createElement('select');select.setAttribute('aria-label',spec.variantLabel);spec.variants.forEach(v=>{const o=document.createElement('option');o.value=v.id;o.textContent=v.label;select.append(o);});select.addEventListener('change',()=>{variant=select.value;frames().forEach((s,i)=>{Object.assign(steps[i],{label:s.label,description:s.description});const option=root.querySelector('.mlsys-original-sequence select').options[i];option.textContent=(i+1)+'. '+s.label;});player.go(0);});choice.append(select);}
+ if(spec.variants){choice=document.createElement('label');choice.className='v3-original-choice';choice.textContent=spec.variantLabel+' ';const select=document.createElement('select');select.setAttribute('aria-label',spec.variantLabel);spec.variants.forEach(v=>{const o=document.createElement('option');o.value=v.id;o.textContent=v.label;select.append(o);});select.addEventListener('change',()=>{variant=select.value;const seq=root.querySelector('.mlsys-original-sequence select');frames().forEach((s,i)=>{Object.assign(steps[i],{label:s.label,description:s.description});if(seq&&seq.options[i])seq.options[i].textContent=(i+1)+' / '+steps.length+' · '+s.label;});player.go(0);});choice.append(select);}
  function follow(x,y){active=[x,y];const scale=svg.getBoundingClientRect().width/vb.width;if(canvas.scrollWidth>canvas.clientWidth)canvas.scrollLeft=Math.max(0,x*scale-canvas.clientWidth/2);if(canvas.scrollHeight>canvas.clientHeight)canvas.scrollTop=Math.max(0,y*scale-canvas.clientHeight/2);}
  function render(i,{stage,details}){
-  if(!canvas.isConnected){if(choice)root.insertBefore(choice,root.querySelector('.mlsys-original-stage'));stage.append(cue,canvas);details.append(readout);}
+  if(!canvas.isConnected){stage.append(canvas);details.append(cue,readout);}
   const frame=frames()[i];packet.setAttribute('visibility','hidden');markerLayer.replaceChildren();
-  for(const [key,b]of Object.entries(bindings)){b.node.innerHTML=b.original;if(b.font)b.node.setAttribute('font-size',b.font);b.node.removeAttribute('opacity');const value=Object.assign({},spec.defaults,frame.text)[key];if(value!==undefined)b.node.textContent=value;if(spec.slots[key].font)b.node.setAttribute('font-size',spec.slots[key].font);b.node.removeAttribute('textLength');if(spec.slots[key].width&&b.node.getComputedTextLength()>spec.slots[key].width)b.node.setAttribute('textLength',spec.slots[key].width);b.node.setAttribute('lengthAdjust','spacingAndGlyphs');}
+  for(const [key,b]of Object.entries(bindings)){b.node.innerHTML=b.original;if(b.font)b.node.setAttribute('font-size',b.font);if(key==='stall')b.node.setAttribute('x','106');b.node.removeAttribute('opacity');const value=Object.assign({},spec.defaults,frame.text)[key];if(value!==undefined)b.node.textContent=value;if(spec.slots[key].font)b.node.setAttribute('font-size',spec.slots[key].font);b.node.removeAttribute('textLength');if(spec.slots[key].width&&b.node.getComputedTextLength()>spec.slots[key].width)b.node.setAttribute('textLength',spec.slots[key].width);b.node.setAttribute('lengthAdjust','spacingAndGlyphs');}
   for(const c of circles)for(const k of ['fill','stroke','stroke-width']){if(c[k]!==null)c.n.setAttribute(k,c[k]);}
   for(const p of frame.circles||[]){const c=circles.find(c=>Number(c.n.getAttribute('cx'))===p.x&&Number(c.n.getAttribute('cy'))===p.y&&Number(c.n.getAttribute('r'))===(p.r||8));if(!c)throw Error('Original graph node changed');for(const k of ['fill','stroke','stroke-width'])if(p[k])c.n.setAttribute(k,p[k]);}
   for(const m of frame.marks||[]){markerLayer.append(node('circle',{cx:m.x,cy:m.y,r:m.r||12,fill:'none',stroke:m.color||'#0284c7','stroke-width':2}));}
@@ -1302,7 +1913,7 @@ window.MLSysFigureLessons[spec.name]=async(root,context)=>{
   const width=Math.max(28,Math.min(112,motion.label.length*6+12));packet.querySelector('rect').setAttribute('x',-width/2);packet.querySelector('rect').setAttribute('width',width);packet.querySelector('text').textContent=motion.label;packet.dataset.role=motion.role||'state';packet.setAttribute('visibility','visible');
   onFrame(p=>{let d=total*p,j=0;while(j<lengths.length-1&&d>lengths[j]){d-=lengths[j];j++;}const t=lengths[j]?d/lengths[j]:0,a=route[j],b=route[j+1],x=a[0]+(b[0]-a[0])*t,y=a[1]+(b[1]-a[1])*t;packet.setAttribute('transform',`translate(${x} ${y})`);follow(...(motion.lock_camera?frame.camera:[x,y]));if(p>=1)packet.setAttribute('visibility','hidden');});
  }
- player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:spec.question,scope:spec.scope,steps,render,transition});
+ player=window.MLSysOriginalPlayer.create({root,outer:context.outer,layout:'compact',title:spec.question,intro:'Trace why a scope mask stalls greedy graph traversal after 3 left-side nodes and compare scope partitioning, extra entry points, and exact eligible scans.',scope:spec.scope,viewControls:choice,steps,render,transition});
  const resize=new ResizeObserver(()=>follow(...active));resize.observe(canvas);const destroy=player.destroy;player.destroy=()=>{resize.disconnect();destroy();};return player;
 };
 })();

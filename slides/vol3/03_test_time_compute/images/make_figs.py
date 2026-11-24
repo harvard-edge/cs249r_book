@@ -86,8 +86,13 @@ def arrow(ax, x0, y0, x1, y1, color='#64748b', ls='-', lw=1.6, alpha=1.0):
 def hook():
     rows = [('Explain in 1,024 tokens', 21580.41791, 'compute', '21.58 s'), ('Run the targeted test', 40, 'data', '40 ms')]
     sp.hbars_steps(str(out / 'hook'), rows, 'ms', log=True, size=(5.8, 1.7), xlabel='Time (ms, log scale)')
+    rows_col = [
+        ('Explain 1,024 tok', 21580.41791, 'compute', '21.58 s'),
+        ('NM 3.1 test budget', 40, 'neutral', '40 ms'),
+        ('Measured probe', 32.8, 'data', '32.8 ms'),
+    ]
     with plain_log_ticks(every=2):
-        sp.hbars(str(out / 'hook_col.svg'), rows, 'ms', log=True, size=(2.6, 0.9), xlabel='Time (ms, log scale)')
+        sp.hbars(str(out / 'hook_col.svg'), rows_col, 'ms', log=True, size=(2.6, 1.15), xlabel='Time (ms, log scale)', fontsize=13)
 
 def axes():
     """Drawn 9 in wide and shown about 5.6 in wide: 15 pt text lands near 9.5 pt."""
@@ -366,7 +371,7 @@ def diamond(ax, x, y, w, h, text, role='neutral', alpha=1.0):
     ax.text(x + w / 2, y + h / 2, text, ha='center', va='center', fontsize=15, color=txt, alpha=alpha, zorder=3)
 
 def stop():
-    steps = [('1. Ceiling\nreached?', 'Stop admitting;\nkeep a pass,\nelse escalate', 'bad'), ('2. Candidate\naccepted?', 'Stop search;\nsend it to the\nacceptance gate', 'mem'), ('3. Gain per\ndollar too low?', 'Stop early;\nreport incomplete\nor escalate', 'tool')]
+    steps = [('1. Ceiling\nreached?', 'Stop admitting;\nkeep a pass,\nelse escalate', 'bad'), ('2. Candidate\naccepted?', 'Stop search;\nsend it to the\nacceptance check', 'mem'), ('3. Gain per\ndollar too low?', 'Stop early;\nreport incomplete\nor escalate', 'tool')]
     for k in (1, 2, 3):
         fig, ax = canvas(9.0, 3.4)
         box(ax, 0.3, 19, 14.5, 12, 'Before\nadmitting\nwork', 'neutral', fs=15)

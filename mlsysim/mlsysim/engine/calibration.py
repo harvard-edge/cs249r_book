@@ -9,24 +9,16 @@ from ..core.provenance import sourced
 from ..core import provenance_catalog as pc
 from ..physics.memory import optimizer_state_bytes
 
-# Engine: software stack latency (CUDA programming guide order of magnitude)
+# Engine: software stack latency (CUDA programming guide order of magnitude).
+# Per-layer host dispatch is zero by default because CUDA Graphs, XLA, and
+# TorchInductor launch compiled step graphs rather than dispatching per layer;
+# callers modeling eager Python execution pass layer_overhead_ms explicitly.
 KERNEL_LAUNCH_LATENCY_US = 15.0
-FRAMEWORK_LAYER_TAX_MS = 0.01
+FRAMEWORK_LAYER_TAX_MS = 0.0
 
-# EfficiencyModel / InferenceScalingModel / ResponsibleEngineeringModel
-MFU_FLASH_ATTENTION = 0.75
-MFU_FLASH_ATTENTION_CAP = 0.85
-MFU_FFN_CAP = 0.60
-MFU_CONV_CAP = 0.55
-# 2026-06-10 audit: HFU_MFU_RATIO (1.1) deleted. HFU is now computed from
-# actual hardware ops (engine.py): hfu == mfu without recomputation, 4/3 × mfu
-# with full recompute — per PaLM App. B / Korthikanti et al. (2022). The old
-# fixed 1.1 fabricated phantom utilization and matched no published pair.
-# EfficiencyModel's SM-occupancy heuristic kept its numerics under its own name:
-SM_OCCUPANCY_HEADROOM = 1.1  # heuristic: occupancy ceiling ≈ 1.1 × base efficiency
+# InferenceScalingModel / ScalingModel reference defaults
 TOKENS_PER_REASONING_STEP = 50
 REFERENCE_MFU_SUSTAINED = 0.40
-DP_SGD_SLOWDOWN_COEFFICIENT = 2.0
 
 # ScalingModel: Reference FLOPS for GPU-days conversions
 REFERENCE_HARDWARE_TFLOPS = 989.0  # NVIDIA H100 SXM FP16 Dense
@@ -42,19 +34,9 @@ SPECULATIVE_GAMMA = 4  # Typical lookahead (K) for draft verification
 DEFAULT_INFRASTRUCTURE_MULTIPLIER = 1.0  # Hardware only. Use 2.0-2.5 for full DC.
 
 # DistributedModel API fallbacks when efficiency kwargs are omitted
-DEFAULT_SCALING_EFFICIENCY = sourced(0.90, pc.SCALING_EFFICIENCY_RULE_OF_THUMB, name="Scaling Efficiency (η)", description="Default parallel scaling efficiency (90%).")
+DEFAULT_SCALING_EFFICIENCY = sourced(0.90, pc.SCALING_EFFICIENCY_RULE_OF_THUMB, name="Scaling Efficiency (η)", description="Default parallel scaling efficiency (η = 90%).")
 DEFAULT_OVERLAP_EFFICIENCY = sourced(0.85, pc.MEGATRON_OVERLAP, name="Communication Overlap Efficiency", description="Fraction of comm time hidden behind compute.")
 DEFAULT_COMPUTE_EFFICIENCY = sourced(0.50, pc.PALM_MFU, name="Baseline MFU", description="Baseline model FLOPs utilization for large LLM training.")
-
-# CompressionModel: quantization / pruning survey medians (Gholami 2021, Blalock 2020)
-QUANT_ACCURACY_DELTA_INT8 = -0.005
-QUANT_ACCURACY_DELTA_INT4 = -0.025
-QUANT_ACCURACY_DELTA_FP8 = -0.002
-QUANT_ACCURACY_DELTA_SUB_INT4 = -0.050
-PRUNING_ACCURACY_THRESHOLD = 0.5
-PRUNING_MILD_DELTA = -0.001
-PRUNING_STEEP_COEFFICIENT = 0.01
-PRUNING_STEEP_EXPONENT = 2.0
 
 # CheckpointModel: optimizer state accounting for checkpoints
 CHECKPOINT_BYTES_PER_PARAM_ADAM = 14

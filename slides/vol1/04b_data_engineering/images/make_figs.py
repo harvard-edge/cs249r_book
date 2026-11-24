@@ -114,7 +114,7 @@ def price_trend():
         ax.text(1.0, -0.2, 'Data: Our World in Data (McCallum price records)', transform=ax.transAxes, ha='right', fontsize=9, color=C['neutral'])
         sp.save(fig, out / f'price_trend_step{k}.svg')
 price_trend()
-bars_lines(out / 'latency_ladder.svg', [('DRAM', 100.0 * 1e-06, 'memory', '100 ns'), ('Local NVMe', 0.1, 'memory', '100 µs', 'in'), ('Remote SSD', 2, 'danger', '2 ms'), ('Object store', 20, 'danger', '20 ms')], lines=[(1, '1 ms', 'danger', 1.07)], xlim=(3e-05, 2000.0), size=(1.75, 1.45), xlabel='Access latency (log)', fs=12, tick_fs=12, xticks=[(0.0001, '100 ns'), (100, '100 ms')])
+bars_lines(out / 'latency_ladder.svg', [('DRAM', 100.0 * 1e-06, 'memory', '100 ns'), ('Local NVMe', 0.1, 'memory', '100 µs', 'in'), ('Remote SSD', 2, 'danger', '2 ms'), ('Object store', (20, 150), 'danger', '20–150 ms')], lines=[(1, '1 ms', 'danger', 1.07)], xlim=(3e-05, 18000.0), size=(1.75, 1.45), xlabel='Access latency (log)', fs=12, tick_fs=12, xticks=[(0.0001, '100 ns'), (100, '100 ms')])
 bars_lines(out / 'tier_bandwidth.svg', [('Memory cache', (20000, 50000), 'memory', '20–50 GB/s'), ('Local NVMe', (5000.0, 7000.0), 'memory', '5–7 GB/s'), ('Object store', (100, 500), 'danger', f'{0.1:.1f}–0.5 GB/s'), ('Archive', (10, 50), 'danger', '10–50 MB/s')], xlim=(5, 3000000.0), size=(1.55, 1.45), xlabel='Bandwidth (MB/s, log)', fs=12, tick_fs=12, xticks=[(10, '10'), (10000.0, '10,000')])
 bars_lines(out / 'appetite.svg', [('Arithmetic ceiling', 12682, 'compute', '12,682 img/s'), ('Sustained (chapter)', 3200.0, 'compute', '3,200 img/s  (25%)'), ('Measured (NVIDIA)', 2470.0, 'neutral', '2,470 img/s  (19%)')], log_x=False, xlim=(0, 19000), size=(5.6, 1.75), xlabel='Images per second')
 steps('decoded_bytes', [('JPEG, 150 KB', 480.0, 'compute', '480 MB/s  (48% lost)'), ('Decoded FP32, 602 KB', 1926.7584, 'danger', '1.9 GB/s  (87% lost)')], lines=[(250, 'Supply: 250 MB/s', 'neutral', 1.07)], log_x=False, xlim=(0, 3000), size=(6.4, 1.3), fs=15, tick_fs=14, xlabel='Storage bandwidth needed at 3,200 img/s (MB/s)')
@@ -122,25 +122,30 @@ supply_rows = [('Needed at 3,200 img/s', 480.0, 'compute', '480 MB/s'), ('Object
 for k in (1, 2, 3):
     bars_lines(out / f'storage_supply_step{k}.svg', supply_rows, step=4 + k, lines=[(15414.0672, 'decoded:\n15.4 GB/s', 'danger', 1.06, k == 3)], xlim=(30, 100000.0), size=(5.8, 3.0), xlabel='Sequential read bandwidth (MB/s, log scale)', xticks=[(100, '100'), (1000, '1,000'), (10000, '10,000')])
 
-def choke():
+def choke(step):
     per_worker = 375
     rate = 3200.0
-    crossing, whole = (8.533333333, 9)
+    crossing, whole = (rate / per_worker, 9)
     w = np.arange(1, 17)
     loader = np.minimum(per_worker * w, 3500)
     train = np.minimum(per_worker * w, rate)
     fig, ax = plt.subplots(figsize=(5.6, 2.5))
-    ax.plot(np.concatenate(([crossing], w[w >= whole])), np.concatenate(([rate], loader[w >= whole])), '--', color=C['neutral'], lw=1.3)
-    ax.text(12.2, 3680, 'loader capacity', color=C['neutral'], fontsize=11, fontweight='bold', va='center')
-    ax.plot(w, train, 'o-', color=C['memory'], lw=2.4, ms=6, zorder=4)
-    ax.axhline(rate, color=C['danger'], lw=2, ls='--', zorder=3)
-    ax.text(16.8, 2750, 'Accelerator\n3,200 img/s', color=C['danger'], fontsize=11, fontweight='bold', va='center')
-    ax.fill_between(w, 0, train, color=C['memory_l'], alpha=0.5)
-    ax.axvline(crossing, color=C['text'], lw=1, ls=':')
-    ax.text(8.75, 600, f'about {whole} workers', fontsize=11, fontweight='bold', color=C['text'])
-    ax.text(1.0, 2600, 'Host decode binds', fontsize=11, va='center', fontweight='bold', color=C['memory'])
+    w_ramp = w[w <= 8]
+    if step == 1:
+        ax.plot(w_ramp, train[:len(w_ramp)], 'o-', color=C['memory'], lw=2.4, ms=6, zorder=4)
+        ax.fill_between(w_ramp, 0, train[:len(w_ramp)], color=C['memory_l'], alpha=0.5)
+    else:
+        ax.plot(np.concatenate(([crossing], w[w >= whole])), np.concatenate(([rate], loader[w >= whole])), '--', color=C['neutral'], lw=1.3)
+        ax.text(12.2, 3680, 'loader capacity', color=C['neutral'], fontsize=11, fontweight='bold', va='center')
+        ax.plot(w, train, 'o-', color=C['memory'], lw=2.4, ms=6, zorder=4)
+        ax.axhline(rate, color=C['danger'], lw=2, ls='--', zorder=3)
+        ax.text(16.8, 2750, 'Accelerator\n3,200 img/s', color=C['danger'], fontsize=11, fontweight='bold', va='center')
+        ax.fill_between(w, 0, train, color=C['memory_l'], alpha=0.5)
+        ax.axvline(crossing, color=C['text'], lw=1, ls=':')
+        ax.text(8.75, 600, f'about {whole} workers', fontsize=11, fontweight='bold', color=C['text'])
+        ax.text(11, 2300, 'Accelerator limits', fontsize=11, fontweight='bold', color=C['danger'])
+    ax.text(1.0, 2600, 'Host decode limits', fontsize=11, va='center', fontweight='bold', color=C['memory'])
     ax.text(4.5, 1150, '375 img/s\nper worker', fontsize=11, va='center', fontweight='bold', color=C['memory'])
-    ax.text(11, 2300, 'Accelerator binds', fontsize=11, fontweight='bold', color=C['danger'])
     ax.set_xlim(0.5, 16.5)
     ax.set_ylim(0, 4000)
     ax.set_xticks([1, 4, 8, 12, 16])
@@ -150,8 +155,48 @@ def choke():
     ax.set_ylabel('Images per second', fontsize=11)
     ax.grid(color=C['grid'], linewidth=0.6)
     ax.set_axisbelow(True)
-    sp.save(fig, out / 'dataloader.svg')
-choke()
+    sp.save(fig, out / f'dataloader_step{step}.svg')
+for k in (1, 2):
+    choke(k)
+
+def speech_commands_v1v2(step):
+    # Warden (2018), Top-One accuracy table (arXiv:1804.03209)
+    v1_on_v1, v2_on_v1 = 85.4, 89.7
+    v1_on_v2, v2_on_v2 = 82.7, 88.2
+    gain_data = v2_on_v1 - v1_on_v1
+    drop_test = v1_on_v1 - v1_on_v2
+    fig, ax = plt.subplots(figsize=(4.4, 2.65))
+    x = np.array([0.0, 1.35])
+    w = 0.36
+    # Group 0: v1 test (always shown)
+    ax.bar(x[0] - w / 2 - 0.03, v1_on_v1, width=w, color=C['neutral'])
+    ax.bar(x[0] + w / 2 + 0.03, v2_on_v1, width=w, color=C['memory'])
+    ax.text(x[0] - w / 2 - 0.03, v1_on_v1 + 0.4, f'{v1_on_v1:.1f}%', ha='center', va='bottom', fontsize=11, fontweight='bold', color=C['neutral'])
+    ax.text(x[0] + w / 2 + 0.03, v2_on_v1 + 0.4, f'{v2_on_v1:.1f}%', ha='center', va='bottom', fontsize=11, fontweight='bold', color=C['memory'])
+    ax.text(x[0], 93.2, f'+{gain_data:.1f} pts from v2 data', ha='center', va='bottom', fontsize=11, fontweight='bold', color=C['memory'])
+    # Group 1: v2 test (shown on step 2)
+    a2 = 1.0 if step >= 2 else 0.0
+    ax.bar(x[1] - w / 2 - 0.03, v1_on_v2, width=w, color=C['neutral'], alpha=a2)
+    ax.bar(x[1] + w / 2 + 0.03, v2_on_v2, width=w, color=C['memory'], alpha=a2)
+    ax.text(x[1] - w / 2 - 0.03, v1_on_v2 + 0.4, f'{v1_on_v2:.1f}%', ha='center', va='bottom', fontsize=11, fontweight='bold', color=C['compute'], alpha=a2)
+    ax.text(x[1] + w / 2 + 0.03, v2_on_v2 + 0.4, f'{v2_on_v2:.1f}%', ha='center', va='bottom', fontsize=11, fontweight='bold', color=C['memory'], alpha=a2)
+    ax.text(x[1], 93.2, f'−{drop_test:.1f} pts: v2 test harder', ha='center', va='bottom', fontsize=11, fontweight='bold', color=C['compute'], alpha=a2)
+    # Clean vector legend strip above the bars (zero overlap)
+    for lx, col, lab in ((-0.50, C['neutral'], 'Trained on v1'), (0.62, C['memory'], 'Trained on v2')):
+        ax.add_patch(plt.Rectangle((lx, 97.6), 0.11, 1.35, facecolor=col, edgecolor='none', clip_on=False))
+        ax.text(lx + 0.15, 98.25, lab, fontsize=12, fontweight='bold', color=col, va='center')
+    ax.set_xticks(x)
+    ax.set_xticklabels(['v1 test set\n(fixed yardstick)', 'v2 test set\n(new yardstick)'], fontsize=11.5)
+    ax.set_xlim(-0.62, 1.98)
+    ax.set_ylim(75, 100.5)
+    ax.set_yticks([75, 80, 85, 90, 95])
+    ax.set_yticklabels(['75%', '80%', '85%', '90%', '95%'], fontsize=11)
+    ax.set_ylabel('Top-1 accuracy', fontsize=11.5)
+    ax.grid(axis='y', color=C['grid'], linewidth=0.6)
+    ax.set_axisbelow(True)
+    sp.save(fig, out / f'speech_commands_v1v2_step{step}.svg')
+for k in (1, 2):
+    speech_commands_v1v2(k)
 steps('format_bytes', [('Row format (CSV)', 100, 'neutral', 'reads 100 of 100 columns'), ('Columnar (Parquet)', 100 * 0.2, 'data', 'reads 20 columns: 5× less')], log_x=False, xlim=(0, 175), size=(6.0, 1.1), fs=15, tick_fs=14, xlabel='Share of the table read from disk (%)')
 
 def profiler_bars():

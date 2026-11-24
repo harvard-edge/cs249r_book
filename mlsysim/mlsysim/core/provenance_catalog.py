@@ -77,9 +77,35 @@ def _conv(id: str, ref: str, *, notes: str | None = None) -> Provenance:
 IEA_WEO_2023 = Provenance(
     id="prov:iea-weo-2023-carbon",
     kind=ProvenanceKind.INDUSTRY_REPORT,
-    ref="IEA World Energy Outlook 2023 (rounded gCO2/kWh)",
+    ref="IEA World Energy Outlook 2023 (macro-regional electricity statistics)",
     url="https://www.iea.org/reports/world-energy-outlook-2023",
-    verified="2026-03-06",
+    verified="2026-11-12",
+    notes="Macro-regional WEO Annex A tables; country-level grid anchors in Grids.* use REGIONAL_GRID_CARBON_ANCHORS and PATTERSON_US_AVG_GRID.",
+)
+
+PATTERSON_US_AVG_GRID = _lit(
+    "prov:patterson-2021-us-grid",
+    "Patterson et al. (2021), 'Carbon Emissions and Large Neural Network Training', Table 4 (US average grid anchor from EPA eGRID)",
+    url="https://arxiv.org/abs/2104.10350",
+    verified="2026-11-12",
+    notes=(
+        "Table 4 (GPT-3 column) uses 429 gCO2e/kWh (0.429 kg/kWh) as the US datacenter grid "
+        "factor from EPA eGRID; PUE 1.12 and WUE 1.8 are paired reference hyperscale facility assumptions."
+    ),
+)
+
+REGIONAL_GRID_CARBON_ANCHORS = _est(
+    "prov:regional-grid-carbon-anchors",
+    "Rounded regional electricity carbon-intensity reference anchors synthesized from Ember, EEA, EPA eGRID, and ML carbon-accounting literature (Lacoste et al. 2019; Luccioni et al. 2023)",
+    notes=(
+        "Pedagogical multi-year rounded reference anchors (Norway 10, Iceland 28, France 50, "
+        "EU_Avg 270, Germany 385, Texas ERCOT 400, China_Avg 555, India_Avg 720, Poland 820 gCO2/kWh) "
+        "paired with representative facility PUE/WUE tiers. Not single-year IEA WEO 2023 country tables "
+        "(IEA WEO publishes macro-regions rather than individual European countries or ERCOT), and "
+        "reflects ~2018-2022 reference levels rather than time-matched marginal or lifecycle factors."
+    ),
+    url="https://ember-energy.org/data/electricity-data-explorer/",
+    verified="2026-11-12",
 )
 
 # --- Facility PUE anchors (one record per source; each tier cites its own) ---
@@ -180,11 +206,12 @@ REFERENCE_WORKLOAD_SCALE = Provenance(
     ref="Illustrative real-world scale anchors (Gmail volume, Google searches, Waymo sensor rate) for order-of-magnitude intuition",
     verified="2026-03-06",
 )
-TINYML_ANOMALY_CASE = Provenance(
-    id="prov:tinyml-anomaly-case",
-    kind=ProvenanceKind.ILLUSTRATIVE,
-    ref="TinyML anomaly-detection case study (latency / AUC / energy) used as a benchmarking example",
-    verified="2026-03-06",
+TINYML_ANOMALY_CASE = _lit(
+    "prov:tinyml-anomaly-case",
+    "Banbury et al. (2021), 'MLPerf Tiny Benchmark' (arXiv:2106.07597), Anomaly Detection reference benchmark",
+    url="https://arxiv.org/abs/2106.07597",
+    verified="2026-11-12",
+    notes="MLPerf Tiny v0.5 ToyADMOS Deep AutoEncoder reference case (0.86 AUC target quality, 10.4 ms latency, and 516 uJ per inference on Cortex-M4 reference hardware).",
 )
 CLINICAL_IMAGING_WORKFLOW_ANCHORS = Provenance(
     id="prov:clinical-imaging-workflow-anchors",
@@ -284,10 +311,17 @@ ILLUSTRATIVE_IOWA_CARBON = Provenance(
     verified="2026-03-06",
 )
 
-HYDRO_QUEBEC_GRID = _ds(
+HYDRO_QUEBEC_GRID = _est(
     "prov:hydro-quebec-grid",
-    "Hydro-Québec electricity mix and carbon intensity",
-    "https://www.hydroquebec.com/about/our-energy.html",
+    "Lacoste et al. (2019), 'Quantifying the Carbon Emissions of Machine Learning' (ML CO2 Impact, Canada-Quebec anchor) and Hydro-Québec electricity mix",
+    notes=(
+        "20 gCO2e/kWh is the rounded Quebec hydroelectric grid anchor used in ML carbon-accounting "
+        "tools (Lacoste et al. 2019, ca-east); Hydro-Québec reports ~1.7 gCO2e/kWh direct operational "
+        "emissions and ~34.5 gCO2e/kWh ISO 14067 lifecycle emissions. PUE 1.06 and WUE 0.0 are reference "
+        "free/liquid-cooled facility assumptions."
+    ),
+    url="https://arxiv.org/abs/1910.09700",
+    verified="2026-11-12",
 )
 
 # --- Cloud accelerators ---
@@ -880,6 +914,18 @@ NVIDIA_DLE_RESNET50_A100_TRAINING = Provenance(
     ),
 )
 
+MLPERF_TRAINING_RESNET50_QUALITY_TARGET = Provenance(
+    id="prov:mlperf-training-resnet50-quality-target",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref=(
+        "MLCommons, MLPerf Training Rules, benchmark table: Vision / Image classification / "
+        "ResNet-50 v1.5, quality target 75.90% classification (top-1 on ImageNet validation)"
+    ),
+    url="https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc",
+    verified="2026-11-20",
+    notes="The accuracy a training submission must reach before its time is counted.",
+)
+
 MLPERF_TRAINING_V31_RESNET50_H100 = Provenance(
     id="prov:mlperf-training-v31-resnet50-h100",
     kind=ProvenanceKind.INDUSTRY_REPORT,
@@ -1325,9 +1371,12 @@ EFFECTIVE_COLLECTIVE_ALPHA_RANGES = _est(
     "Effective per-message collective-launch latency (alpha) ranges by interconnect: NVLink 4.0, "
     "PCIe Gen5, InfiniBand NDR and HDR, 100G RoCE",
     notes=(
-        "Teaching assumption, not a vendor figure: alpha here is the EFFECTIVE launch latency of one "
-        "collective message, communication-library software stack included, so it sits above the wire "
-        "latencies in Tech.Interconnect and Fabrics. Ranges: NVLink 1-2 us, PCIe Gen5 2-5 us, IB NDR "
+        "Teaching assumption, not a vendor figure: alpha here is the effective SINGLE-HOP "
+        "adjacent-rank collective-launch latency (RDMA NIC + single switch hop + communication "
+        "library software stack), so it sits above single-hop board/link wire latencies in "
+        "Tech.Interconnect (NVLink 0.5 us, PCIe Gen5 1 us), whereas Fabrics.*.latency (IB NDR "
+        "5 us, IB HDR 7 us, RoCE 10 us) models multi-hop end-to-end cluster fabric transit across "
+        "leaf-spine-leaf switches, optics, and FEC. Ranges: NVLink 1-2 us, PCIe Gen5 2-5 us, IB NDR "
         "1-3 us, IB HDR 2-5 us, RoCE 100G 5-10 us. They bracket the single-value anchors AlphaNdr "
         "(1.5 us) and AlphaRoce (5 us) from prov:fabric-latency-assumptions. Consolidated 2026-10-15 "
         "from three identical hand-typed copies in book cells into this one source."
@@ -2151,16 +2200,17 @@ MIDSCALE_TRAINING_CARBON_SCENARIO = _est(
 SCALING_EFFICIENCY_REFERENCE_JOB_MODELED = Provenance(
     id="prov:scaling-efficiency-reference-job-modeled",
     kind=ProvenanceKind.DERIVED,
-    ref="MLSysIM DistributedModel sweep of Scenarios.DenseLLMPretrainingReference",
+    ref="MLSysIM DistributedModel sweep of Scenarios.DenseLLMPretrainingReference on Systems.Clusters.Training_1K_NDR",
     notes=(
-        "GPT-3 175B on DGX H100 + HDR InfiniBand; TP8 x PP8 (64-GPU replica); fixed global batch "
+        "GPT-3 175B on DGX H100 + NDR InfiniBand (moved from HDR 2026-11-20 so the tiers match the 8,192-GPU "
+        "Frontier_8K step the chapters model); TP8 x PP8 (64-GPU replica); fixed global batch "
         "1,536 sequences (Brown et al. 2020 Table 2.1), one sequence per micro-batch, overlap_comm=True, "
-        "efficiency=LocalComputeEfficiency 0.45, fp16. Raw 0.8738 (256), 0.8293 (1,024), 0.5619 (8,192), "
+        "efficiency=LocalComputeEfficiency 0.45, fp16. Raw 0.8738 (256), 0.8318 (1,024), 0.5733 (8,192), "
         "rounded to 2 dp. Same sweep as vol2 fig-fleet-orchestration-scaling-efficiency-curve. Published "
         "strong-scaling retention is higher with larger batch and interleaved pipelines: MegaScale Table 2 "
         "is 0.90 from 256 to 1,024 and 0.93 from 3,072 to 12,288 GPUs."
     ),
-    verified="2026-09-29",
+    verified="2026-11-20",
 )
 
 # --- Accelerator life cycle (2026-10-13) ---
@@ -2429,10 +2479,10 @@ SICK_NANOSCAN3_CORE = _ds(
 # Fitting a training step on one accelerator (added 2026-10-20)
 ACCELERATOR_ONCHIP_SRAM_RANGE = _est(
     "prov:accelerator-onchip-sram-range",
-    "MLSysBook, Model Training: on-chip SRAM of a modern accelerator",
-    ("The book's rounded range for one accelerator chip's on-chip SRAM (registers, shared memory, L1 and "
+    "Modern datacenter GPU on-chip SRAM capacity and bandwidth envelope (NVIDIA H100 Architecture Whitepaper; Dao et al., 2022)",
+    ("Representative range for one datacenter accelerator chip's on-chip SRAM (registers, shared memory, L1 and "
      "L2 together): 30 to 50 MB at roughly 15 to 20 TB/s. The H100 has 50 MiB of L2 and 228 KiB of shared "
-     "memory per SM across 132 SMs; Dao et al. (2022) label the A100's SRAM 20 MB at 19 TB/s."),
+     "memory per SM across 132 SMs; Dao et al. (2022) report the A100's SRAM as 20 MB at 19 TB/s."),
     verified="2026-10-20",
 )
 

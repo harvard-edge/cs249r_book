@@ -407,15 +407,22 @@ Requirements:
 Progress Report Data: {{progress_report}}`;
 
 // Text extraction configuration
+const TEXT_EXTRACTION_EXCLUDE_SELECTORS = [
+  'nav', 'header', 'footer', 'aside:not(.column-margin)',
+  '.navigation', '.nav', '.navbar', '.menu',
+  '.sidebar', '.header', '.footer',
+  '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
+  '.breadcrumb', '.pagination', '.toc',
+  '#socratiq-reader', '#widget-chat-container', '#collaborative-widget-host',
+  '.chapter-concept-map', '.mlsys-figure-tabs', '.mlsys-explore-panel',
+  'textarea.pseudocode', 'mjx-assistive-mml', '[data-socratiq-ignore]',
+  '[hidden]', '[inert]', '[aria-hidden="true"]'
+];
+
 export const TEXT_EXTRACTION_CONFIG = {
   MAX_TOKENS: 30000, // Maximum tokens for text extraction
-  NAV_SELECTORS: [
-    'nav', 'header', 'footer', 'aside',
-    '.navigation', '.nav', '.navbar', '.menu',
-    '.sidebar', '.header', '.footer',
-    '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
-    '.breadcrumb', '.pagination', '.toc'
-  ],
+  NAV_SELECTORS: TEXT_EXTRACTION_EXCLUDE_SELECTORS,
+  excludeSelectors: TEXT_EXTRACTION_EXCLUDE_SELECTORS,
   CONTENT_SELECTORS: [
     'main', 'article', '.content', '.main-content',
     '.post-content', '.entry-content', '.chapter-content'

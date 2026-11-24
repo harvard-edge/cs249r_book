@@ -1,0 +1,178 @@
+% Study sheet: Volume II, Chapter 10, Serving at Scale.
+% Numbers: \val{...} from inference_studysheet_numbers.tex, written by inference_studysheet_numbers.py.
+\documentclass{studysheet}
+\input{inference_studysheet_numbers}
+\sheetvolume{2}
+\sheetchapter{10}{Serving at Scale}
+\sheetsources{Numbers from the mlsysim registry and the chapter's modeled scenarios; HBM in GiB, other sizes decimal; assumed inputs are marked.}
+
+\begin{document}
+% ===================================================================== FRONT
+\frontside
+\begin{bigidea}
+Training is paid once; serving, on \hl{every request}. A fleet's
+capacity is its \hl{SLO goodput}: completed requests that meet their first-token (TTFT) and per-token (TPOT) targets.
+In C\textsuperscript{3} terms, batching's compute reuse must pay for the communication and coordination
+it adds.
+\end{bigidea}
+
+\begin{leftcol}
+\sheetsec{Key ideas}
+\begin{ideas}
+\idea{Serving cost recurs.}{Lifetime cost = training + cost per request $\times$ requests;
+  serving can overtake training within weeks.}
+\idea{A late answer counts for nothing.}{Network, serialization, coordination and queueing
+  share the budget model execution leaves.}
+\idea{Batching trades waiting for reuse.}{Shared weight reads lift throughput toward a ceiling; a
+  batching window caps formation delay, not queueing.}
+\idea{The KV cache is the admission budget.}{Each request's cache grows with context;
+  continuous batching and paging pack it better but never shrink it.}
+\idea{Prefill computes; decode streams weights.}{Chunked prefill feeds a long prompt one chunk per
+  iteration: token gaps shrink, its first token waits.}
+\idea{Distribution sends a bill.}{Tensor parallelism splits each request but adds collectives, so it
+  stays in one fast interconnect domain. Replicas, not shards, add capacity.}
+\end{ideas}
+
+\vspace{10pt}
+\sheetsec{Which limit binds? Read the evidence}
+\begin{sheettable}{@{}l L L@{}}
+\thead{Limit} & \thead{Evidence} & \thead{Lever}\\ \midrule
+Weight fit & weights exceed one device's HBM & lower-bit weights; shard inside the node\\
+KV capacity & admission stalls while compute idles & fewer KV heads, 8-bit cache, shorter context\\
+Prefill interference & token gaps spike as long prompts arrive & chunked prefill, or separate pools\\
+Queueing & p99 grows with load, model time steady & add replicas; route on remaining work (two probes); admit less while they start\\
+\end{sheettable}
+
+\vspace{10pt}
+\fcard{Little's law: sizing replicas}%
+  {\RequestConcurrency = \ArrivalRate\,\RequestTimeInSystem, \qquad
+   \ReplicaCount \ge \frac{\ArrivalRate}{\TargetServingUtilization\,\EffectiveServiceRate}}%
+  {Mean requests in flight = arrival rate $\times$ mean time in system. Replicas: rate over per-replica throughput
+   $\EffectiveServiceRate$ (batching card) at target utilization $\TargetServingUtilization < 1$.}%
+  {Means only: it proves no p99.}{}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Formulas you will use}
+\fcard{Batching curve}%
+  {\BatchServiceTime(\BatchSize) = \BatchFixedOverheadTime + \BatchSize\,\MarginalRequestServiceTime,
+   \qquad \EffectiveServiceRate = \frac{\BatchSize}{\BatchServiceTime(\BatchSize)}}%
+  {Throughput rises toward $1/\MarginalRequestServiceTime$; at the knee $\BatchSize \approx
+   \BatchFixedOverheadTime/\MarginalRequestServiceTime$ it reaches half. Decode: $\BatchFixedOverheadTime$ = \val{tfixed} ms
+   streams the weights, $\MarginalRequestServiceTime$ = \val{treq} ms reads one sequence's cache.}%
+  {Each decode step gives each stream one token: $\BatchServiceTime$ must meet TPOT.}%
+  {\begin{tikzpicture}[sheet]
+     \draw[dim] (20,0) -- (226,0);
+     \draw[dim] (20,0) -- (20,78);
+     \foreach \b in {0,80,200,400}{
+       \draw[dim] ({20+0.5*\b},0) -- ({20+0.5*\b},-2.5);
+       \node[small, anchor=north] at ({20+0.5*\b},-4) {\b};}
+     \node[small, anchor=north] at (150,-13) {batch size (sequences)};
+     \node[small, anchor=east] at (17,35) {{1,000}};
+     \node[small, anchor=east] at (17,70) {{2,000}};
+     \node[small, anchor=south west] at (0,80) {tokens/s};
+     \draw[accent, dashed, line width=0.6pt] (20,70) -- (220,70);
+     \node[note, anchor=south east] at (220,71) {ceiling $1/\MarginalRequestServiceTime$};
+     \edef\bplot{\noexpand\draw[accent, line width=1pt] plot coordinates {\val{curve}};}\bplot
+     \draw[dim, dashed] (\val{xknee},0) -- (\val{xknee},\val{yknee});
+     \filldraw[fill=accent, draw=accent] (\val{xknee},\val{yknee}) circle (2pt);
+     \node[lab, anchor=north west] at (\val{xknee}+5,\val{yknee}-2) {knee \val{knee}: half the ceiling};
+   \end{tikzpicture}}
+\fcard{KV admission budget}%
+  {\begin{aligned}\KvCacheBytesPerToken &= 2\,\LayerCount\,\KvHeadCount\,\AttentionHeadDimension\,\ElementStorageSize,
+   \qquad \WeightMemory = \Parameters\,\frac{\NumericBitWidth}{8}\\[2pt]
+   \BatchSize_{\max} &= \left\lfloor \frac{\DeviceMemoryCapacity - \WeightMemory - \ReservedDeviceMemory}{\SequenceLength\,\KvCacheBytesPerToken} \right\rfloor\end{aligned}}%
+  {Key and value, $\LayerCount$ layers, $\KvHeadCount$ KV heads of size $\AttentionHeadDimension$, $\ElementStorageSize$ bytes each;
+   $\SequenceLength$ context tokens; $\Parameters$ parameters at $\NumericBitWidth$ bits; node HBM $\DeviceMemoryCapacity$, runtime reserve $\ReservedDeviceMemory$.}%
+  {}{}
+\fcard{Fan-out tail}%
+  {\Pr(\text{request slow}) = 1 - (1 - \IndependentEventProbability)^{\SeriesComponentCount}}%
+  {A request waits for its slowest of $\SeriesComponentCount$ leaves, each slow with probability
+   $\IndependentEventProbability$. \val{leaves} leaves at p\val{leafpct}: \val{slowpct}\% of requests slow;
+   holding p\val{leafpct} needs each leaf slow under \val{leafbudget}\%.}%
+  {Levers: fewer shards, queue-aware routing, hedging (lower $\IndependentEventProbability$), partial results.}{}
+\end{rightcol}
+
+% ===================================================================== BACK
+\backside
+\begin{answers}
+\ans{Finish}{INT8 cache: \val{pertoken8} bytes/token, \val{perrequest8} GB per request; \val{budget} $\div$ \val{perrequest8}
+  $\to$ \res{\val{batchkveight}}. INT4 weights: \val{weightsfour} GB, so \val{nodegb} $-$ \val{weightsfour} $-$ \val{reservegb}
+  = \val{budgetfour} GB; $\div$ \val{perrequest} $\to$ \res{\val{batchweightsfour}}. The cache wins: halving per-request
+  state doubles the count; INT4 frees only weights.}
+\ans{1}{Knee \val{qfixed} $\div$ \val{qreq} = \val{qknee}; ceiling one over \val{qreq} ms = \val{qceiling} tokens/s.
+  At \val{qbatch}: step \val{qfixed} + \val{qextra} = \val{qstep} ms, \val{qrate} tokens/s (\val{qshare}\% of ceiling),
+  but \val{qstep} ms misses \val{qtarget} ms. Largest batch: (\val{qtarget} $-$ \val{qfixed}) $\div$ \val{qreq} $\to$
+  \val{qmax} (\val{qmaxstep} ms). The target, not the knee, sets the batch (batching card).}
+\columnbreak
+\ans{2}{One minus \val{qfast} to the power \val{qleaves} = \val{qslowpct}\% slow. Leaf budget: one minus \val{qfast} to the power one over \val{qleaves} =
+  \val{qleafbudget}\%: p\val{qleafpct}. Levers: fewer shards, queue-aware routing, hedging,
+  partial results (fan-out card).}
+\ans{3}{A monolithic prefill lands in every stream's token gap. \val{prompt} $\div$ \val{chunk}
+  = \val{chunkratio}, so \val{chunkiters} iterations: each gap is one hybrid step, but its first token waits all
+  \val{chunkiters}.}
+\ans{4}{In flight: \val{qlrate} $\times$ \val{qllats} s = \val{qlinflight}. Replica: \val{lbatch} $\div$ \val{qlsvcs} s =
+  \val{qlrep}/s; \val{qlfloor} replicas sit at the stability edge; \val{qlrate} $\div$ (\val{lutilfrac} $\times$ \val{qlrep})
+  = \val{qlneedraw} $\to$ \res{\val{qlneed}}. The law relates means; a p99 needs a queue model or load test (Little's law card).}
+\end{answers}
+
+\begin{leftcol}
+\sheetsec{Worked example}
+\begin{practicebox}\boxtitle{How many \val{contextk}K-token requests fit on one \val{gpus}-GPU node?}
+A \val{params}-billion-parameter model: \val{layers} layers, \val{kvheads} KV heads of dimension \val{headdim}, FP16
+(\val{fpbytes} bytes) weights and cache. \val{gpus} H100s $\times$ \val{hbmgib} GiB = \val{nodegib} GiB
+(\val{nodegb} GB); reserve \val{reservegb} GB for runtime.
+\begin{steps}
+\item Weights: \val{params} billion $\times$ \val{fpbytes} bytes = \res{\val{weightsgb} GB}.
+\item Per token: $2 \times \val{layers} \times \val{kvheads} \times \val{headdim} \times \val{fpbytes}$ = \val{pertoken} bytes;
+  $\times$ \val{context} tokens = \res{\val{perrequest} GB} per request.
+\item Free for cache: \val{nodegb} $-$ \val{weightsgb} $-$ \val{reservegb} = \res{\val{budget} GB}.
+\item $\BatchSize_{\max} = \lfloor \val{budget} \div \val{perrequest} \rfloor$ = \res{\val{maxbatch}}.
+\end{steps}\vspace{4pt}
+{\centering
+\begin{tikzpicture}[sheet]
+  \pgfmathsetmacro\a{\val{barweights}} \pgfmathsetmacro\b{\a+\val{barreserve}} \pgfmathsetmacro\c{\b+\val{barkv}}
+  \draw[accbox] (0,0) rectangle (\a,14); \node[lab] at ({\a/2},7) {weights};
+  \draw[nbox] (\a,0) rectangle (\b,14);
+  \draw[hotbox] (\b,0) rectangle (\c,14);
+  \foreach \i in {1,...,11}{\draw[white, line width=0.4pt] ({\b+\i*\val{barone}},0) -- ({\b+\i*\val{barone}},14);}
+  \draw[nbox] (\c,0) rectangle (230,14);
+  \node[note, anchor=north] at ({(\b+\c)/2},-3) {\val{maxbatch} requests $\times$ \val{perrequest} GB};
+  \node[note, anchor=north west] at (0,-3) {\val{weightsgb} GB};
+  \node[note, anchor=south east] at (230,16) {node: \val{nodegb} GB};
+  \node[note, anchor=south west] at (0,16) {white: reserve, unused};
+\end{tikzpicture}\par}
+\takeaway{The cache, not the weights, sets the batch.}
+\end{practicebox}
+
+\vspace{10pt}
+\sheetsec{Your turn: finish it}
+\begin{practicebox}\boxtitle{Compress the cache or the weights?}
+Same node and reserve. (i) INT8 cache (one byte); (ii) INT4 weights (half a byte per parameter).\par\vspace{4pt}
+\textbf{Given:} the worked budget, per-token cache and weights.\par
+\textbf{You:} find each batch, and why one lever admits more.\par\vspace{24pt}
+\end{practicebox}
+\end{leftcol}%
+\begin{rightcol}
+\sheetsec{Common mistakes}
+\mistake{``The model fits on the GPU, so it can serve long contexts.''}%
+  {INT4 weights (\val{weightsfour} GB) fit one \val{hbmgb} GB H100, and one \val{contextk}K request brings it to
+   \val{onefit} GB; a second makes \val{twofit} GB, past \val{hbmgb}.}{}
+\mistake{``Rising p99 means we need a bigger, sharded replica.''}%
+  {If model time is flat while queueing grows, demand has outgrown the replicas. Sharding only divides each
+   request's compute and adds collectives. Add replicas, and shed load while they start: scaling response = detect +
+   decide + provision + warm-up, and provisioning plus warm-up alone take \val{coldmin} min.}{}
+
+\vspace{2pt}
+\sheetsec{Check yourself}
+\begin{qs}
+\item \assumed{} a decode step costs \val{qfixed} ms plus \val{qreq} ms per sequence; per-token target \val{qtarget} ms.
+  Find the knee and ceiling. Batch \val{qbatch}: what share of the ceiling, and does it meet the target? What batch does?
+\item \assumed{} a request fans out to \val{qleaves} leaves, each at its own p\val{leafpct}. What share of requests is
+  slow? What leaf percentile holds p\val{leafpct}, and which levers get there?
+\item Average per-token time is fine, but token gaps spike when long prompts arrive. Why? What do \val{chunk}-token
+  chunks buy and cost for a \val{prompt}-token prompt?
+\item \assumed{} a vision service takes \val{qlrate} requests/s at \val{qllat} ms mean time in system; each replica runs
+  batches of \val{lbatch} in \val{lsvc} ms, held under \val{lutil}\% utilization. In flight? Replicas? Why not size from the p99?
+\end{qs}
+\end{rightcol}
+\end{document}

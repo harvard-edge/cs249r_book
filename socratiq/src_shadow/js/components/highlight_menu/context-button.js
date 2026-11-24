@@ -1,4 +1,5 @@
 import {addToCopyContainer} from './send_text_highlight.js';
+import {searchTaxonomyItems} from '../../../../src_shared/taxonomy-map.js';
 
 export function insertContextButton(shadowRoot) {
   const contextButton = shadowRoot.querySelector('#context-button');
@@ -24,8 +25,9 @@ export function insertContextButton(shadowRoot) {
     right: 0;
     width: 100%;
     max-height: 250px;
-    background: white;
-    border: 1px solid #e2e8f0;
+    background: var(--socratiq-study-surface-elevated, #ffffff);
+    color: var(--socratiq-study-text, #0f172a);
+    border: 1px solid var(--socratiq-study-border, #e2e8f0);
     border-radius: 0.5rem;
     box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1);
     z-index: 50;
@@ -48,6 +50,9 @@ export function insertContextButton(shadowRoot) {
     </div>
     <div class="folder-filter p-1.5 rounded-md cursor-pointer flex items-center hover:bg-gray-100" data-filter="keyword">
       <span class="mr-1">🔑</span><span>Keywords</span>
+    </div>
+    <div class="folder-filter p-1.5 rounded-md cursor-pointer flex items-center hover:bg-gray-100" data-filter="taxonomy">
+      <span class="mr-1">🧭</span><span>Taxonomy</span>
     </div>
   `;
 
@@ -79,47 +84,99 @@ export function insertContextButton(shadowRoot) {
   dropUpMenu.appendChild(resultsContainer);
   inputWrapper.appendChild(dropUpMenu);
 
-  function populateResults(filter = null) {
-    resultsContainer.innerHTML = '';
+  function populateResults(filter = null, filterText = '') {
+    resultsContainer.replaceChildren();
     let visibleItems = [];
+    const normalizedFilter = String(filterText || '').trim().toLowerCase();
+
+    // Bridge active Focused Reader passage if available
+    const activeSource = typeof window !== 'undefined' ? window.__SOCRATIQ_ACTIVE_SOURCE__ : null;
+    const activeQuote = typeof activeSource?.quote === 'string' ? activeSource.quote.trim() : '';
+    if (activeQuote && (!filter || filter === 'section')) {
+      const activeSection = typeof activeSource.section === 'string' ? activeSource.section.trim() : '';
+      const activeLabel = `Current reader passage${activeSection ? ' (' + activeSection + ')' : ''}`;
+      const matchesFilter = !normalizedFilter
+        || 'current reader passage'.includes(normalizedFilter)
+        || activeLabel.toLowerCase().includes(normalizedFilter)
+        || (activeSection && activeSection.toLowerCase().includes(normalizedFilter))
+        || activeQuote.toLowerCase().includes(normalizedFilter);
+      if (matchesFilter) {
+        const resultItem = createResultItem(
+          '📖',
+          activeLabel,
+          () => {
+            const content = `Current reader passage${activeSection ? ' (' + activeSection + ')' : ''}\n\n${activeQuote}`;
+            addToCopyContainer(content, shadowRoot);
+            dropUpMenu.style.display = 'none';
+          }
+        );
+        resultsContainer.appendChild(resultItem);
+      }
+    }
     
     // Search subsections
     if (window.subsections && (!filter || filter === 'subsection')) {
       for (const [key, value] of Object.entries(window.subsections)) {
-        visibleItems.push({ 
-          type: 'subsection', 
-          key, 
-          value: {
-            title: key,
-            content: value.text
-          }
-        });
+        if (!normalizedFilter || key.toLowerCase().includes(normalizedFilter)) {
+          visibleItems.push({ 
+            type: 'subsection', 
+            key, 
+            value: {
+              title: key,
+              content: value.text
+            }
+          });
+        }
       }
     }
 
     // Search keywords
     if (window.keywords && (!filter || filter === 'keyword')) {
       for (const [key, value] of Object.entries(window.keywords)) {
-        visibleItems.push({ 
-          type: 'keyword', 
-          key, 
-          value: {
-            title: key,
-            content: value.text
-          }
-        });
+        if (!normalizedFilter || key.toLowerCase().includes(normalizedFilter)) {
+          visibleItems.push({ 
+            type: 'keyword', 
+            key, 
+            value: {
+              title: key,
+              content: value.text
+            }
+          });
+        }
       }
     }
 
     // Search section data
     if (window.sectionData && (!filter || filter === 'section')) {
       for (const [key, value] of Object.entries(window.sectionData)) {
-        visibleItems.push({ 
-          type: 'section', 
-          key, 
+        const sectionTitle = value.title || key;
+        if (!normalizedFilter || sectionTitle.toLowerCase().includes(normalizedFilter)) {
+          visibleItems.push({ 
+            type: 'section', 
+            key, 
+            value: {
+              title: value.title,
+              content: value.content
+            }
+          });
+        }
+      }
+    }
+
+    // Search ML Systems Taxonomy items (placed after sections/subsections/keywords in 'all' so index-0 tests stay unchanged)
+    if (!filter || filter === 'taxonomy') {
+      const currentUrl = typeof window !== 'undefined' ? (window.location?.href || '') : '';
+      const taxonomyMatches = searchTaxonomyItems(filterText, currentUrl);
+      const itemsToInclude = filter === 'taxonomy' || normalizedFilter
+        ? taxonomyMatches
+        : taxonomyMatches.slice(0, 6);
+      for (const taxItem of itemsToInclude) {
+        visibleItems.push({
+          type: 'taxonomy',
+          key: taxItem.key,
           value: {
-            title: value.title,
-            content: value.content
+            title: taxItem.title,
+            content: taxItem.content
           }
         });
       }
@@ -129,7 +186,8 @@ export function insertContextButton(shadowRoot) {
     visibleItems.forEach(item => {
       const icon = item.type === 'section' ? '📚' : 
                   item.type === 'subsection' ? '📑' : 
-                  item.type === 'keyword' ? '🔑' : '📎';
+                  item.type === 'keyword' ? '🔑' :
+                  item.type === 'taxonomy' ? '🧭' : '📎';
       
       const resultItem = createResultItem(
         icon, 
@@ -148,12 +206,21 @@ export function insertContextButton(shadowRoot) {
     if (firstItem) firstItem.focus();
   }
 
-  // Helper function to create result items
+  function renderItems(filterText = '') {
+    populateResults(null, filterText);
+  }
+
+  // Helper function to create result items safely without innerHTML
   function createResultItem(icon, text, clickHandler) {
     const item = document.createElement('div');
     item.className = 'at-mention-item p-2 hover:bg-gray-100 cursor-pointer flex items-center';
     item.setAttribute('tabindex', '0');
-    item.innerHTML = `<span class="mr-2">${icon}</span><span>${text}</span>`;
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'mr-2';
+    iconSpan.textContent = icon;
+    const textSpan = document.createElement('span');
+    textSpan.textContent = text;
+    item.append(iconSpan, textSpan);
     item.addEventListener('click', (event) => {
       event.stopPropagation();
       clickHandler();
@@ -259,7 +326,8 @@ export function insertContextButton(shadowRoot) {
 
   contextButton.addEventListener('click', (event) => {
     event.stopPropagation();
-    if (dropUpMenu.style.display === 'none' || !dropUpMenu.style.display) {
+    if (dropUpMenu.style.display === 'none' || !dropUpMenu.style.display || dropUpMenu.classList.contains('hidden')) {
+      dropUpMenu.classList.remove('hidden');
       dropUpMenu.style.display = 'flex';
       isFolderFocused = true;
       selectedFolderIndex = 0;
@@ -276,4 +344,29 @@ export function insertContextButton(shadowRoot) {
       dropUpMenu.style.display = 'none';
     }
   });
+
+  function attachActiveReaderPassage() {
+    const activeSource = typeof window !== 'undefined' ? window.__SOCRATIQ_ACTIVE_SOURCE__ : null;
+    const activeQuote = typeof activeSource?.quote === 'string' ? activeSource.quote.trim() : '';
+    if (!activeQuote) {
+      const copyContainer = shadowRoot.getElementById('copy-container');
+      if (copyContainer) {
+        copyContainer.querySelectorAll('.copy-item[data-active-reader-passage="true"]').forEach(el => el.remove());
+        if (copyContainer.children.length === 0) {
+          copyContainer.classList.add('hidden');
+        }
+      }
+      return;
+    }
+    const activeSection = typeof activeSource.section === 'string' ? activeSource.section.trim() : '';
+    const content = `Current reader passage${activeSection ? ' (' + activeSection + ')' : ''}\n\n${activeQuote}`;
+    addToCopyContainer(content, shadowRoot, { activeReaderPassage: true });
+  }
+
+  attachActiveReaderPassage();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('socratiq:open', attachActiveReaderPassage);
+    window.addEventListener('socratiq:study-open', attachActiveReaderPassage);
+    window.addEventListener('socratiq:active-source-updated', attachActiveReaderPassage);
+  }
 }

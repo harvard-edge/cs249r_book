@@ -3,7 +3,7 @@ number-offset: [4]
 quiz: nn_computation_quizzes.json
 concepts: nn_computation_concepts.yml
 engine: jupyter
-notation-local: [\AllOnesVector, \BatchLabelComponent, \BatchLoss, \BatchPredictedProbability, \ChainRuleInput, \ChainRuleIntermediate, \ChainRuleOutput, \CorrectClassIndex, \CorrectClassLogit, \CorrectClassProbability, \CurrentLayerWidth, \CurrentModelParameters, \ExampleIndex, \FinalLayerWidth, \HiddenUnitOutput, \InputFeatureIndex, \MacAccumulator, \ManualReviewCost, \ManualReviewFraction, \MaximumLogit, \MisclassifiedFraction, \NetworkFunction, \NetworkOutput, \NeuronActivation, \NeuronConnectionWeight, \NeuronIndex, \PenultimateLayerWidth, \PreviousLayerWidth, \TrueLabelComponent, \UpdatedModelParameters, \WeightPenaltyStrength]
+notation-local: [\AllOnesVector, \BatchLabelComponent, \BatchLoss, \BatchPredictedProbability, \ChainRuleInput, \ChainRuleIntermediate, \ChainRuleOutput, \CorrectClassIndex, \CorrectClassLogit, \CorrectClassProbability, \CurrentLayerWidth, \CurrentModelParameters, \EpochIndex, \ExampleIndex, \FinalLayerWidth, \HiddenUnitOutput, \InputFeatureIndex, \MacAccumulator, \ManualReviewCost, \ManualReviewFraction, \MaximumLogit, \MisclassifiedFraction, \NetworkFunction, \NetworkOutput, \NeuronActivation, \NeuronConnectionWeight, \NeuronIndex, \PenultimateLayerWidth, \PreviousLayerWidth, \TrueLabelComponent, \UpdatedModelParameters, \WeightPenaltyStrength]
 ---
 
 # Neural Computation {#sec-neural-computation}
@@ -36,7 +36,7 @@ notation-local: [\AllOnesVector, \BatchLabelComponent, \BatchLoss, \BatchPredict
 
 ::: {.content-visible unless-format="pdf"}
 ::: {.column-margin}
-![](images/svg/margin_stack.svg){width="100%" fig-alt="Machine Learning Systems Architecture Stack"}
+![](images/svg/margin_stack.svg){width="100%" fig-alt="Seven-layer ML systems stack, hardware at the bottom to applications at the top, used as a chapter map: models is highlighted in full crimson as the chapter's focus; training is strongly shaded; hardware is moderately shaded; frameworks and serving are lightly shaded; operations and applications are gray, not covered; the data bar beside the stack is faint."}
 
 *Architecture stack focus for this chapter.*
 :::
@@ -146,15 +146,17 @@ class MNISTInference:
     out_dim_str = fmt(out_dim, precision=0, commas=False)
 ```
 
-Recognizing one handwritten digit costs the small network at the center of this chapter `{python} MNISTInference.total_macs_str`. A multiply-accumulate (MAC) multiplies one weight by one input value and adds the product to a running sum ($\MacAccumulator\leftarrow \MacAccumulator+ \ModelWeight\cdot \LayerInputComponent$), and the usual convention counts it as two floating-point operations ($1\text{ MAC} = 2\text{ FLOPs}$), so the digit costs `{python} MNISTInference.total_flops_str`. None of that work is a logical branch. A program that once tested pixel thresholds and stroke patterns with if-then-else rules has become a fixed sequence of arithmetic. How fast it runs now depends on how quickly the machine can supply operands to that arithmetic, and so on whether memory bandwidth or arithmetic capacity runs out first. Such a program also fails differently. It rarely fails logically; it fails numerically, as values grow or shrink until they stop carrying information.
+Recognizing one $28{\times}28$ handwritten digit from the Modified National Institute of Standards and Technology (MNIST) dataset [@lecun1998] costs the small network at the center of this chapter `{python} MNISTInference.total_macs_str`. The network flattens those 784 grayscale pixels and maps them through hidden layers of `{python} MNISTInference.h1_dim_str` and `{python} MNISTInference.h2_dim_str` units to `{python} MNISTInference.out_dim_str` class scores (`784` $\to$ `128` $\to$ `64` $\to$ `10`), holding `{python} MNISTInference.total_params_str` (`{python} MNISTInference.weight_kb_str` in 32-bit floating point, FP32). A multiply-accumulate (MAC) multiplies one weight by one input value and adds the product to a running sum ($\MacAccumulator\leftarrow \MacAccumulator+ \ModelWeight\cdot \LayerInputComponent$), and the usual convention counts it as two floating-point operations ($1\text{ MAC} = 2\text{ FLOPs}$), so the digit costs `{python} MNISTInference.total_flops_str`.
 
-The data pipeline of @sec-data-engineering ends by delivering a clean, versioned training example, and that example by itself teaches the model nothing. Learning begins when the digit crosses from the pipeline into the model, the algorithm axis of D·A·M, where mathematical operators fix the work to be done and the state to be held. Under the silicon contract (principle \ref{pri-silicon-contract}), those operators supply the model's side of the contract, while precision, data layout, implementation, and hardware fix how many bytes actually move and which machine resource saturates first.
+None of that work is a logical branch. A program that once tested pixel thresholds and stroke patterns with if-then-else rules has become a fixed sequence of arithmetic. How fast it runs now depends on how quickly the machine can supply operands to that arithmetic, and so on whether memory bandwidth or arithmetic capacity runs out first. Such a program also fails differently. It rarely fails logically; it fails numerically, as values grow or shrink until they stop carrying information.
+
+That arithmetic begins where the data pipeline of @sec-data-engineering ends, because a clean, versioned training example by itself teaches the model nothing. Learning begins when the digit crosses from the pipeline into the model, the algorithm axis of D·A·M, where mathematical operators fix the work to be done and the state to be held. Under the silicon contract (principle \ref{pri-silicon-contract}), those operators supply the model's side of the contract, while precision, data layout, implementation, and hardware fix how many bytes actually move and which machine resource saturates first.
 
 ::: {.column-margin .margin-pointer}
 ↩ The hardware's side of the silicon contract, the terms that memory bandwidth, peak compute rate, and fixed overhead set for any model, is established on the single-node stack in @sec-ml-systems-architectural-anchor.
 :::
 
-The digit passes through five stages in the life of a model. The *forward pass* carries the image through three weight matrices to ten class scores. The *loss* reduces those scores to one number that says how wrong they are. The *backward pass* carries that signal back through the layers with the chain rule, and the *update* adjusts every parameter. *Serving* runs the forward pass alone with frozen weights.
+The digit passes through five stages in the life of a model. The *forward pass* carries the image through three weight matrices to ten class scores, and the *loss* reduces those scores to one number that says how wrong they are. The *backward pass* carries that signal back through the layers with the chain rule, and the *update* adjusts every parameter. During *serving*, by contrast, the model runs the forward pass alone with frozen weights.
 
 Two of those stages leave per-parameter values behind. The backward pass produces one *gradient* per parameter, a number that says how much the loss would change if that parameter changed slightly, and the update moves each parameter a small step in the direction that lowers the loss. Many update rules also keep extra running values for each parameter, such as an average of its recent gradients, and those values are the *optimizer state*.
 
@@ -170,16 +172,6 @@ The iron law of ML systems (principle \ref{pri-iron-law}) charges each stage for
 
 : **Where Each Stage Spends Its Budget**: Work, data movement, and retained state for the five stages in the life of a model, for the running 784-128-64-10 network. Training repeats the first four stages for every batch, while serving runs only the forward pass. Later sections derive each row, and the summary returns to the table. {#tbl-nn-computation-stage-costs tbl-colwidths="[14,24,24,19,19]"}
 
-::: {#exmp-nn-computation-running-example-mnist-digit-recognition .callout-example title="Running example: MNIST digit recognition"}
-
-**Scenario**: A handwritten-digit classifier receives $28{\times}28$ grayscale images from the Modified National Institute of Standards and Technology (MNIST) dataset [@lecun1998], flattens each into 784 pixel values, and maps them through hidden layers of `{python} MNISTInference.h1_dim_str` and `{python} MNISTInference.h2_dim_str` units to `{python} MNISTInference.out_dim_str` class scores, one per digit (784 → 128 → 64 → 10).
-
-**Diagnosis**: The network holds `{python} MNISTInference.total_params_str`, which occupy `{python} MNISTInference.weight_kb_str` in 32-bit floating point (FP32), and it spends `{python} MNISTInference.total_macs_str` (`{python} MNISTInference.total_flops_str`) to classify one digit. Those three numbers summarize what one classification costs.
-
-**Systems lesson**: The task is small enough to compute by hand yet exercises every mechanism that larger networks scale up. Each later section either derives one of these numbers or asks what happens to it when the network trains, grows, or ships.
-
-:::
-
 Even this small network counts as deep in the sense the field uses, because it stacks more than one layer of learned features between input and output. Each of its layers computes new features from the layer before, and training learns those features from examples instead of receiving them from a designer.
 
 ::: {#dfn-nn-computation-deep-learning .callout-definition title="Deep learning"}
@@ -192,7 +184,9 @@ Even this small network counts as deep in the sense the field uses, because it s
 
 :::
 
-Learning representations end to end also introduces engineering failure modes that conventional software debugging cannot isolate. Deep learning failures produce subtle symptoms: gradient instabilities\index{Gradient instabilities!training failure mode}[^fn-gradient-instabilities-depth] that stop training from making progress, numerical precision errors that corrupt parameter state across millions of updates, or inefficient memory access patterns in tensor operations (operations on multidimensional arrays of numbers) that leave accelerator compute units underutilized. Resolving these failures requires reasoning about the physical execution of tensor algebra on hardware rather than stepping through procedural control flow. Those hardware demands depend first on representation, that is, on whether patterns are expressed through hand-authored rules, engineered statistical features, or learned parameters.
+Learning representations end to end also introduces engineering failure modes that conventional software debugging cannot isolate. Deep learning failures produce subtle symptoms: gradient instabilities\index{Gradient instabilities!training failure mode}[^fn-gradient-instabilities-depth] that stop training from making progress, numerical precision errors that corrupt parameter state across millions of updates, or inefficient memory access patterns in tensor operations (operations on multidimensional arrays of numbers) that leave accelerator compute units underutilized. Resolving these failures requires reasoning about the physical execution of tensor algebra on hardware rather than stepping through procedural control flow.
+
+The chapter traces that tensor execution across the five stages of @tbl-nn-computation-stage-costs. @Sec-neural-computation-evolution-ml-paradigms-ec9c first contrasts rules, engineered features, and learned representations to explain why neural computation trades low operation counts for regular dense arithmetic. @Sec-neural-computation-neural-network-fundamentals-07e4 builds the forward pass from single neurons to batched matrix layers, @sec-neural-computation-learning-process-0b83 derives the loss, backward pass, optimizer state, and training memory footprint, and @sec-neural-computation-inference-pipeline-5372 strips that training scaffolding away to expose the leaner serving pass before @sec-neural-computation-case-study-usps-digit-recognition-97be traces the full loop on postal digit recognition. Every one of those hardware demands begins with a choice of representation, because how a program expresses patterns fixes the operations a machine must execute.
 
 ```{python}
 #| echo: false
@@ -231,7 +225,19 @@ class EarlySystemsClaims:
 
 ## Computing with Patterns {#sec-neural-computation-evolution-ml-paradigms-ec9c}
 
-Before a learned network spent `{python} MNISTInference.total_macs_str` on that $28{\times}28$ digit, earlier generations of computing attacked the same classification problem with two simpler representation strategies. An illustrative rule tree tests roughly one hundred pixel comparisons per digit; an engineered feature pipeline performs several thousand arithmetic operations; the three-layer neural network performs more than one hundred thousand multiply-accumulates. Each strategy replaced a predecessor whose representations ran out of expressive reach on unconstrained handwriting, and each step up in representation capacity shifted which hardware resource bound execution.
+Before a learned network spent `{python} MNISTInference.total_macs_str` on a $28{\times}28$ handwritten digit (example \ref{exmp-nn-computation-running-example-mnist-digit-recognition}), earlier generations of computing attacked the same classification problem with two simpler representation strategies. An illustrative rule tree tests roughly one hundred pixel comparisons per digit, an engineered feature pipeline performs several thousand arithmetic operations, and the three-layer neural network performs more than one hundred thousand multiply-accumulates.
+
+::: {#exmp-nn-computation-running-example-mnist-digit-recognition .callout-example title="Running example: MNIST digit recognition"}
+
+**Scenario**: A handwritten-digit classifier receives $28{\times}28$ grayscale images from the MNIST dataset [@lecun1998], flattens each into 784 pixel values, and maps them through hidden layers of `{python} MNISTInference.h1_dim_str` and `{python} MNISTInference.h2_dim_str` units to `{python} MNISTInference.out_dim_str` class scores, one per digit (784 → 128 → 64 → 10).
+
+**Diagnosis**: The network holds `{python} MNISTInference.total_params_str`, which occupy `{python} MNISTInference.weight_kb_str` in FP32, and it spends `{python} MNISTInference.total_macs_str` (`{python} MNISTInference.total_flops_str`) to classify one digit. Those three numbers summarize what one classification costs.
+
+**Systems lesson**: The task is small enough to compute by hand yet exercises every mechanism that larger networks scale up. Each later section either derives one of these numbers or asks what happens to it when the network trains, grows, or ships.
+
+:::
+
+Holding that $28{\times}28$ task fixed across all three eras shows why learned representations spend three orders of magnitude more arithmetic than a rule tree. Each strategy replaced a predecessor whose representations ran out of expressive reach on unconstrained handwriting, and each step up in representation capacity shifted which hardware resource limited execution.
 
 ::: {.column-margin .margin-pointer}
 ↩ The succession of logic, knowledge, feature-engineering, and infrastructure bottlenecks that these paradigms answered is established in @sec-introduction-ai-paradigm-evolution-ae2b.
@@ -346,9 +352,7 @@ Line/.style={line width=1.0pt,black!50,text=black},
 
 An illustrative rule-based classifier for the digit compares pixel intensities against fixed thresholds, checks stroke patterns in localized regions, and branches on the results. Under this toy implementation, the computation requires roughly `{python} ParadigmSystemsCost.rb_comparisons_str` over `{python} ParadigmSystemsCost.rb_mem_bytes_str` of pixel data, a workload that is small, predictable, and easily held in an ordinary CPU cache. The comparison establishes a workload baseline, not the accuracy of a production rule system. Rules fail on coverage rather than cost. Every new writing style demands new branches, the same coverage problem that stalled the expert systems\index{Expert systems!knowledge engineering} of @sec-introduction-expert-systems-era-knowledge-bottleneck-f928.
 
-Classical machine learning replaced the rule for every situation with patterns found in examples, yet its success still depended on human insight to define which patterns to look for, a process known as feature engineering\index{Feature engineering!classical ML}\index{Classical machine learning!feature engineering} (@sec-introduction-statistical-learning-era-feature-engineering-bottleneck-8cf5).
-
-Feature engineering transformed raw data into representations that expose patterns to learning algorithms. The histogram of oriented gradients (HOG)[^fn-hog-feature-descriptor] [@dalal2005hog] exemplifies this approach. In @fig-hog, the feature-extraction pipeline divides an image into spatial cells and bins local pixel gradient directions (the direction in which brightness changes fastest, a different quantity from the training gradients of this chapter) into an eight-bin orientation histogram for each cell, turning raw pixels into shape descriptors that tolerate lighting changes and small shifts in position.
+Classical machine learning replaced the rule for every situation with patterns found in examples, yet its success still depended on human insight to define which patterns to look for, a process known as feature engineering\index{Feature engineering!classical ML}\index{Classical machine learning!feature engineering} (@sec-introduction-statistical-learning-era-feature-engineering-bottleneck-8cf5). The histogram of oriented gradients (HOG)[^fn-hog-feature-descriptor] [@dalal2005hog] exemplifies how engineered representations expose those patterns to a learning algorithm. In @fig-hog, the feature-extraction pipeline divides an image into spatial cells and bins local pixel gradient directions (the direction in which brightness changes fastest, a different quantity from the training gradients of this chapter) into an eight-bin orientation histogram for each cell, turning raw pixels into shape descriptors that tolerate lighting changes and small shifts in position.
 
 ::: {#fig-hog fig-env="figure" fig-pos="htb" fig-cap="**HOG Method**: A local image patch is divided into cells, gradient orientations are accumulated into a histogram, and the resulting descriptor summarizes local shape while reducing sensitivity to illumination. Source: Figure 5 of @bakheet2021hog, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)." fig-alt="Diagram of HOG extraction: an input image grid with one cell highlighted, a magnified cell containing gradient-direction arrows, an orientation guide, and an eight-bin histogram labeled HOG feature."}
 
@@ -1176,9 +1180,9 @@ The XOR network is the smallest case of a general result. The **universal approx
 
 [^fn-universal-approximation-theorem]: **Universal approximation theorem**\index{Universal approximation theorem!depth vs. width}: Under conditions on the activation, target function, compact domain, and approximation tolerance, a sufficiently wide single-hidden-layer network can approximate the target arbitrarily well [@cybenko1989; @hornik1989]. This existence result is nonconstructive: it does not specify how to find the weights or how many neurons practical training will require. Why depth can nonetheless beat width is the subject of @sec-neural-computation-depth-matters-power-hierarchical-representations-f83c.
 
-Comparing activation functions requires one idea from training, which @sec-neural-computation-learning-process-0b83 develops fully. Training adjusts each weight by its gradient, the measure of how much the loss would change if that weight moved slightly. That signal travels backward through the network, a pass called *backpropagation*, and is multiplied at each layer by the activation's slope, so an activation whose slope is near zero passes almost no learning signal to the layers before it.
+Once a network stacks layers within that hardware envelope, comparing activation functions requires one idea from training, which @sec-neural-computation-learning-process-0b83 develops fully. Training adjusts each weight by its gradient, the measure of how much the loss would change if that weight moved slightly. That signal travels backward through the network, a pass called *backpropagation*, and is multiplied at each layer by the activation's slope, so an activation whose slope is near zero passes almost no learning signal to the layers before it.
 
-The choice of activation function therefore affects both learning and computational efficiency. ReLU[^fn-relu-hardware-efficiency] ($\max(0, \NeuronPreactivation)$) became a common hidden-layer activation for feed-forward networks because it is inexpensive, has local derivative one for positive inputs, and can produce sparse activations [@nair2010rectified; @glorot2011deep]. Earlier differentiable deep networks often used sigmoid or tanh. Their smooth S-curves saturate, a failure the sigmoid discussion below develops. That contrast is not a simple ranking: sigmoid remains appropriate for some binary outputs, tanh remains useful when bounded zero-centered activations are desired, and modern architectures use additional activation families. The relevant design question is which function supplies the required output semantics and gradient behavior at an acceptable execution cost. @Fig-activation-functions charts the response curves and output ranges of three standard element-wise nonlinearities alongside the vector-level softmax function, contrasting their saturation regimes.
+The choice of activation function therefore affects both learning and computational efficiency. ReLU[^fn-relu-hardware-efficiency] ($\max(0, \NeuronPreactivation)$) became a common hidden-layer activation for feed-forward networks because it is inexpensive, has local derivative one for positive inputs, and can produce sparse activations [@nair2010rectified; @glorot2011deep]. Earlier differentiable deep networks often used sigmoid or tanh, whose smooth S-curves saturate as the sigmoid discussion below develops. That contrast is not a simple ranking: sigmoid remains appropriate for some binary outputs, tanh remains useful when bounded zero-centered activations are desired, and modern architectures use additional activation families. The relevant design question is which function supplies the required output semantics and gradient behavior at an acceptable execution cost. @Fig-activation-functions charts the response curves and output ranges of three standard element-wise nonlinearities alongside the vector-level softmax function, contrasting their saturation regimes.
 
 [^fn-relu-hardware-efficiency]: **ReLU (rectified linear unit)**\index{ReLU!etymology}\index{ReLU!hardware efficiency}: ReLU's cheap comparison-and-select evaluation and its non-saturating positive branch made deep networks markedly faster to train; in the AlexNet paper, a four-layer convolutional network reached 25 percent training error on CIFAR-10 six times sooner with ReLU than with tanh [@krizhevsky2012imagenet].
 
@@ -1219,7 +1223,7 @@ The choice of activation function therefore affects both learning and computatio
         MyStyle,
         ymin=-0.05, ymax=1.05,
         xmin=-10.5,xmax=10.75,
-        xtick={-10.0,-7.5,-5,0,-2.5,0.0,2.5,5.0,7.5,10.0},]
+        xtick={-10.0,-7.5,-5.0,-2.5,0.0,2.5,5.0,7.5,10.0},]
         \addplot[
 BlueLine,line width=2pt,
             domain = -10:10,
@@ -1236,7 +1240,7 @@ BlueLine,line width=2pt,
         MyStyle,
         ymin=-1.1, ymax=1.1,
         xmin=-10.5,xmax=10.75,
-        xtick={-10.0,-7.5,-5,0,-2.5,0.0,2.5,5.0,7.5,10.0},
+        xtick={-10.0,-7.5,-5.0,-2.5,0.0,2.5,5.0,7.5,10.0},
         ytick={-1.00,-0.75,-0.5,-0.25,0.0,0.25,0.50,0.75,1.00},
     ]
         \addplot[
@@ -1255,11 +1259,11 @@ BlueLine,line width=2pt,
         MyStyle,
         ymin=-0.5, ymax=10.5,
         xmin=-10.5,xmax=10.75,
-        xtick={-10.0,-7.5,-5,0,-2.5,0.0,2.5,5.0,7.5,10.0},
+        xtick={-10.0,-7.5,-5.0,-2.5,0.0,2.5,5.0,7.5,10.0},
         ytick={0,2,4,6,8,10},
     ]
         \addplot[
-            red,line width=2pt,
+            RedLine,line width=2pt,
             domain = -10:10,
             samples = 100
         ]
@@ -1274,13 +1278,13 @@ BlueLine,line width=2pt,
         MyStyle,
         ymin=-0.002, ymax=0.052,
         xmin=-10.5,xmax=10.75,
-        xtick={-10.0,-7.5,-5,0,-2.5,0.0,2.5,5.0,7.5,10.0},
+        xtick={-10.0,-7.5,-5.0,-2.5,0.0,2.5,5.0,7.5,10.0},
         ytick={0.000,0.005,0.010,0.015,0.020,0.025,0.030,0.035,0.040,0.045,0.050},
         scaled y ticks = false,
    yticklabel style={/pgf/number format/precision=3},
     ]
         \addplot[
-            green!70!black,line width=2pt,
+            GreenLine,line width=2pt,
             domain = -10:10,
             samples = 100
         ]
@@ -1307,7 +1311,7 @@ Sigmoid's main limitation is saturation. For inputs with large absolute values (
 ##### Tanh {#sec-neural-computation-tanh-e981}
 
 The hyperbolic tangent[^fn-tanh-etymology-activation] centers output activations around zero over the interval $(-1,1)$ (@eq-tanh):
-$$ \tanh(\NeuronPreactivation) = \frac{e^\NeuronPreactivation- e^{-\NeuronPreactivation}}{e^\NeuronPreactivation+ e^{-\NeuronPreactivation}} $$ {#eq-tanh}
+$$ \tanh(\NeuronPreactivation) = \frac{e^{\NeuronPreactivation}- e^{-\NeuronPreactivation}}{e^{\NeuronPreactivation}+ e^{-\NeuronPreactivation}} $$ {#eq-tanh}
 
 [^fn-tanh-etymology-activation]: **Tanh (hyperbolic tangent)**\index{Tanh!etymology}\index{Tanh!zero-centered advantage}: By centering its output range on zero, `tanh` can reduce the correlated-update behavior associated with all-positive activations. Its computational cost is similar to sigmoid because it also depends on exponential approximations, while its saturation behavior still permits vanishing gradients.
 
@@ -1327,7 +1331,7 @@ ReLU is not without drawbacks. The **dying ReLU problem**\index{Dying ReLU probl
 ##### Softmax {#sec-neural-computation-softmax-ebe5}
 
 Unlike *element-wise* activation functions that operate independently on each value, softmax\index{Activation function!softmax}\index{Softmax!probability distribution}[^fn-softmax-etymology-probability] is a *vector-level* function that considers all values together to produce a probability distribution. In simple classifiers, softmax is commonly used in the output layer rather than as an element-wise hidden activation; it also normalizes learned importance-score vectors in attention architectures. The softmax function is defined in @eq-softmax:
-$$ \text{softmax}(\NeuronPreactivation_i) = \frac{e^{\NeuronPreactivation_i}}{\sum_{j=1}^\ClassCount e^{\NeuronPreactivation_j}} $$ {#eq-softmax}
+$$ \text{softmax}(\NeuronPreactivation_i) = \frac{e^{\NeuronPreactivation_i}}{\sum_{j=1}^{\ClassCount} e^{\NeuronPreactivation_j}} $$ {#eq-softmax}
 
 [^fn-softmax-etymology-probability]: **Softmax**\index{Softmax!etymology}\index{Softmax!numerical stability}: The name, coined by @bridle1990probabilistic, reflects its role as a "soft" or differentiable version of `argmax`, a function that must evaluate an entire vector to find its maximum value. This vector-wise operation is not used as a drop-in replacement for element-wise nonlinearities such as ReLU, but it is central whenever a model must normalize a vector of scores, including classification heads and attention layers. Direct exponentiation can overflow in 32-bit floating point, so stable implementations subtract the largest logit first (@sec-neural-computation-batch-loss-calculation-methods-f02b).
 
@@ -1375,7 +1379,7 @@ class ActivationLogic:
     activation_ratio_mult_str = fmt_multiple(ratio, commas=False, precision=0)
 ```
 
-Activation choice also carries a silicon cost, a **transistor tax**\index{Transistor tax!definition}\index{Transistor tax!activation functions}\index{Logic unit cost!activation functions} paid in circuit complexity, area, and switching energy. A ReLU datapath needs only a sign-bit comparator and a multiplexer, roughly `{python} ActivationLogic.relu_transistor_str` transistor equivalents. An exponential approximation for sigmoid or tanh is modeled here as a stylized budget of `{python} ActivationLogic.sigmoid_transistor_str` transistor equivalents, `{python} ActivationLogic.activation_ratio_mult_str` the comparator, an order-of-magnitude teaching ratio rather than a constant across manufacturing nodes.
+Alongside those mathematical and gradient properties, activation choice carries a silicon cost, a **transistor tax**\index{Transistor tax!definition}\index{Transistor tax!activation functions}\index{Logic unit cost!activation functions} paid in circuit complexity, area, and switching energy. A ReLU datapath needs only a sign-bit comparator and a multiplexer, roughly `{python} ActivationLogic.relu_transistor_str` transistor equivalents. An exponential approximation for sigmoid or tanh is modeled here as a stylized budget of `{python} ActivationLogic.sigmoid_transistor_str` transistor equivalents, `{python} ActivationLogic.activation_ratio_mult_str` the comparator, an order-of-magnitude teaching ratio rather than a constant across manufacturing nodes.
 
 Logic area is only half the cost. An element-wise activation run as its own kernel is limited by memory traffic rather than arithmetic, a gap the forward-pass analysis later quantifies, so compilers fuse it into the preceding matrix multiplication, merging the two into one kernel so that the intermediate values never travel back to main memory.
 
@@ -1470,7 +1474,7 @@ Line/.style={line width=0.35pt,black!60,-latex}
 
 :::
 
-As data flows through the network, it is transformed at each layer to extract meaningful patterns. Each layer applies the neuron's weighted sum and activation in parallel across all its neurons, and its outputs become the next layer's inputs. Simple features detected in early layers combine into increasingly complex patterns in deeper layers.
+That progression works as a stage-by-stage handoff across the schematic. Each layer applies the neuron's weighted sum and activation in parallel across all its neurons, and its outputs become the next layer's inputs so simple features detected in early layers combine into increasingly complex patterns in deeper layers.
 
 On the machine, a layer is one matrix multiplication over all of its neurons at once, and the boundary between layers is where data moves and waits. Each layer writes its output as an activation tensor that the next layer must read. Inference can discard that tensor once the next layer has consumed it, and training must keep it until the backward pass. The next layer cannot start until that tensor exists, which is the source of the latency floor that no amount of parallel hardware inside a layer removes.
 
@@ -1742,82 +1746,6 @@ For the running MNIST classifier, the data format and task fix the two ends of t
 ↪ How spatial locality and weight sharing replace the parameter overhead of fully connected layers is developed as a spatial inductive bias in @sec-network-architectures-cnns-spatial-pattern-processing-5b8d.
 :::
 
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MNIST INPUT DIMENSION—FEEDFORWARD SECTION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Input-layer width prose in @sec-neural-computation-feedforward-
-# │          network-architecture-d2cf.
-# │
-# │ Goal: Derive flattened MNIST input width from image dimensions.
-# └─────────────────────────────────────────────────────────────────────────────
-
-# ┌── LEGO ───────────────────────────────────────────────
-class MnistInputDimLocal:
-    """Namespace for MNIST flattened input width."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    mnist_input_neurons = Datasets.MNIST.image_width * Datasets.MNIST.image_height
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mnist_input_str = fmt(mnist_input_neurons, precision=0, commas=False)
-```
-
-Between the fixed `{python} MnistInputDimLocal.mnist_input_str`-unit input layer and the 10-unit logit layer, the number of hidden layers and their widths remain open engineering choices. Adding layers increases depth so that successive transformations can compose simple edges into strokes and digit parts, whereas widening a layer expands how many distinct features the network can represent at the same level of abstraction.
-
-```{python}
-#| echo: false
-from mlsysim.physics import calc_dense_params
-from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_qty_int, check
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MNIST NETWORK SCALE COMPARISON
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Hidden-layer width trade-off prose in @sec-neural-computation-
-# │          feedforward-network-architecture-d2cf.
-# │
-# │ Goal: Quantify parameter and memory cost of wide vs. modest hidden layers.
-# └─────────────────────────────────────────────────────────────────────────────
-
-# ┌── LEGO ───────────────────────────────────────────────
-class MnistScaleComparison:
-    """Namespace for wide vs. modest MNIST MLP scale comparison."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    mnist_input_dim = Scenarios.MnistDenseNetwork.layer_widths[0]
-    mnist_output_dim = Scenarios.MnistDenseNetwork.layer_widths[-1]
-    mnist_large_l1 = 1000  # scenario assumption: a wide MLP
-    mnist_large_l2 = 1000
-    mnist_small_l1 = 100  # scenario assumption: a modest MLP
-    mnist_small_l2 = 100
-    mnist_large_arch = [mnist_input_dim, mnist_large_l1, mnist_large_l2, mnist_output_dim]
-    mnist_small_arch = [mnist_input_dim, mnist_small_l1, mnist_small_l2, mnist_output_dim]
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    mnist_large_params = calc_dense_params(mnist_large_arch)
-    mnist_large_mem = mnist_large_params * BYTES_FP32
-    mnist_small_params = calc_dense_params(mnist_small_arch)
-    mnist_small_mem = mnist_small_params * BYTES_FP32
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(mnist_small_l1 == mnist_small_l2 and mnist_large_l1 == mnist_large_l2, "Prose widens both hidden layers equally.")
-    check(mnist_large_params > mnist_small_params, "Large MLP parameters must exceed small MLP")
-    check(mnist_large_mem > mnist_small_mem, "Large MLP memory must exceed small MLP")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mnist_large_params_m_str = fmt_count(mnist_large_params, scale='M', precision=1, commas=False)
-    mnist_large_mem_mb_str = fmt_qty_int(mnist_large_mem, MB, commas=False)
-    mnist_small_params_k_str = fmt_count(mnist_small_params, scale='K', precision=1, commas=False)
-    mnist_small_mem_kb_str = fmt_qty_int(mnist_small_mem, KB, commas=False)
-    mnist_small_width_str = fmt(mnist_small_l1, precision=0, commas=False)
-    mnist_large_width_str = fmt(mnist_large_l1, precision=0, commas=False)
-```
-
-Widening both hidden layers from `{python} MnistScaleComparison.mnist_small_width_str` to `{python} MnistScaleComparison.mnist_large_width_str` neurons, comparing a $784 \to 100 \to 100 \to 10$ network with a $784 \to 1000 \to 1000 \to 10$ network, increases parameters from ~`{python} MnistScaleComparison.mnist_small_params_k_str` to ~`{python} MnistScaleComparison.mnist_large_params_m_str` (~`{python} MnistScaleComparison.mnist_small_mem_kb_str` vs. ~`{python} MnistScaleComparison.mnist_large_mem_mb_str` in FP32). Whether the wider network improves accuracy requires training and evaluation; the storage increase alone already matters for mobile deployment budgets.
-
 ::: {#fig-mnist-topology-1 fig-env="figure" fig-pos="htb" fig-cap="**MNIST Network Topology**: Both panels draw the same network; only the form of the input changes, from a two-dimensional image in panel (a) to the flattened vector the input layer actually receives in panel (b)." fig-alt="Two panels showing MNIST digit recognition. Panel a: a digit 7 image labeled 28 px by 28 px beside a column of input-layer circles fully connected to 10 output nodes, one marked 1 and the rest marked 0. Panel b: the same network with the image flattened into a 784-element pixel vector that an arrow feeds into the input layer."}
 
 ```{.tikz}
@@ -2008,9 +1936,85 @@ minimum width=46,minimum height=56](\picname){};
 
 :::
 
+```{python}
+#| echo: false
+from mlsysim.fmt import fmt
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MNIST INPUT DIMENSION—FEEDFORWARD SECTION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Input-layer width prose in @sec-neural-computation-feedforward-
+# │          network-architecture-d2cf.
+# │
+# │ Goal: Derive flattened MNIST input width from image dimensions.
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── LEGO ───────────────────────────────────────────────
+class MnistInputDimLocal:
+    """Namespace for MNIST flattened input width."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    mnist_input_neurons = Datasets.MNIST.image_width * Datasets.MNIST.image_height
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    mnist_input_str = fmt(mnist_input_neurons, precision=0, commas=False)
+```
+
+Between the fixed `{python} MnistInputDimLocal.mnist_input_str`-unit input layer and the 10-unit logit layer, the number of hidden layers and their widths remain open engineering choices. Adding layers increases depth so that successive transformations can compose simple edges into strokes and digit parts, whereas widening a layer expands how many distinct features the network can represent at the same level of abstraction.
+
+```{python}
+#| echo: false
+from mlsysim.physics import calc_dense_params
+from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_qty_int, check
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MNIST NETWORK SCALE COMPARISON
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Hidden-layer width trade-off prose in @sec-neural-computation-
+# │          feedforward-network-architecture-d2cf.
+# │
+# │ Goal: Quantify parameter and memory cost of wide vs. modest hidden layers.
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── LEGO ───────────────────────────────────────────────
+class MnistScaleComparison:
+    """Namespace for wide vs. modest MNIST MLP scale comparison."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    mnist_input_dim = Scenarios.MnistDenseNetwork.layer_widths[0]
+    mnist_output_dim = Scenarios.MnistDenseNetwork.layer_widths[-1]
+    mnist_large_l1 = 1000  # scenario assumption: a wide MLP
+    mnist_large_l2 = 1000
+    mnist_small_l1 = 100  # scenario assumption: a modest MLP
+    mnist_small_l2 = 100
+    mnist_large_arch = [mnist_input_dim, mnist_large_l1, mnist_large_l2, mnist_output_dim]
+    mnist_small_arch = [mnist_input_dim, mnist_small_l1, mnist_small_l2, mnist_output_dim]
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    mnist_large_params = calc_dense_params(mnist_large_arch)
+    mnist_large_mem = mnist_large_params * BYTES_FP32
+    mnist_small_params = calc_dense_params(mnist_small_arch)
+    mnist_small_mem = mnist_small_params * BYTES_FP32
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(mnist_small_l1 == mnist_small_l2 and mnist_large_l1 == mnist_large_l2, "Prose widens both hidden layers equally.")
+    check(mnist_large_params > mnist_small_params, "Large MLP parameters must exceed small MLP")
+    check(mnist_large_mem > mnist_small_mem, "Large MLP memory must exceed small MLP")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    mnist_large_params_m_str = fmt_count(mnist_large_params, scale='M', precision=1, commas=False)
+    mnist_large_mem_mb_str = fmt_qty_int(mnist_large_mem, MB, commas=False)
+    mnist_small_params_k_str = fmt_count(mnist_small_params, scale='K', precision=1, commas=False)
+    mnist_small_mem_kb_str = fmt_qty_int(mnist_small_mem, KB, commas=False)
+    mnist_small_width_str = fmt(mnist_small_l1, precision=0, commas=False)
+    mnist_large_width_str = fmt(mnist_large_l1, precision=0, commas=False)
+```
+
+Widening both hidden layers from `{python} MnistScaleComparison.mnist_small_width_str` to `{python} MnistScaleComparison.mnist_large_width_str` neurons, comparing a $784 \to 100 \to 100 \to 10$ network with a $784 \to 1000 \to 1000 \to 10$ network, increases parameters from ~`{python} MnistScaleComparison.mnist_small_params_k_str` to ~`{python} MnistScaleComparison.mnist_large_params_m_str` (~`{python} MnistScaleComparison.mnist_small_mem_kb_str` vs. ~`{python} MnistScaleComparison.mnist_large_mem_mb_str` in FP32). Whether the wider network improves accuracy requires training and evaluation; the storage increase alone already matters for mobile deployment budgets.
+
 #### Layer connectivity design patterns {#sec-neural-computation-layer-connectivity-design-patterns-c66e}
 
-Widening both hidden layers jumped the parameter count by an order of magnitude because the architecture of @sec-neural-computation-parameters-connections-27c9 connects every unit in one layer to every unit in the next. Connectivity itself is an architectural choice: dense, sparse, and skip patterns trade all-to-all flexibility against parameter count, spatial locality, and gradient flow.
+That order-of-magnitude jump in parameters happens because the architecture of @sec-neural-computation-parameters-connections-27c9 connects every unit in one layer to every unit in the next. Connectivity itself is an architectural choice: dense, sparse, and skip patterns trade all-to-all flexibility against parameter count, spatial locality, and gradient flow.
 
 ```{python}
 #| echo: false
@@ -2221,8 +2225,8 @@ Modern architectures balance depth against width. A network with `{python} Depth
 
 :::
 
-The cost side of that trade-off follows from counting. For a fully connected network with layer widths running from $\LayerWidth_0$ (the input) to $\FinalLayerWidth$ (the output), each layer $\LayerIndex$ holds a $\PreviousLayerWidth{\times}\CurrentLayerWidth$ weight matrix and $\CurrentLayerWidth$ biases, and its forward pass performs one MAC per weight for every example. Training must also retain each layer's output for every example in a batch of $\BatchSize$, because the backward pass reuses those outputs (@sec-neural-computation-backpropagation-algorithm-steps-6871), so the parameter count $\Parameters$, the forward operations per example $\Operations$ (two FLOPs per MAC), and the retained activation memory $\ActivationMemory$ follow @eq-depth-width-cost:
-$$ \Parameters = \sum_{\LayerIndex=1}^{\LayerCount} (\PreviousLayerWidth + 1)\,\CurrentLayerWidth, \qquad \Operations = 2\sum_{\LayerIndex=1}^{\LayerCount} \PreviousLayerWidth\,\CurrentLayerWidth, \qquad \ActivationMemory \propto \BatchSize \sum_{\LayerIndex=1}^{\LayerCount} \CurrentLayerWidth $$ {#eq-depth-width-cost}
+The cost side of that trade-off follows from counting. For a fully connected network with layer widths running from $\LayerWidth_0$ (the input) to $\FinalLayerWidth$ (the output), each layer $\LayerIndex$ holds a $\PreviousLayerWidth{\times}\CurrentLayerWidth$ weight matrix and $\CurrentLayerWidth$ biases, and its forward pass performs one MAC per weight for every example. Training must also retain the input batch and each layer's output for every example in a batch of $\BatchSize$, because the backward pass reuses those values (@sec-neural-computation-backpropagation-algorithm-steps-6871), so the parameter count $\Parameters$, the forward operations per example $\Operations$ (two FLOPs per MAC), and the retained activation memory $\ActivationMemory$ follow @eq-depth-width-cost:
+$$ \Parameters = \sum_{\LayerIndex=1}^{\LayerCount} (\PreviousLayerWidth + 1)\,\CurrentLayerWidth, \qquad \Operations = 2\sum_{\LayerIndex=1}^{\LayerCount} \PreviousLayerWidth\,\CurrentLayerWidth, \qquad \ActivationMemory \propto \BatchSize \sum_{\LayerIndex=0}^{\LayerCount} \CurrentLayerWidth $$ {#eq-depth-width-cost}
 
 When every hidden layer has the same width $\HiddenDimension$, the sums collapse. Parameters and operations grow as $\LayerCount\HiddenDimension^2$, linear in depth and quadratic in width, while retained activations grow as $\BatchSize\LayerCount\HiddenDimension$, linear in both. @Fig-depth-width-scaling plots the two sweeps on the running network's input and output widths. Holding the network at two hidden layers and doubling their width from `{python} DepthWidthCost.width_lo_str` to `{python} DepthWidthCost.width_hi_str` multiplies MACs per example by `{python} DepthWidthCost.width_double_mult_str`, short of four only because the input layer's share still grows linearly. Holding the width at `{python} DepthWidthCost.fixed_width_str` and doubling depth from `{python} DepthWidthCost.depth_lo_str` to `{python} DepthWidthCost.depth_hi_str` hidden layers multiplies MACs by `{python} DepthWidthCost.depth_double_mult_str` and retained activations by `{python} DepthWidthCost.retained_double_mult_str`.
 
@@ -2240,6 +2244,8 @@ When every hidden layer has the same width $\HiddenDimension$, the sums collapse
 # │ Show: Left, MACs vs. width (log-log) with a slope-two guide and the MNIST
 # │       point; right, MACs and retained activations vs. depth (twin axes).
 # │ How: Plot the sweeps computed in DepthWidthCost; book_style.set_book_style().
+# │ Provenance: Modeled analytical MLP forward MAC and retained-activation formulas
+# │   for 784-input, 10-output dense networks computed in DepthWidthCost.
 # └─────────────────────────────────────────────────────────────────────────────
 from binder.tools.figures import style as book_style
 
@@ -2307,7 +2313,7 @@ If any of these feel unclear, review the earlier sections on neural network fund
 
 :::
 
-Network architecture, neurons, and parameters are now in place, but nothing yet explains how randomly initialized parameters become useful. Architecture answers *what* the model computes; training answers *how* it learns. The mechanics reveal systems constraints because training adds backward computation, saved activations, gradients, and optimizer state. Batch size then becomes a joint statistical and hardware choice, because it changes gradient noise (how far a gradient averaged over a few examples strays from the gradient over the whole training set), activation memory, data reuse, and parallel efficiency at once.
+With network architecture, neurons, and parameters in place, architecture answers *what* the model computes, whereas training answers *how* it learns. The mechanics reveal systems constraints because training adds backward computation, saved activations, gradients, and optimizer state. Batch size then becomes a joint statistical and hardware choice, because it changes gradient noise (how far a gradient averaged over a few examples strays from the gradient over the whole training set), activation memory, data reuse, and parallel efficiency at once.
 
 ## Learning Process {#sec-neural-computation-learning-process-0b83}
 
@@ -2466,7 +2472,7 @@ $$ \text{loss} = \LossFunction(\PredictedOutput, \LabelVector) $$ {#eq-loss-gene
 
 [^fn-loss-function-error]: **Loss function**\index{Loss function!etymology}: Formalized by Abraham Wald\index{Wald, Abraham!statistical decision theory} in statistical decision theory\index{Statistical decision theory!loss function origin} [@wald1949statistical] as the "cost" of an incorrect decision, $\LossFunction$ quantifies the gap between prediction $\PredictedOutput$ and ground truth $\LabelVector$. The choice of loss function shapes the optimization geometry: it determines the gradient landscape\index{Loss function!landscape geometry} that backpropagation must navigate. A loss with flat regions near incorrect predictions produces weak gradients that stall learning, while a loss with steep gradients near the decision boundary accelerates convergence where it matters most, a systems consequence explored in @sec-neural-computation-loss-functions-6fc2.
 
-The error measurement drives the adjustment of network parameters: gradient descent (@sec-neural-computation-parameter-update-algorithms-b592) moves each parameter against its loss gradient, and backpropagation (@sec-neural-computation-gradient-computation-backpropagation-dacf) computes those gradients. In practice, training operates on batches of examples rather than individual&nbsp;inputs. For the MNIST dataset, each training iteration might process 32, 64, or 128 images simultaneously for reasons developed in @sec-neural-computation-minibatch-gradient-updates-4a04. The training cycle continues until the network achieves sufficient accuracy or reaches a predetermined number of iterations, and each iteration begins with the forward pass that turns a batch of input images into predictions.
+The error measurement drives the adjustment of network parameters: gradient descent (@sec-neural-computation-parameter-update-algorithms-b592) moves each parameter against its loss gradient, and backpropagation (@sec-neural-computation-gradient-computation-backpropagation-dacf) computes those gradients. In practice, training operates on batches of examples rather than individual&nbsp;inputs. For the MNIST dataset, each training iteration might process 32, 64, or 128 images simultaneously for reasons developed in @sec-neural-computation-minibatch-gradient-updates-4a04. The training cycle continues until the network achieves sufficient accuracy or reaches a predetermined number of iterations.
 
 ::: {.column-margin .margin-pointer}
 ↪ How long this cycle takes to reach a target accuracy, the time-to-accuracy measure that training benchmarks prefer over raw throughput, is developed in @sec-benchmarking-time-throughput-1252.
@@ -2852,7 +2858,7 @@ The same batch size sets the other side of the trade. Notebook \ref{nbk-nn-compu
 
 Memory layout and optimized linear-algebra libraries decide how much of that reuse an implementation actually captures. Reuse explains why parallel processors\index{GPU!parallel computation}\index{Parallel processing!neural networks} that can be fed from on-chip storage run large dense matrix operations substantially faster than CPUs\index{CPU!neural network execution}\index{Central processing unit|see{CPU}}, and why specialized accelerators\index{Throughput!accelerator parallelism} add reduced-precision arithmetic and dataflows tailored to these patterns. Data movement often explains most of the difference in the energy\index{Energy consumption!hardware platforms} that platforms spend on one workload.
 
-A roofline [@williams2009] plots a machine's attainable throughput against arithmetic intensity, with a sloped segment equal to bandwidth times intensity that meets a flat roof at peak compute. @Sec-hardware-acceleration-roofline-model-3e1a develops that throughput bound in full. @Fig-mnist-roofline places those two intensities on the rooflines of two machines whose FP32 ridge points happen to sit near the same value. At both batch sizes the running network lies on the sloped, bandwidth-limited side of both machines, so its attainable rate is bandwidth times intensity. Batching therefore gains more than an order of magnitude by climbing that slope, and at these intensities the accelerator outruns the CPU because it moves bytes faster, not because it multiplies faster. The plot assumes that every operand streams from main memory, as the notebook's traffic model does; a model this small can instead stay in a CPU's cache, which raises the bandwidth that actually feeds it.
+A roofline [@williams2009] puts that platform comparison on one chart by plotting a machine's attainable throughput against arithmetic intensity, with a sloped segment equal to bandwidth times intensity that meets a flat roof at peak compute. @Sec-hardware-acceleration-roofline-model-3e1a develops that throughput bound in full. @Fig-mnist-roofline places those two intensities on the rooflines of two machines whose FP32 ridge points happen to sit near the same value. At both batch sizes the running network lies on the sloped, bandwidth-limited side of both machines, so its attainable rate is bandwidth times intensity. Batching therefore gains more than an order of magnitude by climbing that slope, and at these intensities the accelerator outruns the CPU because it moves bytes faster, not because it multiplies faster. The plot assumes that every operand streams from main memory, as the notebook's traffic model does; a model this small can instead stay in a CPU's cache, which raises the bandwidth that actually feeds it.
 
 ::: {#fig-mnist-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Running Network on the Roofline**: Attainable FP32 throughput against arithmetic intensity for a desktop CPU and a data-center accelerator, with the running network's forward pass at batch 1 and batch 32 under the main-memory traffic model of the operation-count notebook. Both points sit left of both ridge points, so batching raises throughput by climbing the bandwidth slope, and at these intensities the accelerator's lead equals its memory-bandwidth advantage rather than its arithmetic advantage." fig-alt="Log-log roofline plot of attainable FP32 rate against arithmetic intensity. A solid blue roofline for a data-center accelerator and a dashed brown roofline for a desktop CPU both bend at a ridge near 20 FLOP per byte. Red markers on each sloped segment show the network at batch 1 near 0.5 FLOP per byte and batch 32 near 12 FLOP per byte: about 25 GFLOP/s and 595 GFLOP/s on the CPU, about 2 and 40 TFLOP/s on the accelerator."}
 
@@ -2868,6 +2874,8 @@ A roofline [@williams2009] plots a machine's attainable throughput against arith
 # │ Show: Desktop CPU and data-center accelerator rooflines; the two intensities.
 # │ How: min(peak FP32, bandwidth x intensity); intensities from MnistFlopsCalc,
 # │      peaks and bandwidths from the Hardware registry (ReferenceCPU, H100).
+# │ Provenance: Modeled analytical roofline min(peak_fp32, bandwidth * intensity)
+# │   using mlsysim.Hardware (ReferenceCPU, H100) and MNIST MLP intensities from MnistFlopsCalc.
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from binder.tools.figures import style as book_style
@@ -2927,7 +2935,7 @@ When the MNIST network sees a handwritten "seven" and places a probability of 0.
 On the machine, evaluating the loss is the cheapest stage of the training step: a few operations over ten class scores, against the `{python} MNISTInference.total_macs_str` per image that produced them (@tbl-nn-computation-stage-costs). What the system must get right about the loss is therefore its numerical range and gradient shape rather than its arithmetic cost. Lower loss indicates a better value of the chosen objective on the evaluated examples, which is not identical to higher classification accuracy because the network's confidence and its calibration (how closely its stated probabilities match how often it is right) can shift while the top predicted class stays the same.
 
 For a single training example, @eq-loss-general wrote that scalar discrepancy between prediction $\PredictedOutput$ and ground-truth label $\LabelVector$ as $\LossFunction(\PredictedOutput, \LabelVector)$. When training on mini-batches, the system averages those per-example costs across all $\BatchSize$ examples in the batch\index{Batch!loss averaging} (@eq-batch-loss):
-$$ \BatchLoss = \frac{1}{\BatchSize}\sum_{i=1}^\BatchSize\LossFunction(\PredictedOutput_i, \LabelVector_i) $$ {#eq-batch-loss}
+$$ \BatchLoss = \frac{1}{\BatchSize}\sum_{i=1}^{\BatchSize}\LossFunction(\PredictedOutput_i, \LabelVector_i) $$ {#eq-batch-loss}
 where $\BatchSize$ is the batch size\index{Batch size!loss computation} and $(\PredictedOutput_i, \LabelVector_i)$ represents the prediction and truth for the $\ExampleIndex$-th example. Averaging keeps the loss and mean-gradient scale comparable across batch sizes, although the best learning rate can still change with batch size and optimization regime. The summation also maps naturally to parallel hardware: each example's loss can be computed independently before a reduction combines them.
 
 The choice of loss function depends on the type of task. For digit classification, the loss function must handle probability distributions over multiple classes, provide meaningful gradients that guide learning, penalize wrong predictions in proportion to their severity, and scale efficiently with batch processing. Cross-entropy loss satisfies all four requirements.
@@ -3004,6 +3012,8 @@ For example, suppose the network assigns the probabilities in the left panel of 
 # │ Show: Left, bars for predicted probabilities with the one-hot target
 # │       outlined; right, -log p with the uniform-guess, 0.8, and 0.9 points.
 # │ How: Probabilities from CrossEntropyExample; illustrative remaining mass.
+# │ Provenance: Constructed illustrative 10-class prediction distribution from
+# │   CrossEntropyExample paired with the exact analytical -ln(p) cross-entropy curve.
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from binder.tools.figures import style as book_style
@@ -3069,8 +3079,8 @@ The loss is $-\log(0.8)$, approximately `{python} CrossEntropyExample.loss_08_st
 
 Evaluating cross-entropy naively across a batch can crash a training run in a single step. If softmax rounds a tiny correct-class probability down to zero in finite floating-point arithmetic, $\log(0)$ evaluates to $-\infty$, and subsequent gradient arithmetic produces a not-a-number value (NaN).
 
-For a batch of $\BatchSize$ examples, the cross-entropy objective averages the per-example losses across all examples (@eq-batch-cross-entropy):
-$$ \BatchLoss = -\frac{1}{\BatchSize}\sum_{i=1}^\BatchSize\sum_{j=1}^{10} \BatchLabelComponent \log(\BatchPredictedProbability) $$ {#eq-batch-cross-entropy}
+That failure enters through the batch loss itself, which averages the per-example cross-entropy losses across all $\BatchSize$ examples (@eq-batch-cross-entropy):
+$$ \BatchLoss = -\frac{1}{\BatchSize}\sum_{i=1}^{\BatchSize}\sum_{j=1}^{10} \BatchLabelComponent \log(\BatchPredictedProbability) $$ {#eq-batch-cross-entropy}
 
 Here, $\ExampleIndex$ indexes examples in the batch, $\ClassIndex$ indexes the ten output classes, $\BatchLabelComponent$ is the one-hot target indicator for class $\ClassIndex$ on example $\ExampleIndex$, and $\BatchPredictedProbability$ is the predicted probability for that class. Averaging over $\BatchSize$ keeps the loss scale comparable as batch size changes, but each term in the sum must stay within the floating-point format's representable range.
 
@@ -3083,11 +3093,11 @@ Subtracting the same $\max(\PreactivationVector)$ from every logit leaves the so
 
 2. Prefer fused cross-entropy from logits. Applying $-\log(\cdot)$ directly to the shifted ratio in @eq-softmax-stable for target class $\CorrectClassIndex$ and $\MaximumLogit=\max(\PreactivationVector)$ separates the numerator and denominator logarithms:
 $$ \LossFunction= -(\CorrectClassLogit-\MaximumLogit) + \log\!\sum_j \exp(\NeuronPreactivation_j-\MaximumLogit) $$ {#eq-cross-entropy-from-logits-stable}
-@Eq-cross-entropy-from-logits-stable is mathematically equivalent to $-\log \CorrectClassProbability$, but the logarithm and exponential cancel in the numerator, leaving the linear difference $-(\CorrectClassLogit-\MaximumLogit)$ instead of a tiny intermediate probability that could round to zero. Meanwhile, the denominator sum is guaranteed to be at least one because the maximum logit contributes $\exp(0)=1$, so its logarithm remains well behaved. Clamping a probability or adding $\NumericalStabilityConstant$ can be a defensive fallback, but it changes the objective and should not replace the stable formulation.
+@Eq-cross-entropy-from-logits-stable is mathematically equivalent to $-\log \CorrectClassProbability$, but the logarithm and exponential cancel in the numerator, leaving the linear difference $-(\CorrectClassLogit-\MaximumLogit)$ instead of a tiny intermediate probability that could round to zero. Meanwhile, the denominator sum is guaranteed to be at least one because the maximum logit contributes $\exp(0)=1$, so its logarithm remains well behaved. Clamping a probability or adding a small positive constant $\NumericalStabilityConstant$ can be a defensive fallback, but it changes the objective and should not replace the stable formulation.
 
 #### Impact on learning dynamics {#sec-neural-computation-impact-learning-dynamics-fb35}
 
-With a batch size of 32 and 10 output classes, each training step processes 32 sets of 10 scores, computes a loss for each example, and averages them into one batch loss. During training, that value serves two roles: its gradient supplies the update direction, and its trend helps diagnose whether optimization is progressing, stalling, or diverging. For the MNIST classifier, training loss often begins near `{python} CrossEntropyExample.uniform_loss_math` when class probabilities are close to uniform, falls rapidly during early optimization, and then improves more slowly. Because a low training loss reflects confidence on the training examples rather than proof of generalization, task accuracy, calibration, and validation loss must still be measured separately on held-out data.
+Evaluated in that stable form for a batch size of 32 and 10 output classes, each training step processes 32 sets of 10 scores, computes a loss for each example, and averages them into one batch loss. During training, that value serves two roles: its gradient supplies the update direction, and its trend helps diagnose whether optimization is progressing, stalling, or diverging. For the MNIST classifier, training loss often begins near `{python} CrossEntropyExample.uniform_loss_math` when class probabilities are close to uniform, falls rapidly during early optimization, and then improves more slowly. Because a low training loss reflects confidence on the training examples rather than proof of generalization, task accuracy, calibration, and validation loss must still be measured separately on held-out data.
 
 The loss function's gradients with respect to the network's output logits provide the initial error signal that drives backpropagation. For one example, when softmax and cross-entropy are combined, each logit gradient has a particularly simple form: the difference between the predicted and target probabilities, $\PredictedOutputComponent_j - \TrueLabelComponent_j$ for logit $\NeuronPreactivation_j$. The form follows in two steps. Taking the logarithm of the softmax probability undoes its exponential, so the loss becomes the logarithm of the softmax denominator minus the correct class's logit. Consider raising any one logit. The denominator grows at a rate equal to that logit's exponential, and taking the logarithm divides this rate by the denominator, which leaves exactly the logit's predicted probability. The second term changes only when the raised logit belongs to the correct class, where it lowers the loss at rate one. Each logit's gradient is therefore its predicted probability minus its target of one or zero.
 
@@ -3101,7 +3111,7 @@ The loss gives training a single number to reduce, and gradient descent is the r
 
 ::: {#dfn-nn-computation-gradient-descent .callout-definition title="Gradient descent"}
 
-***Gradient descent***\index{Gradient descent!definition} is the iterative optimization algorithm that updates model parameters in the direction of the negative gradient, $\ModelParameters \leftarrow \ModelParameters - \LearningRate \nabla_\ModelParameters \LossFunction$ with learning rate $\LearningRate$, trading additional operations $(\Operations)$ for loss reduction.
+***Gradient descent***\index{Gradient descent!definition} is the iterative optimization algorithm that updates model parameters in the direction of the negative gradient, $\ModelParameters \leftarrow \ModelParameters - \LearningRate \nabla_{\ModelParameters} \LossFunction$ with learning rate $\LearningRate$, trading additional operations $(\Operations)$ for loss reduction.
 
 1.  **Significance**: The update rule itself sets a memory floor. Every parameter needs a gradient of the same size, so in FP32 plain gradient descent holds 8 bytes per parameter (the weight plus its gradient) before counting saved activations. Optimizers that keep extra per-parameter state raise that floor, as the training-memory estimate later in this chapter shows, and @sec-model-training-memory-management-c1ec develops the complete accounting.
 2.  **Distinction**: Backpropagation computes gradients (the "what to change" signal); an optimizer applies updates (the "change it" action).
@@ -3129,6 +3139,8 @@ For the digit classifier, the update aims to reduce the chosen loss. If the netw
 # │       the learning rate.
 # │ Show: The same quadratic loss with six steps at two learning rates.
 # │ How: Iterate w <- w - lr * dL/dw on an illustrative quadratic.
+# │ Provenance: Constructed illustrative 1D quadratic loss trajectory under
+# │   exact gradient-descent updates w <- w - lr * dL/dw at moderate and near-critical step sizes.
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from binder.tools.figures import style as book_style
@@ -3192,7 +3204,7 @@ Despite neural network loss landscapes\index{Loss landscape!nonconvex optimizati
 #### Mini-batch gradient updates {#sec-neural-computation-minibatch-gradient-updates-4a04}
 
 Updating the weights after every individual image would follow a noisy single-example gradient and touch every parameter once per example. Applied to mini-batches (Definition \ref{dfn-nn-computation-mini-batch}), gradient descent instead becomes mini-batch gradient descent\index{Mini-batch!gradient descent}\index{Batch size!gradient stability}, which averages the gradients over the batch and performs one update per batch. For a batch of size $\BatchSize$, with $\LossFunction_i$ denoting the loss for example $\ExampleIndex$, the mean loss gradient is @eq-batch-gradient:
-$$ \nabla_{\ModelParameters}\BatchLoss = \frac{1}{\BatchSize}\sum_{i=1}^\BatchSize\nabla_{\ModelParameters}\LossFunction_i $$ {#eq-batch-gradient}
+$$ \nabla_{\ModelParameters}\BatchLoss = \frac{1}{\BatchSize}\sum_{i=1}^{\BatchSize}\nabla_{\ModelParameters}\LossFunction_i $$ {#eq-batch-gradient}
 
 With a typical batch size of 32, the system performs one forward pass over 32 images, computes 32 per-example losses, averages their gradients, and applies a single weight update. That average smooths noisy per-example gradients, but it also means the accelerator must keep the batch's activations available until the backward pass consumes them. Batch size therefore influences available parallelism and utilization together with model shape, kernel implementation, and hardware. When the batch that optimization wants does not fit in accelerator memory, gradient accumulation\index{Gradient accumulation!memory budget} splits it into smaller batches whose gradients are summed before a single update, a technique @sec-model-training-gradient-accumulation-308f develops with its numerical caveats.
 
@@ -3204,7 +3216,7 @@ Gradient descent assumes the gradient is already in hand, but the loss alone doe
 
 ***Backpropagation***\index{Backpropagation!definition}\index{Backpropagation!gradient computation}\index{Gradient!backpropagation} is the gradient-computation algorithm training systems use to apply the chain rule to a computational graph, using recorded operations and saved or recomputed forward-pass values to compute the gradient of the loss with respect to every parameter in a single backward traversal.
 
-1.  **Significance**: For dense layers that require both parameter and input gradients, the backward pass costs on the order of twice the forward-pass FLOPs (a ratio derived from the layer equations later in this section). It also requires retaining or recomputing the intermediate values needed by the chain rule. For a model with $\LayerCount$ layers, batch size $\BatchSize$, and layer widths $\LayerWidth_1,\ldots,\FinalLayerWidth$, the stored activations scale, in a simplified count, as $\mathcal{O}\!\left(\BatchSize\sum_{\LayerIndex=1}^{\LayerCount} \LayerWidth_\LayerIndex\right)$. Gradients and optimizer state add further memory, so a model that fits on one accelerator for inference may not fit there for training.
+1.  **Significance**: For dense layers that require both parameter and input gradients, the backward pass costs on the order of twice the forward-pass FLOPs (a ratio derived from the layer equations later in this section). It also requires retaining or recomputing the intermediate values needed by the chain rule. For a model with $\LayerCount$ layers, batch size $\BatchSize$, and layer widths $\LayerWidth_0,\ldots,\FinalLayerWidth$ (from input to output), the stored activations scale, in a simplified count, as $\mathcal{O}\!\left(\BatchSize\sum_{\LayerIndex=0}^{\LayerCount} \LayerWidth_{\LayerIndex}\right)$. Gradients and optimizer state add further memory, so a model that fits on one accelerator for inference may not fit there for training.
 2.  **Distinction**: Numerical differentiation requires a perturbed evaluation for each of the model's $\Parameters$ parameters. Reverse-mode automatic differentiation computes all $\Parameters$ gradients in one backward traversal whose cost is proportional to the computational graph, avoiding $\Parameters$ separate forward passes.
 3.  **Common pitfall**: A frequent misconception is that backpropagation is learning. It is a gradient computation algorithm; gradient descent performs the actual parameter update. Confusing the two hides which one sets activation storage and which sets optimizer state.
 
@@ -3240,16 +3252,16 @@ Machines have evaluated these chain-rule products automatically since the 1960s 
 \begin{algorithm}
 \caption{Backpropagation training step}
 \begin{algorithmic}
-\Require mini-batch inputs $\mathbf{X}$, labels $\mathbf{y}$; $\NumberOfLayers$ layers with parameters $\{\mathbf{W}^{(\LayerIndex)}, \mathbf{b}^{(\LayerIndex)}\}_{\LayerIndex=1}^{\NumberOfLayers}$; loss $\mathcal{L}$
-\Ensure parameter gradients $\{\nabla_{\mathbf{W}^{(\LayerIndex)}}\mathcal{L}, \nabla_{\mathbf{b}^{(\LayerIndex)}}\mathcal{L}\}$ for the optimizer
-\State $\mathbf{A}^{(0)} \gets \mathbf{X}$
-\For{$\LayerIndex = 1$ to $\NumberOfLayers$} \Comment{forward pass}
-    \State compute $\mathbf{Z}^{(\LayerIndex)}, \mathbf{A}^{(\LayerIndex)}$; save the values its derivative needs
+\Require mini-batch inputs $\LayerInputMatrix$, labels $\LabelVector$; $\LayerCount$ layers with parameters $\{\WeightMatrix^{(\LayerIndex)}, \BiasVector^{(\LayerIndex)}\}_{\LayerIndex=1}^{\LayerCount}$; loss $\LossFunction$
+\Ensure parameter gradients $\{\nabla_{\WeightMatrix^{(\LayerIndex)}}\LossFunction, \nabla_{\BiasVector^{(\LayerIndex)}}\LossFunction\}$ for the optimizer
+\State $\ActivationMatrix^{(0)} \gets \LayerInputMatrix$
+\For{$\LayerIndex = 1$ to $\LayerCount$} \Comment{forward pass}
+    \State compute $\PreactivationMatrix^{(\LayerIndex)}, \ActivationMatrix^{(\LayerIndex)}$; save the values its derivative needs
 \EndFor
-\State compute loss $\mathcal{L}(\mathbf{A}^{(\NumberOfLayers)}, \mathbf{y})$; seed the output gradient $\nabla_{\mathbf{A}^{(\NumberOfLayers)}}\mathcal{L}$
-\For{$\LayerIndex = \NumberOfLayers$ down to $1$} \Comment{same local rule repeats}
-    \State use the saved forward values to compute $\nabla_{\mathbf{W}^{(\LayerIndex)}}\mathcal{L}, \nabla_{\mathbf{b}^{(\LayerIndex)}}\mathcal{L}$
-    \State propagate $\nabla_{\mathbf{A}^{(\LayerIndex-1)}}\mathcal{L}$ only if that input gradient is required
+\State compute loss $\LossFunction(\ActivationMatrix^{(\LayerCount)}, \LabelVector)$; seed the output gradient $\nabla_{\ActivationMatrix^{(\LayerCount)}}\LossFunction$
+\For{$\LayerIndex = \LayerCount$ down to $1$} \Comment{same local rule repeats}
+    \State use the saved forward values to compute $\nabla_{\WeightMatrix^{(\LayerIndex)}}\LossFunction, \nabla_{\BiasVector^{(\LayerIndex)}}\LossFunction$
+    \State propagate $\nabla_{\ActivationMatrix^{(\LayerIndex-1)}}\LossFunction$ only if that input gradient is required
 \EndFor
 \State \Return the accumulated parameter gradients
 \end{algorithmic}
@@ -3262,14 +3274,12 @@ Saving activations in the forward loop of @algo-backpropagation-training-step is
 
 #### Error signal propagation {#sec-neural-computation-error-signal-propagation-9eeb}
 
-During that reverse traversal, the saved activations meet an error signal\index{Gradient!error signal flow}\index{Error signal!backward propagation} that starts at the output loss and steps backward one layer at a time.
-
-A scalar case shows the rule before the matrix form. If $\ChainRuleOutput= 3\ChainRuleIntermediate$ and $\ChainRuleIntermediate= \ChainRuleInput^2$, a small change in $\ChainRuleInput$ changes $\ChainRuleIntermediate$ by $2\ChainRuleInput$ per unit, and each unit change in $\ChainRuleIntermediate$ changes $\ChainRuleOutput$ by 3, so $d\ChainRuleOutput/d\ChainRuleInput= 3 \cdot 2\ChainRuleInput$. Backpropagation applies this multiply-the-local-slopes rule layer by layer. With many units per layer, each local slope becomes a matrix of slopes, called a *Jacobian*, but the rule is unchanged. For a network with $\LayerCount$ layers, the same rule carries the gradient backward one layer at a time. At each layer $\LayerIndex$, the sensitivity of the final loss to that layer's output is governed by the chain rule and the schematic Jacobian notation in @eq-chain-rule:
+During that reverse traversal, the saved activations meet an error signal\index{Gradient!error signal flow}\index{Error signal!backward propagation} that starts at the output loss and steps backward one layer at a time. A scalar case shows the rule before the matrix form. If $\ChainRuleOutput= 3\ChainRuleIntermediate$ and $\ChainRuleIntermediate= \ChainRuleInput^2$, a small change in $\ChainRuleInput$ changes $\ChainRuleIntermediate$ by $2\ChainRuleInput$ per unit, and each unit change in $\ChainRuleIntermediate$ changes $\ChainRuleOutput$ by 3, so $d\ChainRuleOutput/d\ChainRuleInput= 3 \cdot 2\ChainRuleInput$. Backpropagation applies this multiply-the-local-slopes rule layer by layer. With many units per layer, each local slope becomes a matrix of slopes, called a *Jacobian*, but the rule is unchanged. For a network with $\LayerCount$ layers, the same rule carries the gradient backward one layer at a time. At each layer $\LayerIndex$, the sensitivity of the final loss to that layer's output is governed by the chain rule and the schematic Jacobian notation in @eq-chain-rule:
 $$ \frac{\partial \LossFunction}{\partial \ActivationMatrix^{(\LayerIndex)}} = \frac{\partial \LossFunction}{\partial \ActivationMatrix^{(\LayerIndex+1)}} \frac{\partial \ActivationMatrix^{(\LayerIndex+1)}}{\partial \ActivationMatrix^{(\LayerIndex)}} $$ {#eq-chain-rule}
 
 Because @eq-chain-rule walks the layers in reverse, the backward pass consumes saved outputs in the opposite order from the one in which the forward pass produced them. The forward pass finishes holding every layer's output, and the backward pass releases those outputs from the last layer to the first, while parameter gradients accumulate as it goes. Memory therefore peaks at the turnaround between the passes when saved activations dominate, or late in the backward pass when weights, optimizer state, and gradients do, a profile that @sec-neural-computation-memory-training-vs-inference plots for the running network.
 
-Cascading @eq-chain-rule across $\LayerCount$ layers also multiplies $\LayerCount$ local Jacobian factors end to end. Notebook \ref{nbk-nn-computation-tracing-gradients-worked-backpropagation-example}, after the derivative equations below, traces those factors with numbers on a two-unit network. Keeping that repeated product informative requires controlling both the initial scale of the weights and the numerical range of the hardware format.
+Cascading @eq-chain-rule across $\LayerCount$ layers also multiplies $\LayerCount$ local Jacobian factors end to end. Example \ref{exmp-nn-computation-tracing-gradients-worked-backpropagation-example}, after the derivative equations below, traces those factors with numbers on a two-unit network. Keeping that repeated product informative requires controlling both the initial scale of the weights and the numerical range of the hardware format.
 
 #### Initialization and numerical range {#sec-neural-computation-parameter-initialization-5d1a}
 
@@ -3353,9 +3363,7 @@ Range and precision decide whether a gradient survives the backward pass at all,
 
 #### Derivative calculation process {#sec-neural-computation-derivative-calculation-process-edaa}
 
-Expanding one step of @eq-chain-rule at a dense hidden layer $\LayerIndex$ turns the schematic Jacobian into four concrete partial-derivative\index{Partial derivative!gradient computation}\index{Gradient!partial derivatives} operations (one element-wise mask, two matrix multiplications, and one column reduction) that explain why the backward pass costs roughly twice the arithmetic of the forward pass:
-
-First, the incoming error signal $\frac{\partial \LossFunction}{\partial \ActivationMatrix^{(\LayerIndex)}}$ is transformed into the preactivation gradient $\frac{\partial \LossFunction}{\partial \PreactivationMatrix^{(\LayerIndex)}}$ by multiplying element-wise ($\odot$) with the local activation function derivative (@eq-preactivation-gradient):
+Expanding one step of @eq-chain-rule at a dense hidden layer $\LayerIndex$ turns the schematic Jacobian into four concrete partial-derivative\index{Partial derivative!gradient computation}\index{Gradient!partial derivatives} operations (one element-wise mask, two matrix multiplications, and one column reduction) that explain why the backward pass costs roughly twice the arithmetic of the forward pass. At the layer's output, the incoming error signal $\frac{\partial \LossFunction}{\partial \ActivationMatrix^{(\LayerIndex)}}$ is transformed into the preactivation gradient $\frac{\partial \LossFunction}{\partial \PreactivationMatrix^{(\LayerIndex)}}$ by multiplying element-wise ($\odot$) with the local activation function derivative (@eq-preactivation-gradient):
 $$ \frac{\partial \LossFunction}{\partial \PreactivationMatrix^{(\LayerIndex)}} = \frac{\partial \LossFunction}{\partial \ActivationMatrix^{(\LayerIndex)}} \odot \ActivationFunction'(\PreactivationMatrix^{(\LayerIndex)}) $$ {#eq-preactivation-gradient}
 For ReLU activations, $\ActivationFunction'(\PreactivationMatrix^{(\LayerIndex)})$ acts as a binary mask, passing gradients through active neurons ($\NeuronPreactivation> 0$) and zeroing out inactive ones.
 
@@ -3376,7 +3384,7 @@ $$ \frac{\partial \LossFunction}{\partial \ActivationMatrix^{(\LayerIndex-1)}} =
 
 Here, the product $(\BatchSize \times \CurrentLayerWidth) \times (\CurrentLayerWidth \times \PreviousLayerWidth) \to (\BatchSize \times \PreviousLayerWidth)$ sums over the output dimension $\CurrentLayerWidth$, preserving the per-example activation shape for preceding layers. Together, these equations reveal the physical origin of the classic systems rule that the backward pass requires roughly twice the arithmetic of the forward pass. The forward pass executes one matrix multiplication per dense layer, $\ActivationMatrix^{(\LayerIndex-1)}\WeightMatrix^{(\LayerIndex)}$. The backward pass executes two of the same size, one for the weight gradient (@eq-weight-gradient) and one for the input gradient that carries the signal to the preceding layer (@eq-activation-gradient). As a general rule, a full training step therefore costs about three times the forward FLOPs, one forward product and two backward products per layer, although the running network comes in lower because its first layer can skip one of those products.
 
-The weight-gradient product trains that layer's parameters. The input-gradient product supplies the signal needed to train preceding layers. For ordinary parameter training on fixed MNIST images, no preceding trainable layer consumes the gradient with respect to raw pixels, so the first layer's input-gradient product can be omitted.
+The weight-gradient product trains that layer's parameters, whereas the input-gradient product supplies the signal needed to train preceding layers. For ordinary parameter training on fixed MNIST images, no preceding trainable layer consumes the gradient with respect to raw pixels, so the first layer's input-gradient product can be omitted.
 
 ```{python}
 #| echo: false
@@ -3489,7 +3497,7 @@ Two inputs, two ReLU hidden units, and one output are enough to trace every back
 \vspace*{-1.5ex}
 ```
 
-::: {#nbk-nn-computation-tracing-gradients-worked-backpropagation-example .callout-notebook title="Tracing gradients: A worked backpropagation example"}
+::: {#exmp-nn-computation-tracing-gradients-worked-backpropagation-example .callout-example title="Tracing gradients: A worked backpropagation example"}
 
 **Setup**: Consider a network with two inputs, a hidden layer of two neurons (ReLU activation), and one output neuron (no activation, for simplicity). Suppose the current weights and biases are:
 
@@ -3535,7 +3543,7 @@ $$\frac{\partial \LossFunction}{\partial \WeightMatrix^{(1)}} = \InputFeatureVec
 
 :::
 
-In practice an autograd\index{Autograd!automatic differentiation} engine performs this bookkeeping, recording each operation during the forward pass and keeping the values its backward rule needs (@sec-ml-frameworks-execution-problem-e1e1). What it keeps is the activation memory that the worked example below quantifies.
+In practice an autograd\index{Autograd!automatic differentiation} engine performs this bookkeeping, recording each operation during the forward pass and keeping the values its backward rule needs (@sec-ml-frameworks-framework-implementation-automatic-differentiation-1407). What it keeps is the activation memory that the worked example below quantifies.
 
 #### Worked example: Training vs. inference memory {#sec-neural-computation-memory-training-vs-inference}
 
@@ -3598,7 +3606,7 @@ class MnistTrainingMemoryCalc:
     batch_growth = large_batch_size / batch_size
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(3.0 <= training_ratio <= 3.5, f"Expected ~3.3× training/inference ratio, got {training_ratio:.1f}")
+    check(3.0 <= training_ratio <= 3.5, f"Expected ~3.4× training/inference ratio, got {training_ratio:.1f}")
     check(abs(state_bytes_per_param - 16) < 1e-9, f"Expected 16 bytes of FP32 Adam training state per parameter, got {state_bytes_per_param}")
     check(large_batch_size == 1_024 and batch_growth == 32, f"Expected batch 32 → 1,024 (32×), got {large_batch_size} ({batch_growth}×)")
     check(
@@ -3687,6 +3695,8 @@ Multiplying the batch by `{python} MnistTrainingMemoryCalc.batch_growth_str` to 
 # │       update) for batch 32 and 1,024; inference peak as a dashed line.
 # │ How: Activations kept forward, freed backward; gradients added per layer;
 # │      weights + two Adam buffers constant; FP32, decimal KB.
+# │ Provenance: Modeled exact tensor-liveness byte accounting for the 784-128-64-10
+# │   FP32 MLP with Adam state at batch 32 and batch 1,024 from MnistTrainingMemoryCalc.
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from binder.tools.figures import style as book_style
@@ -3799,7 +3809,7 @@ class ParameterGrowth:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     series = viz.load_series(
         "vol1/05_nn_computation/data/notable_models.csv",
-        numeric=("parameters", "training_compute_flop", "frontier"),
+        numeric=("parameters", "training_cost_2023usd", "frontier"),
     )
     split_year = 2010  # scenario assumption: deep-learning transition split year
     rows = [r for r in series.entries if r["parameters"]]
@@ -3828,7 +3838,7 @@ class ParameterGrowth:
 
 The running network is the smallest case in this chapter. @Fig-parameter-growth plots the parameter counts of `{python} ParameterGrowth.model_count_str` notable models published since 1950. Until about 2010 the count doubled roughly every `{python} ParameterGrowth.early_doubling_str` months; after 2010, as deep learning took hold, it doubled about every `{python} ParameterGrowth.late_doubling_str` months, and the largest models now hold more than a trillion parameters. Every dense parameter carries the same three obligations as the running network's weights (it is stored, read on every forward pass, and updated during training), so the per-parameter bookkeeping counted for a small digit classifier is the arithmetic that sets the memory and bandwidth budgets of the models in later chapters. The parameter climb parallels the growth in training compute that @fig-ai-training-compute-growth traced.
 
-::: {#fig-parameter-growth fig-env="figure" fig-pos="htb" fig-cap="**Parameter Counts of Notable Models, 1950 to the Present**: Each point is one notable model, colored by domain, plotted by publication date on a logarithmic axis. Dashed lines are least-squares fits before and after 2010; the steeper second segment coincides with the rise of deep learning. Data from @epochai2026notable." fig-alt="Scatter plot of parameter counts on a logarithmic axis from about 10 to 10 to the 12.5 against publication dates from 1950 to 2026. Gray, blue, green, and red points mark other, vision, games, and language models. A shallow dashed fit from 1950 to 2010 is labeled with its doubling time, and a steeper dashed fit from 2010 onward rises through dense clusters of red language models above 10 to the 11. Perceptron Mark I, LeNet-5, AlexNet, GPT-3, PaLM, and Kimi K2 are labeled."}
+::: {#fig-parameter-growth fig-env="figure" fig-pos="htb" fig-cap="**Parameter Counts of Notable Models, 1950 to the Present**: Each point plots the total stored parameter count of one notable model (counting all subnetworks in mixture-of-experts architectures, which activate only a subset per input), colored by domain, against publication date on a logarithmic axis. Dashed lines are least-squares fits before and after 2010; the steeper second segment coincides with the rise of deep learning. Data from @epochai2026notable." fig-alt="Scatter plot of parameter counts on a logarithmic axis from about 10 to above 1 trillion against publication dates from 1950 to 2026. Gray, blue, green, and red points mark other, vision, games, and language models. A shallow dashed fit from 1950 to 2010 is labeled with its doubling time, and a steeper dashed fit from 2010 onward rises through dense clusters of red language models above 100 billion. Perceptron Mark I, LeNet-5, AlexNet, GPT-3, PaLM, and Kimi K2 are labeled."}
 
 ```{python}
 #| echo: false
@@ -3840,6 +3850,8 @@ The running network is the smallest case in this chapter. @Fig-parameter-growth 
 # │ Goal: Plot parameter counts of notable models over seventy years.
 # │ Show: Scatter by domain with two fitted segments split at 2010.
 # │ How: ParameterGrowth (above); book_style.setup_plot().
+# │ Provenance: Modeled (published and Epoch AI estimated total parameter counts
+# │   in data/notable_models.csv, with piecewise log10 OLS split at 2010 in ParameterGrowth).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from binder.tools.figures import style as book_style
@@ -3957,7 +3969,7 @@ class AdamMemoryOverhead:
 
 [^fn-adam-memory-overhead]: **Adam (adaptive moment estimation)**\index{Adam optimizer!memory overhead}: Maintains per-parameter first- and second-moment estimates of the gradient, requiring 2$\times$ additional FP32 memory beyond the parameters themselves [@kingma2014adam]. For a `{python} AdamMemoryOverhead.mnist_params_k_str`-parameter MNIST model this overhead is negligible, but for a `{python} AdamMemoryOverhead.params_b_str` parameter model it adds ~`{python} AdamMemoryOverhead.state_gb_str`, often the difference between fitting on one GPU or requiring partitioning. Adam is widely used because its adaptive updates work robustly across many tasks, but learning rate, schedule, regularization, and memory strategy still require validation.
 
-The MNIST network's memory is small, but each of its terms grows with network width and batch size, as @eq-depth-width-cost showed. Every training step must also move that state, reading parameters, producing gradients, and retaining or recomputing the forward-pass values each layer's backward calculation needs. For modest networks like the MNIST example, this traffic remains manageable. As models grow, memory bandwidth and activation storage can become limiting constraints. These constraints motivate high-bandwidth memory, narrower number formats for some tensors (mixed precision), partitioning state across devices, and activation recomputation, which discards selected saved activations and recomputes them during the backward pass. @Sec-model-training-mixedprecision-training-9218 develops mixed precision, and @sec-model-training-gradient-accumulation-checkpointing-0c47 develops recomputation.
+As those parameter and batch dimensions grow along @eq-depth-width-cost, every training step must also move that state, reading parameters, producing gradients, and retaining or recomputing the forward-pass values each layer's backward calculation needs. For modest networks like the MNIST example, this traffic remains manageable. On larger models, memory bandwidth and activation storage become limiting constraints that motivate high-bandwidth memory, narrower number formats for some tensors (mixed precision), partitioning state across devices, and activation recomputation, which discards selected saved activations and recomputes them during the backward pass. @Sec-model-training-mixedprecision-training-9218 develops mixed precision, and @sec-model-training-gradient-accumulation-checkpointing-0c47 develops recomputation.
 
 ```{python}
 #| echo: false
@@ -4024,7 +4036,7 @@ class MemoryExplosionCalc:
     memory_jump_factor_mult_str = fmt_multiple(round(mem_jump_value, -3), precision=0, commas=True)  # e.g. "14,000"
 ```
 
-The memory requirements summarized in @tbl-nn-computation-mnist-memory-budget seem modest for a digit classifier. At production scale the same four terms move a model into a different tier of the memory hierarchy.
+Scaling the four terms of @tbl-nn-computation-mnist-memory-budget from the digit classifier to production models moves that working set into a different tier of the memory hierarchy.
 
 ::: {#lhs-nn-computation-memory-explosion .callout-lighthouse title="MNIST-to-ResNet-to-GPT-2 memory scaling"}
 
@@ -4058,6 +4070,8 @@ The MNIST running example and the GPT-2 lighthouse show how model scale changes 
 # │ Show: Log-scale bars for weights and for weights + gradients + Adam state;
 # │       dashed lines for ESP32-S3 SRAM, H100 L2, H100 HBM capacity.
 # │ How: Parameter counts from Models registry; capacities from Hardware registry.
+# │ Provenance: Modeled FP32 weight (4 B/param) and Adam training-state (16 B/param)
+# │   footprints from mlsysim.Models against ESP32-S3 and H100 capacities in mlsysim.Hardware.
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from binder.tools.figures import style as book_style
@@ -4194,16 +4208,16 @@ A single pass through the entire training dataset is called an epoch\index{Epoch
 \begin{algorithm}
 \caption{Mini-batch stochastic gradient descent}
 \begin{algorithmic}
-\Require training set $\{(\mathbf{x}_i,\mathbf{y}_i)\}_{i=1}^{D}$; rate $\LearningRate$; batch size $\BatchSize$; epochs $N_{\text{epochs}}$; initial $\theta_0$
+\Require training set $\{(\InputFeatureVector_{\ExampleIndex},\LabelVector_{\ExampleIndex})\}_{\ExampleIndex=1}^{\DatasetSize}$; rate $\LearningRate$; batch size $\BatchSize$; epochs $\EpochCount$; initial $\ModelParameters_0$
 \Ensure trained parameters $\ModelParameters$
-\State $\ModelParameters \gets \theta_0$
-\For{$e = 1$ to $N_{\text{epochs}}$}
+\State $\ModelParameters \gets \ModelParameters_0$
+\For{$\EpochIndex = 1$ to $\EpochCount$}
     \State shuffle the training set \Comment{reduce order-dependent patterns}
-    \For{each mini-batch $\mathcal{M}$ of size $\BatchSize$}
-        \State $\PredictedOutput_i \gets f(\mathbf{x}_i;\ModelParameters)$ for all $(\mathbf{x}_i,\mathbf{y}_i) \in \mathcal{M}$ \Comment{one MAC per weight per example; every activation saved}
-        \State $\LossFunction_{\mathcal{M}} \gets \tfrac{1}{B}\sum_{(\mathbf{x}_i,\mathbf{y}_i)\in \mathcal{M}} \mathcal{L}(\PredictedOutput_i, \mathbf{y}_i)$ \Comment{a few operations per class; negligible}
-        \State $\Gradient \gets \nabla_\ModelParameters \LossFunction_{\mathcal{M}}$ \Comment{backward: up to twice the forward MACs; reads the saved activations}
-        \State $\ModelParameters \gets \ModelParameters - \LearningRate\, \Gradient$ \Comment{reads and writes every parameter; almost pure data movement}
+    \For{each mini-batch $\MiniBatchSet$ of size $\BatchSize$}
+        \State $\PredictedOutput_{\ExampleIndex} \gets \NetworkFunction(\InputFeatureVector_{\ExampleIndex};\ModelParameters)$ for all $(\InputFeatureVector_{\ExampleIndex},\LabelVector_{\ExampleIndex}) \in \MiniBatchSet$ \Comment{one MAC per weight per example; every activation saved}
+        \State $\BatchLoss \gets \tfrac{1}{\BatchSize}\sum_{(\InputFeatureVector_{\ExampleIndex},\LabelVector_{\ExampleIndex})\in \MiniBatchSet} \LossFunction(\PredictedOutput_{\ExampleIndex}, \LabelVector_{\ExampleIndex})$ \Comment{a few operations per class; negligible}
+        \State $\LossGradient \gets \nabla_{\ModelParameters} \BatchLoss$ \Comment{backward: up to twice the forward MACs; reads the saved activations}
+        \State $\ModelParameters \gets \ModelParameters - \LearningRate\, \LossGradient$ \Comment{reads and writes every parameter; almost pure data movement}
     \EndFor
     \State evaluate on validation; stop if the convergence criterion is met
 \EndFor
@@ -4212,7 +4226,7 @@ A single pass through the entire training dataset is called an epoch\index{Epoch
 \end{algorithm}
 ```
 
-The mini-batch loop makes the batch size $\BatchSize$ a hardware unit of work. A larger $\BatchSize$ can improve matrix utilization and accelerator occupancy but raises activation memory. Because the update fires once per batch rather than once per example, $\BatchSize$ also sets the gradient-update cadence.
+The mini-batch loop makes the batch size $\BatchSize$ a hardware unit of work. A larger $\BatchSize$ can improve matrix utilization and accelerator occupancy (the share of the accelerator's parallel execution slots kept active) but raises activation memory. Because the update fires once per batch rather than once per example, $\BatchSize$ also sets the gradient-update cadence.
 
 The inner loop in @algo-minibatch-sgd is the unit that the hardware repeatedly executes, and its comments carry the chapter's cost accounting line by line. The forward line spends the MACs of @tbl-nn-computation-mnist-params for every example in the batch and leaves activations behind. The backward line spends up to twice that and consumes those activations. The update line does little arithmetic but touches every parameter, so its cost is set by bytes moved rather than operations performed. (In the algorithm, $\DatasetSize$ counts training examples, the $\text{Samples/Task}$ factor of the iron law. It is not the iron law's data term $\DataVolume$, which counts bytes moved.) Notebook \ref{nbk-nn-computation-epoch-time-energy} evaluates one full epoch of this loop in seconds and joules on two machines, charging every operation the fixed dispatch cost whose mechanism @sec-ml-frameworks-dispatch-tax develops.
 
@@ -4235,7 +4249,8 @@ The inner loop in @algo-minibatch-sgd is the unit that the hardware repeatedly e
 # │      operations per step x per-operation overhead; energy from Hardware.Tech.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Ops
-from mlsysim.fmt import fmt, fmt_flops, fmt_magnitude, fmt_multiple, fmt_percent, fmt_time, check
+from mlsysim.core.units import GB, MB, TB
+from mlsysim.fmt import fmt, fmt_bandwidth, fmt_flops, fmt_magnitude, fmt_memory, fmt_multiple, fmt_percent, fmt_time, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class EpochTimeEnergy:
@@ -4261,6 +4276,9 @@ class EpochTimeEnergy:
     run = epoch.result
     ops_per_step = run.ops_per_step
     flops_step = run.step_flops
+    step_bytes = flops_step / epoch.network.result.intensity
+    bw_cpu = run.bandwidth["host"]
+    bw_acc = run.bandwidth["accelerator"]
     rate = {"cpu": run.rate["host"], "acc": run.rate["accelerator"]}
     work_epoch_cpu = run.work_time["host"]
     work_epoch_acc = run.work_time["accelerator"]
@@ -4272,17 +4290,36 @@ class EpochTimeEnergy:
     ovh_share_acc = run.overhead_share_accelerator
     move_vs_arith_b32 = run.movement_to_arithmetic_energy
     move_vs_arith_b1 = run.movement_to_arithmetic_energy_batch1
+    # Uncached optimizer-update traffic omitted from the forward-intensity step model above:
+    # plain SGD reads weights and gradients and writes weights (3 parameter tensors);
+    # Adam reads weights, gradients, and two moments and writes weights and two moments (7 tensors).
+    param_bytes = epoch.network.result.parameter_bytes
+    sgd_opt_bytes = 3 * param_bytes
+    adam_opt_bytes = 7 * param_bytes
+    total_cpu_sgd = ((steps * (step_bytes + sgd_opt_bytes)) / bw_cpu).to(millisecond) + ovh_epoch_cpu
+    total_acc_sgd = ((steps * (step_bytes + sgd_opt_bytes)) / bw_acc).to(millisecond) + ovh_epoch_acc
+    total_cpu_adam = ((steps * (step_bytes + adam_opt_bytes)) / bw_cpu).to(millisecond) + ovh_epoch_cpu
+    total_acc_adam = ((steps * (step_bytes + adam_opt_bytes)) / bw_acc).to(millisecond) + ovh_epoch_acc
+    ovh_share_acc_adam = (ovh_epoch_acc / total_acc_adam).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(rate["cpu"] < rate["acc"], "The accelerator should have the higher attainable rate.")
     check(ovh_share_acc > 0.9, f"Overhead should dominate the accelerator epoch, got {ovh_share_acc:.2f}")
     check(move_vs_arith_b1 > move_vs_arith_b32 > 1, "Data movement should dominate energy, more so at batch 1.")
     check(total_cpu < total_acc, "At this scale the CPU should finish the epoch first.")
+    check(total_cpu_sgd < total_acc_sgd, "Uncached SGD traffic should narrow but keep the CPU lead.")
+    check(total_cpu_adam > total_acc_adam, "Uncached Adam traffic should reverse the CPU lead.")
+    check(ovh_share_acc_adam > 0.99, f"Accelerator should remain >99% overhead-bound under Adam, got {ovh_share_acc_adam:.3f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     _ms = lambda q: round(q.to(millisecond).magnitude) * millisecond  # whole milliseconds for prose
     steps_str = fmt(steps, precision=0, commas=True)
     flops_step_mflop_str = fmt_flops(flops_step, unit=MFLOPs, precision=1, commas=False)
+    step_bytes_mb_str = fmt_memory(step_bytes, unit=MB, precision=2, commas=False)
+    sgd_opt_mb_str = fmt_memory(sgd_opt_bytes, unit=MB, precision=1, commas=False)
+    adam_opt_mb_str = fmt_memory(adam_opt_bytes, unit=MB, precision=1, commas=False)
+    bw_cpu_str = fmt_bandwidth(bw_cpu, unit=GB / second, precision=0, commas=False)
+    bw_acc_str = fmt_bandwidth(bw_acc, unit=TB / second, precision=2, commas=False)
     work_cpu_ms_str = fmt_time(_ms(work_epoch_cpu), unit="millisecond", precision=0, commas=False)
     work_acc_ms_str = fmt_time(work_epoch_acc, unit="millisecond", precision=1, commas=False)
     acc_work_speedup_mult_str = fmt_multiple(round(acc_work_speedup), precision=0, commas=False)
@@ -4293,7 +4330,12 @@ class EpochTimeEnergy:
     ovh_acc_ms_str = fmt_time(ovh_epoch_acc, unit="millisecond", precision=1, commas=False)
     total_cpu_ms_str = fmt_time(_ms(total_cpu), unit="millisecond", precision=0, commas=False)
     total_acc_ms_str = fmt_time(_ms(total_acc), unit="millisecond", precision=0, commas=False)
+    total_cpu_sgd_ms_str = fmt_time(_ms(total_cpu_sgd), unit="millisecond", precision=0, commas=False)
+    total_acc_sgd_ms_str = fmt_time(_ms(total_acc_sgd), unit="millisecond", precision=0, commas=False)
+    total_cpu_adam_ms_str = fmt_time(_ms(total_cpu_adam), unit="millisecond", precision=0, commas=False)
+    total_acc_adam_ms_str = fmt_time(_ms(total_acc_adam), unit="millisecond", precision=0, commas=False)
     ovh_share_acc_str = fmt_percent(ovh_share_acc, precision=1, commas=False, style="prose")
+    ovh_share_acc_adam_str = fmt_percent(ovh_share_acc_adam, precision=1, commas=False, style="prose")
     e_dram_pj_value_str = fmt_magnitude(e_dram_byte, unit=pJ / byte, precision=0, commas=False)
     e_fp32_pj_value_str = fmt_magnitude(e_fp32_flop * flop, unit=pJ, precision=1, commas=False)
     move_b32_mult_str = fmt_multiple(move_vs_arith_b32, precision=1, commas=False)
@@ -4304,11 +4346,11 @@ class EpochTimeEnergy:
 
 **Problem**: How long does one training epoch of the running network take on a desktop CPU and on a data-center accelerator, which term of the iron law sets that time, and where does the energy go?
 
-**Background**: One epoch at batch `{python} MnistEpochLocal.batch_size_str` is `{python} EpochTimeEnergy.steps_str` steps of about `{python} EpochTimeEnergy.flops_step_mflop_str` each, the forward work of @tbl-nn-computation-mnist-params scaled by the training-step ratio derived earlier. At batch `{python} MnistEpochLocal.batch_size_str` the network's arithmetic intensity sits below both machines' ridge points (@fig-mnist-roofline), so each step runs at the bandwidth-limited rate. Every operation a step launches also pays a fixed cost: about `{python} EpochTimeEnergy.dispatch_us_str` for the framework to dispatch it and, on the accelerator, about `{python} EpochTimeEnergy.launch_us_str` more to launch it, across roughly `{python} EpochTimeEnergy.ops_per_step_str` operations per step.
+**Background**: One epoch at batch `{python} MnistEpochLocal.batch_size_str` is `{python} EpochTimeEnergy.steps_str` steps of about `{python} EpochTimeEnergy.flops_step_mflop_str` and `{python} EpochTimeEnergy.step_bytes_mb_str` of memory traffic each, the forward work of @tbl-nn-computation-mnist-flops scaled by the training-step ratio derived earlier. That traffic figure and the energy ratios below model only forward and backward matrix traffic at the forward-pass arithmetic intensity, omitting uncached optimizer-update traffic (about `{python} EpochTimeEnergy.sgd_opt_mb_str` per step for plain SGD or `{python} EpochTimeEnergy.adam_opt_mb_str` for Adam). At batch `{python} MnistEpochLocal.batch_size_str` the network's arithmetic intensity sits below both machines' ridge points (@fig-mnist-roofline), so each step streams at the memory-bandwidth limit: `{python} EpochTimeEnergy.bw_cpu_str` on the desktop CPU and `{python} EpochTimeEnergy.bw_acc_str` on the H100 accelerator. Every operation a step launches also pays a fixed cost: about `{python} EpochTimeEnergy.dispatch_us_str` for the framework to dispatch it and, on the accelerator, about `{python} EpochTimeEnergy.launch_us_str` more to launch it, across `{python} EpochTimeEnergy.ops_per_step_str` operations per step.
 
-**Solution**: The arithmetic and data movement of a whole epoch take about `{python} EpochTimeEnergy.work_cpu_ms_str` on the CPU and `{python} EpochTimeEnergy.work_acc_ms_str` on the accelerator, a `{python} EpochTimeEnergy.acc_work_speedup_mult_str` advantage. The fixed per-operation costs add about `{python} EpochTimeEnergy.ovh_cpu_ms_str` on the CPU and `{python} EpochTimeEnergy.ovh_acc_ms_str` on the accelerator, so the totals come to about `{python} EpochTimeEnergy.total_cpu_ms_str` and `{python} EpochTimeEnergy.total_acc_ms_str`. On the accelerator, `{python} EpochTimeEnergy.ovh_share_acc_str` of the epoch is overhead, and the CPU finishes first. Energy tells a parallel story. The energy constants introduced alongside the iron law [@horowitz2014] are about `{python} EpochTimeEnergy.e_dram_pj_value_str` pJ per byte moved from dynamic random-access memory (DRAM) and `{python} EpochTimeEnergy.e_fp32_pj_value_str` pJ per FP32 operation (the average of a multiply and an add). With those constants, moving a step's bytes costs `{python} EpochTimeEnergy.move_b32_mult_str` the energy of its arithmetic at batch `{python} MnistEpochLocal.batch_size_str`, and `{python} EpochTimeEnergy.move_b1_mult_str` at batch 1.
+**Solution**: The arithmetic and data movement of a whole epoch take about `{python} EpochTimeEnergy.work_cpu_ms_str` on the CPU and `{python} EpochTimeEnergy.work_acc_ms_str` on the accelerator, a `{python} EpochTimeEnergy.acc_work_speedup_mult_str` advantage. The fixed per-operation costs add about `{python} EpochTimeEnergy.ovh_cpu_ms_str` on the CPU and `{python} EpochTimeEnergy.ovh_acc_ms_str` on the accelerator, so the totals come to about `{python} EpochTimeEnergy.total_cpu_ms_str` and `{python} EpochTimeEnergy.total_acc_ms_str`. On the accelerator, `{python} EpochTimeEnergy.ovh_share_acc_str` of the epoch is overhead, and the CPU finishes first. Including uncached optimizer-update traffic narrows that CPU lead under plain SGD (`{python} EpochTimeEnergy.total_cpu_sgd_ms_str` vs. `{python} EpochTimeEnergy.total_acc_sgd_ms_str`) and reverses it under Adam (`{python} EpochTimeEnergy.total_cpu_adam_ms_str` vs. `{python} EpochTimeEnergy.total_acc_adam_ms_str`), while leaving `{python} EpochTimeEnergy.ovh_share_acc_adam_str` of the accelerator epoch in fixed overhead. Energy tells a parallel story. The energy constants introduced alongside the iron law [@horowitz2014] are about `{python} EpochTimeEnergy.e_dram_pj_value_str` pJ per byte moved from dynamic random-access memory (DRAM) and `{python} EpochTimeEnergy.e_fp32_pj_value_str` pJ per FP32 operation (the average of a multiply and an add). With those constants, moving a step's bytes costs `{python} EpochTimeEnergy.move_b32_mult_str` the energy of its arithmetic at batch `{python} MnistEpochLocal.batch_size_str`, and `{python} EpochTimeEnergy.move_b1_mult_str` at batch 1, before uncached optimizer traffic pushes data movement higher still.
 
-**Systems insight**: At this scale the third term of the iron law, fixed overhead, decides the run, and the accelerator's bandwidth advantage disappears behind it; a network this small trains at least as fast on a CPU. Larger models, larger batches, and fewer, fused operations shift the balance back toward the work terms, which is how frameworks gain their speed (@sec-ml-frameworks). The energy result anticipates why reuse, batching, and narrower formats matter as much to power as to time (@sec-introduction-iron-law-ml-systems-c32a).
+**Systems insight**: At this scale the third term of the iron law, fixed overhead, decides the run, and the accelerator's bandwidth advantage disappears behind it; a network this small runs in roughly the same time on a CPU (and faster when its small working set stays in CPU cache). Larger models, larger batches, and fewer, fused operations shift the balance back toward the work terms, which is how frameworks gain their speed (@sec-ml-frameworks). The energy result anticipates why reuse, batching, and narrower formats matter as much to power as to time (@sec-introduction-iron-law-ml-systems-c32a).
 
 :::
 
@@ -4334,9 +4376,7 @@ Convergence monitoring\index{Convergence!monitoring}\index{Validation!accuracy p
 
 For the machine, the quantity that matters is time to a target accuracy, which is the number of steps the optimizer needs times the time each step takes. Batch size pulls the two factors in opposite directions. A larger batch means fewer steps per epoch (`{python} MnistEpochLocal.epoch_batches_str` for MNIST at batch `{python} MnistEpochLocal.batch_size_str`) and better weight reuse per step, but each step costs more time and activation memory. Past some size, the optimizer needs more epochs to reach the same accuracy. The useful batch is the one that minimizes that product within the memory available for training.
 
-Selecting a stopping point also requires periodically evaluating the model on the validation set and saving its weights to durable storage. This practice is called checkpointing\index{Checkpointing!I/O cost} (not to be confused with activation recomputation, which some frameworks also call checkpointing), and @sec-model-training-training-state-checkpoints-5b3e develops it. For the MNIST network a checkpoint write is negligible. For a model whose parameters occupy tens to hundreds of gigabytes, every checkpoint and every validation pass is a recurring storage and compute cost whose frequency must be balanced against recovery and model-selection needs.
-
-The complete training pipeline runs from forward propagation through loss computation to gradient-based weight updates. Training, however, is preparation, not the end goal. Once parameters are optimized, deploying the model for real-time predictions changes the resource profile entirely.
+Selecting a stopping point also requires periodically evaluating the model on the validation set and saving its weights to durable storage. This practice is called checkpointing\index{Checkpointing!I/O cost} (not to be confused with activation recomputation, which some frameworks also call checkpointing), and @sec-model-training-training-state-checkpoints-5b3e develops it. For the MNIST network a checkpoint write is negligible. For a model whose parameters occupy tens to hundreds of gigabytes, every checkpoint and every validation pass is a recurring storage and compute cost whose frequency must be balanced against recovery and model-selection needs. The complete training pipeline therefore couples the inner step of forward propagation, loss computation, and gradient-based weight updates with the outer loop of validation and checkpointing that decides when to stop and which parameters to keep.
 
 ::: {#chk-nn-computation-neural-network-learning-process .callout-checkpoint title="Neural network learning process"}
 
@@ -4563,7 +4603,7 @@ minimum height=13mm,minimum width=22mm,\ifboxdashed dashed\fi](\picname){};
 
 :::
 
-These differences determine which hardware each phase runs on and how it is deployed. Training clusters rely on high-bandwidth, high-memory accelerators backed by hundreds of watts per socket and dedicated data-center cooling.[^fn-training-gpu-power] Inference deployments on constrained hardware\index{Constrained hardware!inference deployment} prioritize bounded tail latency (the latency of the slowest few percent of requests) and energy efficiency across diverse platforms. Mobile devices execute on low-power neural processing units (typically 2–4 W), edge servers employ dedicated inference accelerators,[^fn-edge-tpu-efficiency] and cloud instances use reduced numerical precision to saturate dedicated matrix-multiply units (NVIDIA's versions are called Tensor Cores\index{Tensor Core!reduced-precision matrix units}). At scale, production serving introduces operational requirements that do not arise in isolated training runs, including dynamic request batching, load balancing, and failure isolation. @Tbl-forward-pass-comparison contrasts how the two phases execute the same forward equations under different state rules.
+These differences determine which hardware each phase runs on and how it is deployed. Training clusters rely on high-bandwidth, high-memory accelerators backed by hundreds of watts per socket and dedicated data-center cooling.[^fn-training-gpu-power] Inference deployments on constrained hardware\index{Constrained hardware!inference deployment} prioritize bounded tail latency and energy efficiency across diverse platforms. Mobile devices execute on low-power neural processing units (typically 2–4 W), edge servers employ dedicated inference accelerators,[^fn-edge-tpu-efficiency] and cloud instances use reduced numerical precision to saturate dedicated matrix-multiply units such as NVIDIA Tensor Cores\index{Tensor Core!reduced-precision matrix units}. At scale, production serving introduces operational requirements that do not arise in isolated training runs, including dynamic request batching, load balancing, and failure isolation. @Tbl-forward-pass-comparison contrasts how the two phases execute the same forward equations under different state rules.
 
 ::: {.column-margin .margin-pointer}
 ↪ Tensor Cores, which execute a small matrix multiply-accumulate per instruction and set the reduced-precision peak rates quoted for data center GPUs, are developed in @sec-hardware-acceleration-tensor-cores-771f.
@@ -4580,36 +4620,41 @@ from mlsysim.fmt import check, fmt_multiple, fmt_ops_rate, fmt_power
 class GpuSpecsFootnote:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     h_edge_tpu = Hardware.Edge.Coral
+    h_jetson = Hardware.Edge.JetsonAGXOrin
     a100_tdp_w_value = Hardware.Cloud.A100.tdp.to(watt).magnitude
     h100_tdp_w_value = Hardware.Cloud.H100.tdp.to(watt).magnitude
     mobile_inference_tdp_high_w_value = ReferenceStats.MobilePower.MobileNpuPeak.to(watt).magnitude
     edge_tpu_tops_value = h_edge_tpu.compute.peak_flops.to(TOPS).magnitude
     edge_tpu_tdp_w_value = h_edge_tpu.tdp.to(watt).magnitude
-    jetson_orin_tops_value = Hardware.Edge.JetsonAGXOrin.compute.precision_flops["int8"].to(TOPS).magnitude
-    jetson_orin_tdp_low_w_value = Hardware.Edge.JetsonAGXOrin.tdp_min.to(watt).magnitude
-    jetson_orin_tdp_high_w_value = Hardware.Edge.JetsonAGXOrin.tdp_max.to(watt).magnitude
+    jetson_orin_tops_value = h_jetson.compute.precision_flops["int8"].to(TOPS).magnitude
+    jetson_orin_sparse_tops_value = h_jetson.compute.precision_flops["int8_sparse"].to(TOPS).magnitude
+    jetson_orin_tdp_low_w_value = h_jetson.tdp_min.to(watt).magnitude
+    jetson_orin_tdp_high_w_value = h_jetson.tdp_max.to(watt).magnitude
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     training_mobile_ratio = a100_tdp_w_value / mobile_inference_tdp_high_w_value
     edge_throughput_ratio = jetson_orin_tops_value / edge_tpu_tops_value
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(training_mobile_ratio >= 100, f"Training GPU should be >=100x mobile power, got {training_mobile_ratio:.1f}x")
-    check(edge_throughput_ratio > 60, f"Jetson Orin should be >60x Edge TPU throughput, got {edge_throughput_ratio:.1f}x")
+    check(30 < edge_throughput_ratio < 40, f"Jetson Orin dense INT8 should be ~34x Edge TPU throughput, got {edge_throughput_ratio:.1f}x")
+    check(jetson_orin_sparse_tops_value == 2 * jetson_orin_tops_value, "Jetson Orin sparse INT8 should be 2x dense INT8")
+    check(jetson_orin_tdp_high_w_value == h_jetson.tdp.to(watt).magnitude, "Jetson Orin top mode should match nominal TDP")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     a100_tdp_w_str = fmt_power(Hardware.Cloud.A100.tdp, unit=watt, precision=0, commas=False)
     h100_tdp_w_str = fmt_power(Hardware.Cloud.H100.tdp, unit=watt, precision=0, commas=False)
     training_mobile_ratio_mult_str = fmt_multiple(training_mobile_ratio, precision=0, commas=False)
     edge_tpu_tops_str = fmt_ops_rate(h_edge_tpu.compute.peak_flops, unit=TOPS, precision=0, commas=False)
     edge_tpu_tdp_w_str = fmt_power(h_edge_tpu.tdp, unit=watt, precision=0, commas=False)
-    jetson_orin_tops_str = fmt_ops_rate(Hardware.Edge.JetsonAGXOrin.compute.precision_flops["int8"], unit=TOPS, precision=0, commas=False)
-    jetson_orin_tdp_low_w_str = fmt_power(Hardware.Edge.JetsonAGXOrin.tdp_min, unit=watt, precision=0, commas=False)
-    jetson_orin_tdp_high_w_str = fmt_power(Hardware.Edge.JetsonAGXOrin.tdp_max, unit=watt, precision=0, commas=False)
-    edge_throughput_ratio_mult_str = fmt_multiple(edge_throughput_ratio, precision=1, commas=False)
+    jetson_orin_tops_str = fmt_ops_rate(h_jetson.compute.precision_flops["int8"], unit=TOPS, precision=1, commas=False)
+    jetson_orin_sparse_tops_str = fmt_ops_rate(h_jetson.compute.precision_flops["int8_sparse"], unit=TOPS, precision=0, commas=False)
+    jetson_orin_tdp_low_w_str = fmt_power(h_jetson.tdp_min, unit=watt, precision=0, commas=False)
+    jetson_orin_tdp_high_w_str = fmt_power(h_jetson.tdp_max, unit=watt, precision=0, commas=False)
+    edge_throughput_ratio_mult_str = fmt_multiple(round(edge_throughput_ratio), precision=0, commas=False)
     mobile_inference_tdp_high_w_str = fmt_power(ReferenceStats.MobilePower.MobileNpuPeak, unit=watt, precision=0, commas=False)
 ```
 
 [^fn-training-gpu-power]: **Training GPU power budget**\index{GPU!training, power budget}: The "high-memory" requirement is driven by the need to hold parameters, gradients, optimizer state, and activations simultaneously. The corresponding power draw dictates the "dedicated data-center cooling infrastructure," as a single high-end training GPU consumes `{python} GpuSpecsFootnote.a100_tdp_w_str`--`{python} GpuSpecsFootnote.h100_tdp_w_str`. Even compared with a `{python} GpuSpecsFootnote.mobile_inference_tdp_high_w_str` mobile inference chip, that is at least `{python} GpuSpecsFootnote.training_mobile_ratio_mult_str` the power budget.
 
-[^fn-edge-tpu-efficiency]: **Edge inference accelerators**\index{Edge inference!power tiers}: Google's edge Tensor Processing Unit (TPU), the Edge TPU (Google Coral)\index{Edge TPU!inference efficiency}, operates in the mobile/embedded tier at about `{python} GpuSpecsFootnote.edge_tpu_tdp_w_str`, delivering `{python} GpuSpecsFootnote.edge_tpu_tops_str` through an INT8 datapath. Edge servers sit in a different tier: Jetson AGX Orin\index{Jetson AGX Orin!edge inference} reaches `{python} GpuSpecsFootnote.jetson_orin_tops_str` at `{python} GpuSpecsFootnote.jetson_orin_tdp_low_w_str`--`{python} GpuSpecsFootnote.jetson_orin_tdp_high_w_str`, about `{python} GpuSpecsFootnote.edge_throughput_ratio_mult_str` more throughput but with wired-power assumptions.
+[^fn-edge-tpu-efficiency]: **Edge inference accelerators**\index{Edge inference!power tiers}: Google's edge Tensor Processing Unit (TPU), the Edge TPU (Google Coral)\index{Edge TPU!inference efficiency}, operates in the mobile/embedded tier at about `{python} GpuSpecsFootnote.edge_tpu_tdp_w_str`, delivering `{python} GpuSpecsFootnote.edge_tpu_tops_str` of dense INT8 throughput. Edge servers sit in a different tier: Jetson AGX Orin\index{Jetson AGX Orin!edge inference} reaches `{python} GpuSpecsFootnote.jetson_orin_tops_str` of dense aggregate INT8 throughput at its `{python} GpuSpecsFootnote.jetson_orin_tdp_high_w_str` peak mode (within a `{python} GpuSpecsFootnote.jetson_orin_tdp_low_w_str`--`{python} GpuSpecsFootnote.jetson_orin_tdp_high_w_str` configurable power envelope; NVIDIA's `{python} GpuSpecsFootnote.jetson_orin_sparse_tops_str` headline rating assumes structured sparsity), about `{python} GpuSpecsFootnote.edge_throughput_ratio_mult_str` the dense throughput of Coral under wired-power assumptions.
 
 ```{python}
 #| echo: false
@@ -4713,7 +4758,7 @@ class MnistInferenceResourceLocal:
 
 Pricing the inference column of @tbl-forward-pass-comparison separates persistent parameter storage from transient buffer reuse. For the canonical MNIST network (`{python} MnistInferenceResourceLocal.mnist_arch_str`), the persistent parameter block holds `{python} MnistInferenceResourceLocal.total_params_str`, or about `{python} MnistInferenceResourceLocal.param_mem_kb_str` at 32-bit floating point precision\index{Floating point!FP32 precision}, which must remain available for every request. The layer-level counts in @tbl-nn-computation-mnist-params show why this persistent block is straightforward to plan: each fully connected layer performs one multiply-add per weight, so parameter memory and per-sample arithmetic scale together.
 
-Transient activation storage is where buffer reuse cuts the footprint\index{Memory management!inference efficiency}\index{Memory!reuse, activation buffers}. Whereas retained-activation training holds all layer outputs simultaneously across the network depth ($\sum_\LayerIndex \ActivationMemory^{(\LayerIndex)}$, where $\ActivationMemory^{(\LayerIndex)}$ is the byte size of layer $\LayerIndex$'s activations), a sequential feed-forward inference pass needs layer $\LayerIndex$'s buffer only until layer $\LayerIndex+1$ has produced its output. Once layer $\LayerIndex+1$ finishes, the buffer for layer $\LayerIndex$ is dead and its storage can be overwritten, reducing peak transient activation memory from the cumulative sum to the largest adjacent pair, $\max_\LayerIndex \big(\ActivationMemory^{(\LayerIndex)} + \ActivationMemory^{(\LayerIndex+1)}\big)$. A skip connection or any other later consumer extends a buffer's lifetime and must enter that plan. The static memory planners that serving runtimes build on this property are developed in @sec-model-serving-specialized-inference-engines-475f.
+Transient activation storage is where buffer reuse cuts the footprint\index{Memory management!inference efficiency}\index{Memory!reuse, activation buffers}. Whereas retained-activation training holds all layer outputs simultaneously across the network depth ($\sum_{\LayerIndex} \ActivationMemory^{(\LayerIndex)}$, where $\ActivationMemory^{(\LayerIndex)}$ is the byte size of layer $\LayerIndex$'s activations), a sequential feed-forward inference pass needs layer $\LayerIndex$'s buffer only until layer $\LayerIndex+1$ has produced its output. Once layer $\LayerIndex+1$ finishes, the buffer for layer $\LayerIndex$ is dead and its storage can be overwritten, reducing peak transient activation memory from the cumulative sum to the largest adjacent pair, $\max_{\LayerIndex} \big(\ActivationMemory^{(\LayerIndex)} + \ActivationMemory^{(\LayerIndex+1)}\big)$. A skip connection or any other later consumer extends a buffer's lifetime and must enter that plan. The static memory planners that serving runtimes build on this property are developed in @sec-model-serving-specialized-inference-engines-475f.
 
 For the running network at batch size `{python} MnistInferenceResourceLocal.batch_size_str`, that rule produces the inference column of @tbl-nn-computation-mnist-memory-budget. Inference holds the `{python} MnistInferenceResourceLocal.param_mem_kb_str` parameter block plus a rolling activation pair of about `{python} MnistInferenceResourceLocal.inference_peak_act_kb_str`, roughly `{python} MnistInferenceResourceLocal.inference_total_kb_str` in all. The training step of @tbl-nn-computation-mnist-memory-budget holds about `{python} MnistInferenceResourceLocal.training_total_mb_str`, `{python} MnistInferenceResourceLocal.training_ratio_mult_str` as much, for the same weights and the same forward arithmetic. The entire difference is state that training keeps and inference does not: saved activations, gradients, and optimizer buffers. Fixed parameters and short buffer lifetimes also make inference easier to optimize, and batching is the first lever.
 
@@ -4787,7 +4832,7 @@ Postal digit images and the MNIST benchmark come from separate dataset histories
 
 ### Shared pipeline architecture {#sec-neural-computation-production-system-architecture-130f}
 
-Feeding raw envelope scans straight into a digit classifier fails because the network expects isolated, size-normalized characters rather than full addresses on textured paper, and its raw scores still need a rejection rule before they can trip a sorting gate. The composite six-stage pipeline in @fig-usps-inference-pipeline separates the work shared by postal ZIP-code research and deployed bank-check readers (rather than reconstructing a single historical machine). Upstream preprocessing segments and normalizes the scanned digits. The neural network scores each candidate digit. Downstream postprocessing compares those scores against confidence thresholds, passing accepted digits to the sorter while routing ambiguous ones to human review.
+Feeding raw envelope scans straight into a digit classifier fails because the network expects isolated, size-normalized characters rather than full addresses on textured paper, and its raw scores still need a rejection rule before they can trip a sorting gate. The composite six-stage pipeline in @fig-usps-inference-pipeline separates the work shared by postal ZIP-code research and deployed bank-check readers (rather than reconstructing a single historical machine). Upstream preprocessing first segments and normalizes the scanned digits, the neural network then scores each candidate digit, and downstream postprocessing compares those scores against confidence thresholds, passing accepted digits to the sorter while routing ambiguous ones to human review.
 
 ::: {#fig-usps-inference-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Document-Recognition Pipeline**: A composite six-stage flow distilled from postal ZIP-code research and deployed check-reading systems. Image acquisition and conventional preprocessing prepare handwritten digits for neural inference, and raw scores then pass through postprocessing to the final application output." fig-alt="Six-box linear pipeline: raw data and preprocessing in blue, a neural network in green, and raw output, postprocessing, and final output in purple."}
 
@@ -5172,13 +5217,11 @@ On USPS-supplied digit images, the 1989 backpropagation system reached 1 percent
 \endgroup
 ```
 
-These measurements show three systems trade-offs across the pipeline.
+In @tbl-usps-numbers, the measured rate depended on the measurement boundary. The system exceeded 30 classifications per second after normalization but processed 10 to 12 per second including acquisition. When stages overlap, with one digit being scanned while an earlier one is classified, a rate counts how often a digit completes rather than how long any one digit takes, so the reciprocal of each rate is the interval between completions, not necessarily one digit's latency. The comparison exposes surrounding acquisition and preprocessing work, but does not allocate that work among mechanical handling, scanning, and segmentation. Stage timings are needed before choosing which part of the complete path to accelerate.
 
-First, the measured rate depended on the measurement boundary. The system exceeded 30 classifications per second after normalization but processed 10 to 12 per second including acquisition. When stages overlap, with one digit being scanned while an earlier one is classified, a rate counts how often a digit completes rather than how long any one digit takes, so the reciprocal of each rate is the interval between completions, not necessarily one digit's latency. The comparison exposes surrounding acquisition and preprocessing work, but does not allocate that work among mechanical handling, scanning, and segmentation. Stage timings are needed before choosing which part of the complete path to accelerate.
+Operational reliability across that pipeline depended just as strongly on an explicit rejection pathway. The experiment rejected 12.1 percent of test digits rather than forcing a classification for every input, and rejecting this tail of high-uncertainty predictions reduced the observed classification error on the remaining automated stream to 1 percent. That is one point on the risk-coverage curve of @sec-neural-computation-output-interpretation-decision-making-33be, and the expected-cost rule there decides whether it is the right one. The 12.1 percent becomes a review workload that the rule must account for.
 
-Second, operational reliability depended on an explicit rejection pathway. The experiment rejected 12.1 percent of test digits rather than forcing a classification for every input, and rejecting this tail of high-uncertainty predictions reduced the observed classification error on the remaining automated stream to 1 percent. That is one point on the risk-coverage curve of @sec-neural-computation-output-interpretation-decision-making-33be, and the expected-cost rule there decides whether it is the right one. The 12.1 percent becomes a review workload that the rule must account for.
-
-Third, training-time cost constrained the exploration of model sizes. Training `{python} UspsLenetSpecs.lenet_1_params_count_str` parameters required 23 passes across roughly three days on a Sun-4/260 workstation. That measurement shows the cost of the reported configuration; it does not establish a universal maximum model size for the era. Larger candidates would require a new compute, memory, and training-time budget.
+Before deployment, training-time cost constrained the exploration of model sizes. Training `{python} UspsLenetSpecs.lenet_1_params_count_str` parameters required 23 passes across roughly three days on a Sun-4/260 workstation. That measurement shows the cost of the reported configuration; it does not establish a universal maximum model size for the era. Larger candidates would require a new compute, memory, and training-time budget.
 
 Maintaining these systems in production introduces lifecycle requirements beyond model training. Changes in scanner optics, ink formulations, envelope textures, or regional writing styles cause input distributions to drift over time. Production monitoring must track input image statistics and rejection rates alongside raw classification latency, prompting investigation when rejection threatens review capacity. Whether the remedy is data collection, preprocessing repair, threshold adjustment, or retraining depends on the cause and on validated error costs.
 
@@ -5192,7 +5235,7 @@ Across postal ZIP-code research and deployed check readers, neural computation s
 
 Parameter storage also reappears at system scale. The convolutional reader's footprint, an order of magnitude below the fully connected network's, shows that connectivity patterns, not layer depth alone, govern the state a model must store. A layer that slides one small set of weights across every image position stores far fewer parameters than one that gives every pixel its own weight, although fewer weights do not guarantee smaller activation tensors. @Sec-network-architectures builds its architectures on that choice of connectivity.
 
-Modern edge systems face different power, latency, and deployment budgets, but three requirements still hold. Preprocessing must absorb the variability of the physical world before the network sees it, confidence thresholds must protect the downstream error budget, and end-to-end throughput, not model latency alone, governs how much model capacity the system can afford. The deployed reader worked because its data, network, and machine fit each other, and the running network's own numbers show that alignment one axis at a time.
+Modern edge systems face different power, latency, and deployment budgets, but three requirements still hold. Preprocessing must absorb the variability of the physical world before the network sees it, confidence thresholds must protect the downstream error budget, and end-to-end throughput, not model latency alone, governs how much model capacity the system can afford. The deployed reader worked because its data, network, and machine fit each other.
 
 ::: {.column-margin .margin-pointer}
 ↩ The D·A·M taxonomy and its three diagnostic axes are established in @sec-introduction-defining-ml-systems-d4af.
@@ -5248,7 +5291,7 @@ The algorithm axis set how that matrix meets the machine. Batch size is an algor
 
 The machine axis decided whether learning survives at all. A gradient smaller than its format's smallest normal value, `{python} FloatFormatLimits.fp16_min_normal_math` in FP16 against `{python} FloatFormatLimits.fp32_min_normal_math` in FP32, loses precision or flushes to zero and stops updating its weight, and a value beyond the format's maximum overflows to `Inf`. Narrower formats halve or quarter memory traffic and unlock faster matrix units, but only while gradients and activations still fit the format's range.
 
-No axis can be tuned alone. A larger input improves fidelity but grows the first weight matrix, a larger batch improves reuse but grows training memory, and a narrower format speeds the machine but endangers the gradients. Diagnosing an accuracy shortfall, a latency violation, or an out-of-memory fault therefore starts with a hypothesis on each axis and ends with a measurement of the quantity that sets the limit. An intervention on one axis routinely moves the limiting constraint to another. Teams that skip that measurement tend to fall into a small set of recurring traps.
+No axis can be tuned alone. A larger input improves fidelity but grows the first weight matrix, a larger batch improves reuse but grows training memory, and a narrower format speeds the machine but endangers the gradients. Diagnosing an accuracy shortfall, a latency violation, or an out-of-memory fault therefore starts with a hypothesis on each axis and ends with a measurement of the quantity that sets the limit. An intervention on one axis routinely moves the limiting constraint to another.
 
 ::: {.column-margin .margin-pointer}
 ↪ Screening heuristics that narrow these competing hypotheses, each confirmed against profiler traces and hardware counters, are collected for reference in @sec-appdx-dam-taxonomy-rules-thumb-f94f.
@@ -5343,9 +5386,9 @@ Neural networks do not offer the line-by-line causal trace of traditional code, 
 
 ::: {.fallacy-pitfall}
 
-**Pitfall**: *Discarding domain expertise because a deep model is available.*
+**Pitfall**: *Designing objectives and thresholds without domain error costs and class balance.*
 
-Teams assume automatic feature learning removes the need for domain knowledge. Successful systems require domain expertise at every stage: architecture selection, training objective design, dataset curation, and output interpretation. The document-recognition history in @sec-neural-computation-case-study-usps-digit-recognition-97be shows why confidence thresholds must reflect operating economics and route uncertain cases to human operators. Without domain knowledge, teams can deploy networks that look strong on a test set but fail in production because their thresholds, fallback paths, or error costs are wrong.
+Teams assume automatic feature learning removes the need for domain knowledge and exploratory data analysis. In practice, networks on imbalanced datasets often fail on the minority class\index{Class imbalance!minority-class performance}: a fraud detector with `{python} FallacyQuantExamples.imbalance_ratio_str` imbalance achieves `{python} FallacyQuantExamples.imbalance_majority_acc_str` accuracy by always predicting "not fraud" while catching zero fraud cases, because the unweighted batch average of @eq-batch-loss underweights rare but critical events unless sampling, loss weighting, and evaluation intervene. Likewise, the document-recognition history in @sec-neural-computation-case-study-usps-digit-recognition-97be shows that confidence thresholds must reflect operating economics and route uncertain cases to human operators. Without domain-informed objectives, thresholds, and slice metrics, teams deploy networks that look strong on aggregate accuracy yet fail in production.
 
 :::
 
@@ -5354,14 +5397,6 @@ Teams assume automatic feature learning removes the need for domain knowledge. S
 **Fallacy**: *Deeper networks are always more accurate than wider ones.*
 
 Engineers assume that stacking more layers is the primary path to higher accuracy, since depth enables hierarchical feature extraction. In practice, depth alone encounters diminishing returns. ResNet showed that very deep residual networks can train effectively, yet its 1,202-layer CIFAR-10 network tested worse than its 110-layer counterpart [@he2016]. EfficientNet later showed that compound scaling, which grows width, depth, and input resolution together, can outperform depth-only scaling at a given resource budget [@tan2019efficientnet]. Depth itself is not the problem; scaling it alone is. Teams should profile capacity utilization and scale the dimension that gives the best accuracy per FLOP, since depth adds sequential steps and saved activations while width adds arithmetic inside each step (@eq-depth-width-cost).
-
-:::
-
-::: {.fallacy-pitfall}
-
-**Fallacy**: *Training data distribution issues can be fixed after model design.*
-
-Teams treat training as mechanically feeding data through architectures. Networks on imbalanced datasets often perform poorly on the minority class\index{Class imbalance!minority-class performance}: a fraud detector with `{python} FallacyQuantExamples.imbalance_ratio_str` imbalance achieves `{python} FallacyQuantExamples.imbalance_majority_acc_str` accuracy by always predicting "not fraud" while catching zero fraud cases. The unweighted batch average of @eq-batch-loss can underweight rare but critical classes unless sampling, weighting, loss design, and evaluation address the imbalance. Teams that skip exploratory data analysis may deploy models with strong aggregate metrics but unacceptable minority-class performance.
 
 :::
 
@@ -5392,9 +5427,9 @@ These fallacies and pitfalls share a common root: treating statistical behavior 
 
 ## Summary {#sec-neural-computation-summary-f263}
 
-Neural computation turns layer equations into physical work on a processor. Linear algebra and calculus determine operation cost under the iron law of ML systems ($\Time = \frac{\DataVolume}{\Bandwidth} + \frac{\Operations}{\PeakRate \cdot \EfficiencyHw} + \Latency$). Forward propagation establishes the computational work $\Operations$, often dominated by matrix multiplications, while the complete training step adds backward computation and optimizer updates. Backpropagation needs saved or recomputed forward values and gradient storage; the optimizer may add persistent state. Architecture, batch size, precision, optimizer, and recomputation strategy determine the state footprint. Residency, reuse, and execution then determine the bytes transferred, $\DataVolume$, which need not equal that footprint. These mechanics make memory footprints, arithmetic intensities, and latency limits estimable before deployment. @Tbl-nn-computation-stage-costs, from the chapter's opening, now reads as a summary of where each stage spends its operations, bytes, and overhead, and every row has been derived for the running network.
+Neural computation turns layer equations into physical work on a processor. Linear algebra and calculus determine operation cost under the iron law of ML systems ($\Time = \frac{\DataVolume}{\Bandwidth} + \frac{\Operations}{\PeakRate \cdot \EfficiencyHw} + \Latency$). Forward propagation establishes the computational work $\Operations$, often dominated by matrix multiplications, while the complete training step adds backward computation and optimizer updates. Backpropagation needs saved or recomputed forward values and gradient storage, while the optimizer may add persistent state, so architecture, batch size, precision, optimizer, and recomputation strategy together determine the state footprint. Residency, reuse, and execution then determine the bytes transferred, $\DataVolume$, which need not equal that footprint. These mechanics make memory footprints, arithmetic intensities, and latency limits estimable before deployment. @Tbl-nn-computation-stage-costs, from the chapter's opening, now reads as a summary of where each stage spends its operations, bytes, and overhead, and every row has been derived for the running network.
 
-Replacing hand-written decision rules with parameters learned from data turns feature engineering into matrix arithmetic. Layered compositions of weighted sums, nonlinear activations, and gradient updates form hierarchical representations that convert raw inputs into predictions. Training adjusts connection weights through iterative optimization, while inference applies fixed parameters to incoming data. The two phases make different demands on the machine. In this chapter's FP32 estimate, a batch-`{python} FallacyQuantExamples.mnist_batch_size_str` training step requires ~`{python} FallacyQuantExamples.training_ratio_mult_str` the memory of batch-`{python} FallacyQuantExamples.mnist_batch_size_str` inference because training retains saved activations and gradients alongside the optimizer's additional buffers. In production, as the document-recognition case study demonstrated, these mathematical kernels do not run in isolation; preprocessing, neural inference, rejection, and postprocessing must jointly satisfy a single end-to-end latency and reliability budget.
+Those stage costs arise because replacing hand-written decision rules with parameters learned from data turns feature engineering into matrix arithmetic. Layered compositions of weighted sums, nonlinear activations, and gradient updates form hierarchical representations that convert raw inputs into predictions. Training adjusts connection weights through iterative optimization, while inference applies fixed parameters to incoming data. The two phases make different demands on the machine. In this chapter's FP32 estimate, a batch-`{python} FallacyQuantExamples.mnist_batch_size_str` training step requires ~`{python} FallacyQuantExamples.training_ratio_mult_str` the memory of batch-`{python} FallacyQuantExamples.mnist_batch_size_str` inference because training retains saved activations and gradients alongside the optimizer's additional buffers. In production, as the document-recognition case study demonstrated, these mathematical kernels do not run in isolation; preprocessing, neural inference, rejection, and postprocessing must jointly satisfy a single end-to-end latency and reliability budget.
 
 ```{python}
 #| echo: false
@@ -5453,7 +5488,7 @@ class SummaryParadigmCostRecap:
 
 The escalation from hand-written rules to learned features is the algorithm axis of the D·A·M taxonomy made concrete. Learning representations instead of writing them spends arithmetic and memory in place of human design effort, and every systems dimension in @tbl-evolution shifts as a result. The bitter lesson predicts that this exchange wins once computation is cheap enough to afford it, but making the exchange still requires a measured gain that justifies its cost on the intended machine.
 
-The multilayer perceptrons analyzed in this chapter expose a direct resource law, in which dense connectivity forces both parameter storage and multiply-accumulate count to scale with the product of adjacent layer dimensions. That dense connectivity contains no explicit prior for spatial locality, so the model must learn from data which nearby and distant pixel relationships matter, while paying memory bandwidth and storage to evaluate every connection.
+For the multilayer perceptrons analyzed in this chapter, that cost follows a direct resource law in which dense connectivity forces both parameter storage and multiply-accumulate count to scale with the product of adjacent layer dimensions. That dense connectivity contains no explicit prior for spatial locality, so the model must learn from data which nearby and distant pixel relationships matter, while paying memory bandwidth and storage to evaluate every connection.
 
 Reading the code reveals what a network is asked to do; reading the math reveals what it will cost to execute. That arithmetic is where the algorithm meets the machine: weights must be stored and transferred, dense layers map to matrix execution engines, and saved activations claim accelerator memory that determines whether training fits on device. Under the silicon contract (principle \ref{pri-silicon-contract}), the math commits in advance to operations the machine must execute. Auditing that contract allows systems engineers to calculate bottlenecks from first principles before profiling confirms where the execution stalls.
 

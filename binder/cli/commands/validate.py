@@ -547,6 +547,12 @@ class ValidateCommand:
             Scope("duplicates", "_run_duplicate_labels"),
             Scope("orphans", "_run_unreferenced_labels"),
             Scope("fig-labels", "_run_fig_label_underscores", default=False),
+            # Added 2026-11-20: an HTML comment between a {#fig-} div opener and
+            # its image makes Quarto put the image inside \caption{}, which
+            # fails the PDF ("Missing number, treated as zero"); Vol III
+            # 06_long_term_memory hit it. Put such comments above the div.
+            Scope("fig-div-comment", "_run_fig_div_comment",
+                  note="no HTML comment between a {#fig-} div opener and its image"),
         ],
         "headers": [
             # ids: vol1 complete; opt-in scope for vol2/3/4 as sections are finalized.
@@ -635,9 +641,9 @@ class ValidateCommand:
             Scope("print-scale", "_run_figure_print_scale", default=False,
                   note="matplotlib body figures print at 0.80-1.05x, text >= 9 pt, styled"),
             Scope("data-provenance", "_run_figure_data_provenance",
-                  note="Tier-2 data/*.csv and load_series() provenance and computation headers"),
-            Scope("cell-provenance", "_run_figure_cell_provenance", default=False,
-                  note="matplotlib #fig-* cell header Provenance: lineage block"),
+                  note="Tier-2 data/*.csv, load_series() consumers, and Frictionless manifest seal"),
+            Scope("cell-provenance", "_run_figure_cell_provenance",
+                  note="matplotlib #fig-* cell header Provenance: lineage and measured-receipt guard"),
         ],
         # ------------------------------------------------------------------
         # Semantic check groups: classify checks by WHAT is validated
@@ -788,7 +794,7 @@ class ValidateCommand:
             # cleanup script corrupted 38 sites across both volumes and every
             # existing gate passed; see _run_latex_balance.
             Scope("latex-balance", "_run_latex_balance",
-                  note="unbalanced $, bare \\left}/\\right}, unclosed \\{"),
+                  note="unbalanced $, bare \\left}/\\right}, unclosed \\{, $ split around {python}"),
             # render-audit builds every chapter (~10 min). Manual stage only;
             # default=False ensures `binder check math` stays under 1s.
             Scope("render-audit", "_run_math_render_audit", default=False),
@@ -6251,6 +6257,43 @@ class ValidateCommand:
     # Figure label underscores  (ported from check_fig_references.py)
     # ------------------------------------------------------------------
 
+    def _run_fig_div_comment(self, root: Path) -> ValidationRunResult:
+        """Flag a {#fig-} div whose image is preceded by an HTML comment."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        opener = re.compile(r"^:::+\s*\{#fig-")
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines):
+                if line.strip().startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code or not opener.match(line):
+                    continue
+                j = idx + 1
+                if j >= len(lines) or not lines[j].lstrip().startswith("<!--"):
+                    continue
+                while j < len(lines) and "-->" not in lines[j]:
+                    j += 1
+                if j + 1 < len(lines) and lines[j + 1].lstrip().startswith("!["):
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(file), line=idx + 2,
+                        code="fig_div_comment_before_image",
+                        message=("An HTML comment sits between the figure div opener and its "
+                                 "image, so the PDF puts the image inside the caption and fails. "
+                                 "Move the comment above the ::: {#fig-...} line."),
+                        severity="error", context=lines[idx + 1].strip()[:120],
+                    ))
+        return ValidationRunResult(
+            name="fig-div-comment",
+            description="HTML comment before a figure image",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
     def _run_fig_label_underscores(self, root: Path) -> ValidationRunResult:
         """Find figure references containing underscores (invalid in Quarto)."""
         start = time.time()
@@ -9034,33 +9077,40 @@ class ValidateCommand:
         )
 
     def _run_cross_chapter_callout_ref(self, root: Path) -> ValidationRunResult:
-        """Flag \\ref{} to callout ids (nbk/ws/chk/lhs/psp/exmp) defined in a different file."""
+        """Flag \\ref{} to callout ids (nbk/ws/chk/lhs/psp/exmp, plus dfn/thrm in vol2-vol4) defined in a different file."""
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
         defs = {}
-        def_pat = re.compile(r"\{#((?:nbk|ws|chk|lhs|psp|exmp)-[\w-]+)")
-        ref_pat = re.compile(r"\\ref\{((?:nbk|ws|chk|lhs|psp|exmp)-[\w-]+)\}")
+        def_pat = re.compile(r"\{#((?:nbk|ws|chk|lhs|psp|exmp|dfn|thrm)-[\w-]+)")
+        ref_pat = re.compile(r"\\ref\{((?:nbk|ws|chk|lhs|psp|exmp|dfn|thrm)-[\w-]+)\}")
         texts = {f: self._read_text(f) for f in files}
         for f, t in texts.items():
             for m in def_pat.finditer(t):
                 defs[m.group(1)] = f
         # 2026-10-12: enforced for vol1 only. 2026-10-13: vol2-vol4 refs fixed
-        # (117 at the time), so every volume is enforced.
+        # (117 at the time), so every volume is enforced for callouts.
+        # 2026-11-20: dfn|thrm added for vol2-vol4 (vol1 still has 6 legacy dfn cross-refs).
         enforced_volumes = {"vol1", "vol2", "vol3", "vol4"}
+        dfn_thrm_enforced_volumes = {"vol2", "vol3", "vol4"}
         for f, t in texts.items():
-            if not enforced_volumes & set(Path(f).parts):
+            f_parts = set(Path(f).parts)
+            if not enforced_volumes & f_parts:
                 continue
+            enforce_dfn_thrm = bool(dfn_thrm_enforced_volumes & f_parts)
             for idx, line in enumerate(t.splitlines(), 1):
                 for m in ref_pat.finditer(line):
-                    d = defs.get(m.group(1))
+                    label = m.group(1)
+                    if not enforce_dfn_thrm and label.startswith(("dfn-", "thrm-")):
+                        continue
+                    d = defs.get(label)
                     if d is not None and d != f:
                         issues.append(
                             ValidationIssue(
                                 file=self._relative_file(f),
                                 line=idx,
                                 code="cross_chapter_callout_ref",
-                                message=f"\\ref{{{m.group(1)}}} is defined in {self._relative_file(d)}; cite its section with @sec- instead.",
+                                message=f"\\ref{{{label}}} is defined in {self._relative_file(d)}; cite its section with @sec- instead.",
                                 severity="error",
                                 context=line.strip()[:100],
                             )
@@ -13624,28 +13674,84 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
+    @staticmethod
+    def _provenance_repo_root(root: Path, default_repo_root: Path) -> Path:
+        cur = root.resolve()
+        for cand in (cur, *cur.parents):
+            if cand.name == "books" and cand.parent != cand:
+                return cand.parent
+        return default_repo_root
+
     def _run_figure_data_provenance(
         self, root: Path, ns: Optional[argparse.Namespace] = None
     ) -> ValidationRunResult:
-        """figures --scope data-provenance: Tier-2 CSV and load_series() provenance headers."""
+        """figures --scope data-provenance: Tier-2 CSV headers, column schemas, and Frictionless manifest."""
         try:
             from cli.checks import figure_data_provenance as fdp
         except ImportError:
             from binder.cli.checks import figure_data_provenance as fdp
 
         t0 = time.time()
-        repo_root = Path(__file__).resolve().parents[3]
+        repo_root = self._provenance_repo_root(root, Path(__file__).resolve().parents[3])
+        # Never auto-seal books/datapackage.json on --fix: sealing is gated by
+        # figure_data_provenance.py --seal (metadata-only) or --seal-data --reason.
+
         if ns is not None and getattr(ns, "files", None):
             resolved = [(repo_root / f) if not Path(f).is_absolute() else Path(f) for f in ns.files]
             qmds = [p.resolve() for p in resolved if p.suffix == ".qmd" and p.is_file()]
-            csvs = [p.resolve() for p in resolved if p.suffix == ".csv" and p.is_file()]
+            csvs = [p.resolve() for p in resolved if p.suffix == ".csv" and p.is_file() and fdp._is_book_csv(p, repo_root)]
+            manifest_paths = {
+                (repo_root / fdp.DATAPACKAGE_REL_PATH).resolve(),
+                (repo_root / fdp.EPOCH_RECEIPT_REL_PATH).resolve(),
+            }
+            manifest_staged = any(p.resolve() in manifest_paths for p in resolved)
             checked, violations = fdp.collect_data_provenance(
-                qmds, scan_root=Path("/nonexistent"), repo_root=repo_root
+                qmds,
+                scan_root=Path("/nonexistent"),
+                repo_root=repo_root,
+                verify_manifest=bool(qmds),
             )
-            bib_cache: dict = {}
+            for p in resolved:
+                if p.is_file():
+                    for stray in fdp.discover_stray_book_datasets(p, repo_root=repo_root):
+                        checked += 1
+                        violations.append(
+                            fdp.ProvenanceViolation(
+                                file=fdp._rel(stray, repo_root),
+                                line=1,
+                                code="stray_chapter_dataset",
+                                message=(
+                                    f"Dataset file '{stray.name}' sits outside a chapter 'data/' directory, "
+                                    "which would bypass Tier-2 provenance and manifest sealing."
+                                ),
+                                context=fdp._rel(stray, repo_root),
+                                suggestion=(
+                                    "Move empirical datasets to books/volN/<chapter>/data/<name>.csv "
+                                    "and seal books/datapackage.json."
+                                ),
+                            )
+                        )
+            bib_ctx = fdp._load_bib_context(repo_root)
+            anchor_cache: dict = {}
             for csv_path in csvs:
                 checked += 1
-                violations.extend(fdp.check_csv_file(csv_path, repo_root=repo_root, bib_cache=bib_cache))
+                violations.extend(
+                    fdp.check_csv_file(
+                        csv_path,
+                        repo_root=repo_root,
+                        bib_cache=bib_ctx,
+                        anchor_cache=anchor_cache,
+                    )
+                )
+            if csvs or manifest_staged:
+                target_csvs = fdp.discover_book_csvs(repo_root) if manifest_staged else csvs
+                violations.extend(
+                    fdp.check_datapackage(
+                        target_csvs,
+                        repo_root=repo_root,
+                        check_orphans=True,
+                    )
+                )
         else:
             qmds = self._qmd_files(root)
             scan_root = root.parent if (root.is_file() and root.suffix == ".qmd") else root
@@ -13654,7 +13760,7 @@ class ValidateCommand:
         issues = [ValidationIssue(**v.to_issue_kwargs()) for v in violations]
         return ValidationRunResult(
             name="figure-data-provenance",
-            description="Tier-2 data/*.csv and load_series() provenance and computation headers",
+            description="Tier-2 data/*.csv provenance headers, column schemas, and Frictionless manifest",
             files_checked=checked,
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
@@ -13670,7 +13776,7 @@ class ValidateCommand:
             from binder.cli.checks import figure_data_provenance as fdp
 
         t0 = time.time()
-        repo_root = Path(__file__).resolve().parents[3]
+        repo_root = self._provenance_repo_root(root, Path(__file__).resolve().parents[3])
         if ns is not None and getattr(ns, "files", None):
             resolved = [(repo_root / f) if not Path(f).is_absolute() else Path(f) for f in ns.files]
             qmds = [p.resolve() for p in resolved if p.suffix == ".qmd" and p.is_file()]
@@ -14166,6 +14272,13 @@ class ValidateCommand:
     # literal dollar is written `\\$` there. Collapse that doubling before
     # applying the rule above.
     _LB_ATTR_LINE = re.compile(r"\b(fig|tbl|lst)-(cap|alt)\s*=")
+    # Added 2026-11-20: a math `$` written directly before an inline value
+    # (`$`{python} x`$`) splits one equation around the substitution. After
+    # the value is inserted the `$` sits before a digit, which Pandoc does not
+    # accept as a closing delimiter; MathJax tolerated it, but the Vol II PDF
+    # failed with "Missing $ inserted" (16_responsible_ai equal-opportunity
+    # notebook). Build the whole expression as a `_math` export instead.
+    _LB_SPLIT_MATH = re.compile(r"(?<!\\)\$`\{python\}")
     _LB_LEFTRIGHT_BARE = re.compile(r"\\(left|right)\s*([{}])")
     _LB_DISPLAY = re.compile(r"\$\$")
 
@@ -14208,6 +14321,20 @@ class ValidateCommand:
                     continue
                 if in_code and not in_tikz:
                     continue
+
+                # Rule 0 — math split around an inline {python} value.
+                if not in_code and self._LB_SPLIT_MATH.search(raw):
+                    issues.append(ValidationIssue(
+                        file=rel, line=idx, code="latex_split_math_inline",
+                        message=(
+                            "A math `$` touches an inline `{python}` value, so one "
+                            "equation is split around the substitution. It renders "
+                            "in HTML but breaks the PDF. Export the whole "
+                            "expression from the cell with fmt_math as a `_math` "
+                            "string."
+                        ),
+                        severity="error", context=raw.strip()[:120],
+                    ))
 
                 line = self._lb_strip(raw)
 

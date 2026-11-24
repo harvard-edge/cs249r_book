@@ -281,7 +281,7 @@ class AdmissionOrderModel(ForwardModel):
         return AdmissionOrderResult(
             cost_per_rejection=per_rejection,
             time_per_attempted=times,
-            time_per_admitted=[t / route_yield for t in times],
+            time_per_admitted=[t / y for t, y in zip(times, yields)],
             route_yield=route_yield,
             admitted=None if candidates is None else candidates * route_yield,
             best_order=best,
@@ -436,9 +436,13 @@ class StagingBurstModel(ForwardModel):
         burst = (slots / timeout).to(1 / second)
         net = arrival - burst
         growth = (net * record_ceiling).to(MB / second)
-        t_full = (store / growth).to(second)
+        t_full = (
+            (store / growth).to(second)
+            if growth.to(MB / second).magnitude > 0
+            else float("inf") * second
+        )
         in_flight = (rollouts * record_ceiling).to(GB)
-        reaction_growth = (reaction * growth).to(GB)
+        reaction_growth = (reaction * max(0.0 * (MB / second), growth)).to(GB)
         return StagingBurstResult(
             arrival_rate=arrival,
             capacity=capacity,

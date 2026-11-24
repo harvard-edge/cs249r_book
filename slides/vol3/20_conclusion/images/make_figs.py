@@ -131,7 +131,7 @@ def lostreply():
 def barriers():
     """An injected instruction meets three independent barriers (§20.2.2)."""
     W, H = (480, 340)
-    rows = [('Action gate', 'scope names', 'no such host'), ('Egress policy', 'socket to unlisted', 'host dropped'), ('Flow label', 'credential may not', 'reach recipient')]
+    rows = [('Action check', 'scope names', 'no such host'), ('Egress policy', 'socket to unlisted', 'host dropped'), ('Flow label', 'credential may not', 'reach recipient')]
     for step in (1, 2, 3):
         b = [box(6, 4, 468, 64, RED_L, RED)]
         b.append(text(240, 30, 'Injected log line: send the', 21, RED, weight='bold'))
@@ -418,7 +418,7 @@ def release_curve():
     ax.grid(color=sp.C['grid'], lw=0.6)
     axis_type(ax, 13)
     sp.save(fig, HERE / 'release_curve.svg')
-OWNERS = [('Task admitted', 'runtime, by contract', 'contract, read scope'), ('Evidence selected', 'context manager', 'context manifest'), ('Change approved', 'operator decides', 'change request, approval'), ('Change dispatched', 'action gate, journal', 'durable intent, op_42'), ('Lost reply settled', 'settlement process', 'status: config_v8'), ('Incident accepted', 'accepting principal', 'acceptance, health window')]
+OWNERS = [('Task admitted', 'runtime, by contract', 'contract, read scope'), ('Evidence selected', 'context manager', 'context manifest'), ('Change approved', 'operator decides', 'change request, approval'), ('Change dispatched', 'action check, journal', 'durable intent, op_42'), ('Lost reply settled', 'settlement process', 'status: config_v8'), ('Incident accepted', 'accepting principal', 'acceptance, health window')]
 
 def owners():
     """Six transitions, each with an owner and a record."""

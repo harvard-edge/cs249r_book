@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 from mlsysim.core.units import ureg
+from mlsysim.core._validation import validate_at_least, validate_nonnegative, validate_positive
 
 from ._units import _ensure_unit
 
@@ -19,8 +20,7 @@ def calc_queue_latency_mmc(arrival_rate_hz, service_rate_hz, num_servers):
     service_rate_hz : Quantity or float
         Positive completion rate mu per replica; bare numbers mean Hz.
     num_servers : int
-            Replica count c; implementation truncates to an integer and clamps to at
-        least one.
+        Positive replica count c, at least one.
 
     Returns
     -------
@@ -59,11 +59,17 @@ def calc_queue_latency_mmc(arrival_rate_hz, service_rate_hz, num_servers):
     """
     lam = _ensure_unit(arrival_rate_hz, ureg.hertz, "arrival_rate_hz").magnitude
     mu = _ensure_unit(service_rate_hz, ureg.hertz, "service_rate_hz").magnitude
-    c = max(1, int(num_servers))
+    validate_nonnegative(lam, "arrival_rate_hz")
+    validate_positive(mu, "service_rate_hz")
+    validate_at_least(num_servers, 1, "num_servers")
+    c = int(num_servers)
+
+    if lam == 0.0:
+        return 0.0, 0.0 * ureg.second, 0.0 * ureg.second
 
     # Unstable regime: arrivals meet or exceed total service capacity, so the
     # queue grows without bound — report saturation and infinite waits.
-    if lam >= c * mu or mu == 0:
+    if lam >= c * mu:
         return 1.0, float("inf") * ureg.second, float("inf") * ureg.second
 
     rho = lam / (c * mu)
@@ -190,7 +196,10 @@ def calc_littles_law_occupancy(arrival_rate, time_in_system):
     >>> calc_littles_law_occupancy(2 / ureg.second, 3 * ureg.second).dimensionless
     True
     """
-    return arrival_rate * time_in_system
+    prod = arrival_rate * time_in_system
+    if isinstance(prod, ureg.Quantity) and prod.dimensionless:
+        return prod.to(ureg.dimensionless)
+    return prod
 
 
 def calc_batch_knee(fixed_time, per_request_time):
@@ -308,8 +317,8 @@ def calc_padding_waste_fraction(lengths) -> float:
     True
     """
     lengths = [float(x) for x in lengths]
-    if not lengths or max(lengths) <= 0:
-        raise ValueError("lengths must be nonempty and positive")
+    if not lengths or any(x < 0 for x in lengths) or max(lengths) <= 0:
+        raise ValueError("lengths must be nonempty, nonnegative, and have a positive maximum")
     return 1 - (sum(lengths) / len(lengths)) / max(lengths)
 
 
@@ -355,6 +364,8 @@ def calc_speculative_expected_tokens(acceptance: float, draft_length: int) -> fl
     a = float(acceptance)
     if not 0 <= a < 1:
         raise ValueError("acceptance must be in [0, 1)")
+    if draft_length < 0:
+        raise ValueError("draft_length must be nonnegative")
     return (1 - a ** (draft_length + 1)) / (1 - a)
 
 
@@ -690,4 +701,6 @@ def calc_speculative_round_speedup(accepted_per_round: float, draft_length: int,
     """
     if accepted_per_round < 0 or draft_length < 0 or draft_cost_ratio < 0:
         raise ValueError("inputs must be nonnegative")
+    if accepted_per_round > draft_length:
+        raise ValueError("accepted_per_round cannot exceed draft_length")
     return (accepted_per_round + 1) / (draft_length * draft_cost_ratio + 1)
