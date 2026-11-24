@@ -97,6 +97,9 @@ def check_all() -> list[str]:
                 )
         for slug in vol_data["chapters"]:
             canonical_book_urls.add(f"{vol_data['book_base']}/{slug}/{slug}.html")
+        # Each volume's Study Sheets page (added 2026-11-24, when study sheets
+        # replaced Labs on the live site).
+        canonical_book_urls.add(f"{vol_data['book_base']}/backmatter/studysheets.html")
 
     # 2. Validate canonical lab slugs against labs/config/lab-inventory.qmd
     canonical_lab_urls: set[str] = set()
