@@ -137,8 +137,9 @@ cats = {}
 for r in LLAMA_ROWS:
     cats[r['category']] = cats.get(r['category'], 0) + r['interruption_count']
 other_gpu = cats['GPU'] - cnt('Faulty GPU') - cnt('GPU HBM3 Memory') - cnt('Silent Data Corruption')
-CAUSES = [('Faulty GPU', cnt('Faulty GPU'), 'compute'), ('GPU HBM3 memory', cnt('GPU HBM3 Memory'), 'compute'), ('Other GPU parts', other_gpu, 'compute'), ('Software', cats['Dependency'], 'neutral'), ('Network switch, cable', cats['Network'], 'network'), ('Host maintenance', cats['Unplanned Maintenance'], 'neutral'), ('Host hardware', cats['Host'], 'neutral'), ('NCCL watchdog', cats['Unknown'], 'neutral'), ('Silent data corruption', cnt('Silent Data Corruption'), 'danger')]
+CAUSES = [('Faulty GPU', cnt('Faulty GPU'), 'compute'), ('GPU HBM3 memory', cnt('GPU HBM3 Memory'), 'compute'), ('Other GPU parts', other_gpu, 'compute'), ('Silent data corruption', cnt('Silent Data Corruption'), 'danger'), ('Software', cats['Dependency'], 'neutral'), ('Network switch, cable', cats['Network'], 'network'), ('Host maintenance', cats['Unplanned Maintenance'], 'neutral'), ('Host hardware', cats['Host'], 'neutral'), ('NCCL watchdog', cats['Unknown'], 'neutral')]
 assert sum((c[1] for c in CAUSES)) == 419.0
+assert sum((c[1] for c in CAUSES[:4])) == cats['GPU'] == 268.0
 fig, ax = plt.subplots(figsize=(4.4, 2.25))
 n = len(CAUSES)
 for i, (lab, v, ck) in enumerate(CAUSES):
@@ -146,9 +147,9 @@ for i, (lab, v, ck) in enumerate(CAUSES):
     ax.barh(y, v, color=C[ck], height=0.66)
     txt(ax, -3, y, lab, C['text'], ha='right', va='center', fontsize=11)
     txt(ax, v + 2, y, f'{v:.0f}', C[ck], va='center', fontsize=11)
-ax.annotate('', xy=(176, n - 3.1), xytext=(176, n - 0.9), arrowprops=dict(arrowstyle='-', color=C['compute'], lw=2))
-txt(ax, 186, n - 2.0, 'GPU parts:\n268 of 419\n(64%)', C['compute'], va='center', fontsize=11, linespacing=1.0)
-txt(ax, 22, 0, 'detected only', C['danger'], va='center', fontsize=10, fontweight='normal')
+ax.plot([173, 178, 178, 173], [n - 4.33, n - 4.33, n - 0.67, n - 0.67], color=C['compute'], lw=2)
+txt(ax, 186, n - 2.5, 'GPU parts:\n268 of 419\n(64%)', C['compute'], va='center', fontsize=11, linespacing=1.0)
+txt(ax, 22, n - 4, 'detected only', C['danger'], va='center', fontsize=10, fontweight='normal')
 ax.set_xlim(0, 235)
 ax.set_ylim(-0.6, n - 0.4)
 ax.set_yticks([])

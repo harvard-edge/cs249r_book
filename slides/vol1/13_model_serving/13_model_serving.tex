@@ -117,7 +117,7 @@
     & \textbf{Training} & \leavevmode\uncover<2->{\textbf{\textcolor{mlsysaccent}{Serving}}} \\
     \midrule
     \textbf{Objective} & Samples per second over the run & \leavevmode\uncover<2->{Each request's p99 under its deadline} \\
-    \textbf{Batch} & Large: 7,040 img/s at batch 32 & \leavevmode\uncover<2->{As small as the deadline needs: 283/s at batch 1} \\
+    \textbf{Batch} & Large: hundreds or thousands of samples & \leavevmode\uncover<2->{As small as the deadline needs: 283/s at batch 1} \\
     \textbf{Utilization} & As close to 100\% busy as possible & \leavevmode\uncover<2->{At most 67.5\% busy for a 50 ms p99} \\
     \textbf{Failure} & The run finishes late & \leavevmode\uncover<2->{A user waits past the deadline} \\
     \bottomrule
@@ -125,7 +125,7 @@
   \mlsyscredit{Model Serving, \S13.1 and \S13.5; ResNet-50 on one H100 (table 8, modeled). The 67.5\% bound is this lecture's fleet estimate.}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    That Server-versus-Offline split explains why live serving reverses every priority of training. Training (Lecture 8, analogous to MLPerf Offline) maximizes whole-run throughput with large batches and keeps utilization near 100 percent; if one step runs slow, the job finishes slightly later. The slide contrasts that large-batch regime using ResNet-50's modeled 7,040 img/s batch-32 forward-pass rate on an H100, noting that full training steps also run backward and parameter-update passes. Live serving (analogous to MLPerf Server) inverts every axis. The objective becomes keeping each request's p99 tail latency (Lecture 12) under its deadline. Deadlines force smaller batches, down to 283/s at batch 1, and queues cap safe utilization at 67.5 percent for a 50 ms p99 target (derived in Section 2), because failure now means live users wait past their deadline. Running a serving GPU near 100 percent busy is the worst training habit to carry over.
+    That Server-versus-Offline split explains why live serving reverses every priority of training. Training (Lecture 8, analogous to MLPerf Offline) maximizes whole-run throughput with large batches of hundreds or thousands of samples and keeps utilization near 100 percent; if one step runs slow, the job finishes slightly later. Live serving (analogous to MLPerf Server) inverts every axis. The objective becomes keeping each request's p99 tail latency (Lecture 12) under its deadline. Deadlines force smaller batches, down to 283/s at batch 1 for modeled ResNet-50 on one H100, and queues cap safe utilization at 67.5 percent for a 50 ms p99 target (derived in Section 2), because failure now means live users wait past their deadline. Running a serving GPU near 100 percent busy is the worst training habit to carry over.
 
     \notecue{Next}{Next, compare precomputed static inference against live dynamic serving.}
   }
@@ -488,13 +488,13 @@ Request concurrency: 1
       \uncover<2->{\textcolor{BlueLine}{\textbf{Client:}} 708 \textmu s per request\\[0.2cm]}
       \uncover<3->{\textcolor{OrangeLine}{\textbf{Server:}} 382 \textmu s; the model runs 257 (36\% of 708). 326 \textmu s are outside the server.\\[0.2cm]}
       \uncover<4->{\textcolor{RedLine}{\textbf{Executions = inferences:}} with one request outstanding, every request ran as a batch of one.\\[0.18cm]
-      {\footnotesize\textcolor{midgray}{Serialization (JSON vs.\ gRPC) and OS jitter live inside that 326 \textmu s outside-server slice.}}}
+      {\footnotesize\textcolor{midgray}{Serialization (JSON vs.\ Protobuf) and OS jitter live inside that 326 \textmu s outside-server slice.}}}
     \end{column}
   \end{columns}
   \mlsyscredit{Triton perf\_analyzer docs, quick\_start.md, github.com/triton-inference-server/perf\_analyzer (main @ 93ba37f). Lines quoted exactly; long lines wrapped.}
   \note{%
     \mlsysnotemeta{1.5 min}{Core}%
-    To see what unbatched serving looks like in practice, examine published \texttt{perf\_analyzer} output from NVIDIA Triton Inference Server's quick-start guide. Triton is NVIDIA's serving runtime that decouples network handling and dynamic batching from model code across frameworks. Its load-testing tool drives the quick-start ``simple'' model at concurrency 1 (one request in flight) and splits client from server time. Client latency averages 708 microseconds ($\mu$s), while server latency is 382 $\mu$s and model inference takes only 257 $\mu$s (36 percent). The remaining 326 $\mu$s sit outside the server in network transfer, serialization (text JSON versus gRPC, a remote procedure call framework using binary Protocol Buffers), and client OS jitter (unpredictable operating-system interruptions), confirming Section 1's budget. All 25,348 inferences took 25,348 executions at batch 1, and Little's law holds directly, since $1{,}407.84/\text{s} \times 708\ \mu\text{s} = 1.00$ request in flight.
+    To see what unbatched serving looks like in practice, examine published \texttt{perf\_analyzer} output from NVIDIA Triton Inference Server's quick-start guide. Triton is NVIDIA's serving runtime that decouples network handling and dynamic batching from model code across frameworks. Its load-testing tool drives the quick-start ``simple'' model at concurrency 1 (one request in flight) and splits client from server time. Client latency averages 708 microseconds ($\mu$s), while server latency is 382 $\mu$s and model inference takes only 257 $\mu$s (36 percent). The remaining 326 $\mu$s sit outside the server in network transfer, serialization (text JSON versus binary Protocol Buffers, or Protobuf), and client OS jitter (unpredictable operating-system interruptions), confirming Section 1's budget. All 25,348 inferences took 25,348 executions at batch 1, and Little's law holds directly, since $1{,}407.84/\text{s} \times 708\ \mu\text{s} = 1.00$ request in flight.
 
     \notecue{Next}{Next, break down why 99 percent of a batch-1 ResNet-50 forward pass is fixed cost.}
   }
@@ -531,22 +531,23 @@ Request concurrency: 1
   }
 \end{frame}
 
-\begin{frame}{On an L4, 1.9$\times$ latency buys 4.3$\times$ throughput}
+\begin{frame}{Predict: what L4 throughput gain does batch 8 buy?}
   \mlsysactivity{Predict}{1 min}
   \vspace{-0.18cm}
   \centering
   \mlsyssteps[width=0.95\textwidth,height=5.05cm,keepaspectratio]{batch_curve_step}{2}\\[0.04cm]
-  \uncover<2->{\small One at a time: 0.414 ms. Eight at a time: 0.770 ms.}
+  \only<1|handout:0>{\small\strut L4: batch 1 is 0.414 ms; batch 8 is 0.770 ms.}%
+  \only<2-|handout:1>{\small\strut L4: batch 1 is 0.414 ms; batch 8 is 0.770 ms.\enspace\textbf{\textcolor{mlsysaccent}{1.9$\times$ latency, 4.3$\times$ throughput.}}}
   \mlsyscredit{Left: Model Serving, \S13.6.4 (modeled). Right: MLPerf Inference v5.0, edge, 3$\times$ L4 (5.0-0047); rates per GPU derived from p90 and p99 latencies and Offline/3.}
   \note{%
     \mlsysnotemeta{2.5 min}{Optional}%
-    Batching trades modest latency for multi-fold throughput in both the chapter's model and measured hardware. Under the chapter's modeled eager H100 linear service profile ($3.495 + 0.0329 B$ ms), throughput climbs nearly linearly before flattening near batch 128 (7.7 ms, 16,600 img/s). Measured MLPerf v5.0 runs on an NVIDIA L4 (edge division) test this trade on hardware, where SingleStream (batch 1) takes 0.414 ms (2,415 img/s) and MultiStream (Lecture 12's batch-8 stream) takes 0.770 ms. Before reading on, verify why those latencies yield 4.3x throughput rather than 8x.
+    Batching trades modest latency for multi-fold throughput in both the chapter's model and measured hardware. Under the chapter's modeled eager H100 linear service profile ($3.495 + 0.0329 B$ ms), throughput climbs nearly linearly before flattening near batch 128 (7.7 ms, 16,600 img/s). Measured MLPerf v5.0 runs on an NVIDIA L4 (edge division) test this trade on hardware, where SingleStream (batch 1) takes 0.414 ms (2,415 img/s) and MultiStream (Lecture 12's batch-8 stream) takes 0.770 ms. Before reading on, predict the throughput gain from batch 1 to batch 8.
 
     \notecue{Check}{Eight images take 1.86x (about 1.9x) longer, giving $8 / 1.86 = 4.3\times$ throughput (10,390 img/s), while Offline reaches 12,855 img/s per GPU. A tempting guess is 8x, assuming latency stays flat with batch size.}
 
     \notecue{Watch for}{SingleStream reports p90 latency and MultiStream reports p99, so these per-GPU rates are derived comparisons.}
 
-    \notecue{Teach}{State 0.414 ms and 0.770 ms aloud on overlay 1 and ask pairs to derive 4.3x before revealing the L4 panel. For a 50-minute class, skip this slide.}
+    \notecue{Teach}{Give pairs one minute to predict the batch-8 throughput gain from 0.414 ms and 0.770 ms before revealing the L4 panel. For a 50-minute class, skip this slide.}
 
     \notecue{Next}{Next, price the batch-formation wait that requests pay inside a fixed time window.}
   }

@@ -219,7 +219,7 @@
     \toprule
     Per step, $L$ layers & Calls & Bytes sent per rank & Startup, $\alpha_{\text{call}}$ per call \\
     \midrule
-    Data parallel, unbucketed & 1 AllReduce & $\approx 2M$ & $\alpha_{\text{call}}$ \\
+    Data parallel, whole gradient & 1 AllReduce & $\approx 2M$ & $\alpha_{\text{call}}$ \\
     FSDP & $2L$ & $\approx 2M$ & $2L\,\alpha_{\text{call}}$ \\
     FSDP, reshard after forward & $3L$ & $\approx 3M$ & $3L\,\alpha_{\text{call}}$ \\
     \bottomrule
@@ -228,7 +228,7 @@
   \mlsyscredit{Collective Communication, \S5.4.1 and \S5.4.2 ($M$: model-sized payload, large group, equal widths). Code: PyTorch v2.4.0, lines 65 to 68.}
   \note{%
     \mlsysnotemeta{2 min}{Optional}%
-    That ReduceScatter-plus-AllGather split lets PyTorch's FSDP (shown via \texttt{ShardingStrategy}) and ZeRO-3 store $1/N$ of each layer's weights per rank, running AllGather before compute and ReduceScatter after backward. Section 2 derives why AllReduce sends $\approx 2M$ bytes per rank ($\approx M$ per half), while $\alpha_{\text{call}}$ denotes one collective call's total startup cost across its rounds. Here ``unbucketed'' data parallelism means one whole-model AllReduce of size $M$ in 1 call; standard FSDP moves about $M/L$ bytes per call across $2L$ calls (one AllGather and one ReduceScatter per layer) for the same $\approx 2M$ bytes. Resharding after forward frees and re-gathers weights for backward, sending $\approx 3M$ bytes in $3L$ calls (96 calls for 32 layers, derived). Sharding trades memory (Lecture 6) mainly by multiplying startup calls rather than wire bytes.
+    That ReduceScatter-plus-AllGather split lets PyTorch's FSDP (shown via \texttt{ShardingStrategy}) and ZeRO-3 store $1/N$ of each layer's weights per rank, running AllGather before compute and ReduceScatter after backward. Section 2 derives why AllReduce sends $\approx 2M$ bytes per rank ($\approx M$ per half), while $\alpha_{\text{call}}$ denotes one collective call's total startup cost across its rounds. Whole-gradient data parallelism reduces the full gradient of size $M$ in 1 AllReduce call; standard FSDP moves about $M/L$ bytes per call across $2L$ calls (one AllGather and one ReduceScatter per layer) for the same $\approx 2M$ bytes. Resharding after forward frees and re-gathers weights for backward, sending $\approx 3M$ bytes in $3L$ calls (96 calls for 32 layers, derived). Sharding trades memory (Lecture 6) mainly by multiplying startup calls rather than wire bytes.
 
     \notecue{Watch for}{Calling AllReduce when each rank updates only its own shard wastes half the bytes assembling data every rank discards.}
 
@@ -329,7 +329,7 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
   \mlsyscredit{Collective Communication, Napkin Math 5.1 ($\alpha = 1.5~\mu$s, $\beta = 50$ GB/s), \S5.5. Command: nccl-tests. Photo: Jesseschulman, CC BY-SA 3.0, Wikimedia Commons.}
   \note{%
     \mlsysnotemeta{2 min}{Core}%
-    Pricing that 25 MB bucket round by round in Napkin Math 5.1 (InfiniBand NDR, $\alpha = 1.5$ \textmu s, $\beta = 50$ GB/s) shows the cost of dropping below 75 KB. At 64 GPUs, 126 rounds of 9.3 \textmu s take 1.2 ms in total, including 1.0 ms for bytes. At 1,024 GPUs, the byte term stays at 1.0 ms, yet 2,046 rounds of 1.5 \textmu s add 3.1 ms of startup. Total time rises to 4.1 ms, which is $3.5\times$ slower from unrounded values (derived). Three levers address latency-bound traffic, namely fusion, fewer rounds via trees, and hierarchy. Fusion packs 100 transfers of 4 KB together, cutting $100\alpha = 150$ \textmu s down to $\alpha + 400\text{ KB}/\beta = 9.5$ \textmu s, about 16$\times$ faster, as used in Horovod Tensor Fusion and PyTorch buckets. The \texttt{all\_reduce\_perf} sweep from NCCL's benchmark suite isolates fixed $\alpha$ at small sizes, where compression cannot help.
+    Pricing that 25 MB bucket round by round in Napkin Math 5.1 (InfiniBand NDR, $\alpha = 1.5$ \textmu s, $\beta = 50$ GB/s) shows the cost of dropping below 75 KB. At 64 GPUs, 126 rounds of 9.3 \textmu s take 1.2 ms in total, including 1.0 ms for bytes. At 1,024 GPUs, the byte term stays at 1.0 ms, yet 2,046 rounds of 1.5 \textmu s add 3.1 ms of startup. Total time rises to 4.1 ms, which is $3.5\times$ slower from unrounded values (derived). Three levers address latency-bound traffic, namely fusion, fewer rounds via trees, and hierarchy. Fusion packs 100 transfers of 4 KB together, cutting $100\alpha = 150$ \textmu s down to $\alpha + 400\text{ KB}/\beta = 9.5$ \textmu s, about 16$\times$ faster, as used in Horovod Tensor Fusion and PyTorch buckets. The \texttt{all\_reduce\_perf} sweep from NCCL's benchmark suite isolates fixed $\alpha$ at small sizes, where compression cannot help. The pictured QSFP (Quad Small Form-factor Pluggable) module is a pluggable optical transceiver for a switch or NIC port.
 
     \notecue{Next}{The next slide places the ring on the 64-GPU, 1 GB scoreboard beside Uber's parameter server.}
   }
@@ -443,10 +443,11 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
     \begin{column}{0.36\textwidth}
       \begin{mlsyscard}{mlsysaccent}
         $N = 64$, $M = 1$ MB\\
-        $\alpha = 10~\mu$s, $\beta = 10$ GB/s
+        $\alpha = 10~\mu$s, $\beta = 10$ GB/s\\
+        Tree: $2\log_2 N(\alpha + M/\beta)$
       \end{mlsyscard}
-      \vspace{0.15cm}
-      \small
+      \vspace{0.05cm}
+      \footnotesize
       \uncover<2->{%
       \begin{tabular}{@{}lrr@{}}
         \toprule
@@ -456,7 +457,7 @@ $T_{\text{ring}} \;=\; \underbrace{2(N-1)\,\alpha}_{\text{one startup per round}
         Bytes & 196.9 & 1,200 \\
         \textbf{Total} & 1,457 & \textbf{1,320} \\
         \bottomrule
-      \end{tabular}}\\[0.18cm]
+      \end{tabular}}\\[0.08cm]
       \uncover<3->{{\scriptsize\ttfamily NCCL\_ALGO=Ring\textbar{}Tree\textbar{}NVLS\textbar{}...}}
     \end{column}
     \begin{column}{0.62\textwidth}

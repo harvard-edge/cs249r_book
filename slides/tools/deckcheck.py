@@ -970,7 +970,8 @@ BRITISH = re.compile(r"\b(colou?r(?<=colour)\w*|behaviour\w*|favour\w*|optimis(?
                      r"centre[sd]?\b|modelling|modelled|labelled|labelling|travelled|cancelled|"
                      r"analys(?:e|ed|ing)\b|utilis(?:e|ed|es|ing|ation)\b|programmes?\b|"
                      r"organis(?:e|ed|es|ing|ation)\b|grey\b)", re.I)
-HYPE = re.compile(r"\b(crucial(?:ly)?|massive(?:ly)?|game[- ]changing|game[- ]changer|revolutionary|"
+# 2026-11-24: "Massive Multitask" (the MMLU benchmark name) is not hype.
+HYPE = re.compile(r"\b(crucial(?:ly)?|massive(?:ly)?(?! Multitask)|game[- ]changing|game[- ]changer|revolutionary|"
                   r"revolutioni[sz]e[sd]?|unprecedented|cutting[- ]edge)\b", re.I)
 LEDGER = re.compile(r"\bledgers?\b", re.I)
 BINDING_CONSTRAINT = re.compile(
@@ -1042,9 +1043,10 @@ LLM_NOTE_TAG = re.compile(r"\b(NARRATE|ENGAGE|WARN|LINK|FLEX|LAND|BEAT)\s*:")
 # 2026-11-23: notes address the learner; classroom mechanics live only in
 # \notecue{Teach}{...}. These phrases outside a Teach cue mean the note is
 # talking to the instructor (see rules/slides/speaker-notes.md).
+# 2026-11-24: a hyphenated "Click-" (Click-prediction, Click-through) names a task, not a classroom step.
 INSTRUCTOR_VOICE = re.compile(
     r"\b(?:Ask|Have|Give|Let|Invite|Poll|Remind)\s+(?:students|pairs|the class|anyone)\b"
-    r"|\b(?:Most|Many|Some) students\b|\bClick(?:ing)?\b(?: forward)?|\bshow of hands\b"
+    r"|\b(?:Most|Many|Some) students\b|\bClick(?:ing)?\b(?!-)(?: forward)?|\bshow of hands\b"
     r"|\bthumbs (?:up|down)\b|\bvote with\b|\b50-minute class\b"
     r"|\bStep \d+ (?:reveals|shows|adds|highlights|plots)\b")
 

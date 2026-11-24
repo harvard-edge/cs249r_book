@@ -445,7 +445,7 @@
   \mlsyscredit{Reproduction code: Anthropic, ``A postmortem of three recent issues,'' 2025 (excerpted). Photo: Norman P. Jouppi et al., CC BY 4.0, Wikimedia Commons. The Foundation Model, War Story 2.1.}
   \note{%
   \mlsysnotemeta{1.5 min}{Core}%
-  Reproducing Anthropic's third 2025 serving bug, the script builds 12,000 zeros with a single 1.0 at index $i$ and compares the low-level approximate routine \cd{lax.approx\_max\_k} against exact \cd{lax.top\_k}. On the accelerator serving path (illustrated by the Tensor Processing Unit, or TPU v4, board on the right), the miscompiled approximate kernel dropped the 1.0 for every index $i \ge 10{,}240$, silently excluding the highest-scoring token from sampling. Engineers fixed the defect by switching to exact 32-bit top-k at a modest throughput cost.
+  Reproducing Anthropic's third 2025 serving bug, the script builds 12,000 zeros with a single 1.0 at index $i$ and compares the low-level approximate routine \cd{lax.approx\_max\_k} against exact \cd{lax.top\_k}. It is written in JAX, an array-computing library where \cd{jnp} builds numerical arrays and \cd{lax} calls compiled accelerator primitives. On the accelerator serving path (illustrated by the Tensor Processing Unit, or TPU v4, board on the right), the miscompiled approximate kernel dropped the 1.0 for every index $i \ge 10{,}240$, silently excluding the highest-scoring token from sampling. Engineers fixed the defect by switching to exact 32-bit top-k at a modest throughput cost.
 
   \notecue{Watch for}{Because the defect sat in the serving kernel while weights and output schemas looked clean, retraining could not fix it. Only serving telemetry, operational metrics and configuration logs from the service, paired with external output tests surfaces it.}
 
@@ -541,7 +541,7 @@
   \mlsyscredit{The Foundation Model, \S2.5.3 (Explore: Streaming Cancellation on mlsysbook.ai); 21.075 ms reference floor (derived).}
   \note{%
   \mlsysnotemeta{2 min}{Core}%
-  Waiting for a 4,096-token reply before validating wastes accelerator time once an early token breaks the schema. Streaming delivers tokens as generation runs, letting the runtime validate prefixes incrementally and catch an unrecoverable schema breach at token 96. The host then marks status \cd{REJECTED}, distinct from policy \cd{CANCELED} or timeout \cd{TRANSPORT\_FAILURE}, quarantines the fragment locally, and sends a cancel signal. Local non-dispatch is guaranteed immediately, whereas sparing the remaining 4,000 steps, or 84.3 s at the 21.075 ms per-token decode floor derived in Section 5, depends on the remote serving engine honoring cancellation.
+  Waiting for a 4,096-token reply before validating wastes accelerator time once an early token breaks the schema. Streaming delivers tokens as generation runs, letting the runtime validate prefixes incrementally and catch an unrecoverable schema breach at token 96. The host then marks status \cd{REJECTED}, distinct from policy \cd{CANCELED} or timeout \cd{TRANSPORT\_FAILURE}, quarantines the fragment locally, and sends a cancel signal. Local non-dispatch is guaranteed immediately, whereas sparing the remaining 4,000 steps, or 84.3 s at the 21.075 ms per-token decode floor derived in Section 5, depends on the remote serving engine honoring cancellation. Each unbatched decode step streams 70.6 GB of 8-bit weights across 3.35 TB/s of accelerator memory bandwidth, setting that reference lower bound.
 
   \notecue{Watch for}{Closing a client Transmission Control Protocol (TCP) socket does not guarantee that the remote server stops decoding or billing. Local quarantine is certain, whereas remote compute savings are conditional.}
 
@@ -782,14 +782,14 @@
 \end{frame}
 
 \begin{frame}{Double the turns: how much more resend?}
-  \mlsysactivity{Predict}{3 min}
+  \mlsysactivity{Predict}{2.5 min}
   \begin{columns}[c]
     \begin{column}{0.37\textwidth}
       \begin{mlsyscard}[top=0.2em,bottom=0.2em]{mlsysaccent}
         \small\textbf{Given (NM 2.2)}\\[0.04cm]
         First prompt $S_0$: 8,000\\
         Append $\Delta$/turn: 1,500; out: 200\\
-        $S = H S_0 + \Delta H(H-1)/2$\\
+        $S_{\text{sent}} = H S_0 + \Delta H(H-1)/2$\\
         30 turns: \textbf{892,500} tokens
       \end{mlsyscard}
       \vspace{0.08cm}
@@ -804,7 +804,7 @@
   \mlsyscredit{The Foundation Model, Napkin Math 2.2 and equation 9 (scenario values); reference floors from equations 7 and 8. Derived.}
   \note{%
   \mlsysnotemeta{2.5 min}{Core}%
-  Unlike single-turn completion, an append-only agent calling a stateless model resends growing history every turn (Lecture 1's quadratic resend). In Napkin Math 2.2 (Equation 9), starting at $S_0 = 8{,}000$ tokens and appending $\Delta = 1{,}500$ per turn resends $S = H S_0 + \Delta H(H-1)/2 = 892{,}500$ tokens over 30 turns. Choose how much resent input grows at 60 turns.
+  Unlike single-turn completion, an append-only agent calling a stateless model resends growing history every turn (Lecture 1's quadratic resend). In Napkin Math 2.2 (Equation 9), starting at $S_0 = 8{,}000$ tokens and appending $\Delta = 1{,}500$ per turn resends $S_{\text{sent}} = H S_0 + \Delta H(H-1)/2 = 892{,}500$ tokens over 30 turns. Choose how much resent input grows at 60 turns.
 
   \notecue{Check}{The answer is B, 3.5$\times$. At 60 turns, resend hits 3,135,000 tokens because the triangular sum grows 4.07$\times$ while $H S_0$ doubles. Choice A (2$\times$) assumes linear growth; C (4$\times$) ignores $H S_0$. Prefix reuse, keeping cached KV attention state across turns, leaves 51,500 fresh tokens at 30 turns (17.3$\times$ less) and 96,500 at 60 turns (1.9$\times$). At reference floors, 30-turn prefill falls from 63.68 s to 3.67 s, leaving 126.45 s of decode dominant.}
 
@@ -846,7 +846,7 @@
   \mlsysactivity{Retrieval}{3 min}
   \centering
   \safeimg[width=0.98\textwidth,height=3.65cm,keepaspectratio]{hook_timeline.pdf}\par\vspace{0.08cm}
-  \only<1|handout:0>{\normalsize For each runtime record, say what it would have shown.}%
+  \only<1|handout:0>{\normalsize For each runtime record, say what it would have shown:\\[0.08cm]{\footnotesize\textbf{Status envelope}\ \textperiodcentered\ \textbf{Schema check}\ \textperiodcentered\ \textbf{Serving log}\ \textperiodcentered\ \textbf{External tests}\ \textperiodcentered\ \textbf{Recorded reply}}}%
   \only<2->{\footnotesize
   \begin{tabular}{@{}P{2.7cm}P{2.4cm}P{2.6cm}P{2.5cm}P{2.5cm}@{}}\toprule
     \textbf{Status envelope} & \textbf{Schema check} & \textbf{Serving log} & \textbf{External tests} & \textbf{Recorded reply} \\\midrule

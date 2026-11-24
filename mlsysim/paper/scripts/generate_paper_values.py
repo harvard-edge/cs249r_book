@@ -676,6 +676,58 @@ def section_anchors(V: Values) -> None:
     V.num("AnchorSevenWideDp", wide.best_config["dp"], src + " with max_tp=64 .best_config")
 
 
+def section_energy(V: Values) -> None:
+    V.section("Measured board energy: four declared GPU tests (configurations in paper_scenarios.py)")
+    e = ps.measured_energy()
+    src = e["source"]
+
+    def pair(name: str, key: str, how, source: str) -> None:
+        low, high = e[key]
+        how(f"{name}Low", low, f"min {source}")
+        how(f"{name}High", high, f"max {source}")
+
+    def pct(nd: int):
+        return lambda name, x, source: V.pct(f"{name}Pct", x, source, nd=nd)
+
+    def ratio(nd: int = 2):
+        return lambda name, x, source: V.num(name, x, source, nd=nd)
+
+    V.num("EnergyRuleIdleFraction", cal.ENERGY_IDLE_FRACTION, "engine.calibration.ENERGY_IDLE_FRACTION", nd=2)
+    V.num("EnergyRuleDynamicFraction", cal.ENERGY_DYNAMIC_FRACTION, "engine.calibration.ENERGY_DYNAMIC_FRACTION", nd=2)
+    pair("EnergyDecodePower", "decode_power_over_tdp", pct(0), "decode measured_power_w / registry TDP over the four tests")
+    pair("EnergyDecodeUtil", "decode_utilization", pct(1), f"decode FLOP utilization at the measured time ({src})")
+    pair("EnergyDecodeProp", "decode_proportional_measured", ratio(), f"decode TDP x (idle + dynamic x u) over measured time / measured energy ({src})")
+    pair("EnergyDecodeTdp", "decode_rated_measured", ratio(), "decode TDP x measured time / measured energy")
+    pair("EnergyDenseStep", "dense_step_ratio", ratio(), f"ServingModel ITL / measured decode step, Llama-3.1-8B, Llama-2-7B, Llama-2-13B ({src})")
+    pair("EnergyDenseTdpModeled", "dense_rated_modeled", ratio(), f"TDP x ServingModel ITL / measured decode energy, dense models ({src})")
+    pair("EnergyDensePropModeled", "dense_proportional_modeled", ratio(), f"proportional rule over ServingModel ITL / measured decode energy, dense models ({src})")
+    pair("EnergyPrefillProp", "prefill_proportional_measured", ratio(), f"prefill proportional rule over measured time / measured energy ({src})")
+    pair("EnergyTrainProp", "train_proportional_measured", ratio(), f"training proportional rule over measured time / measured energy ({src})")
+    V.num("EnergyTrainEtaAh", e["train_efficiency_a100"], "ResNet-50 training efficiency the plans declare for the A100 (engine.empirical RESNET50_A100_TRAIN_BS256)", nd=2)
+    V.num("EnergyTrainEtaHh", e["train_efficiency_h100"], "ResNet-50 training efficiency the plans declare for the H100 (engine.empirical RESNET50_H100_TRAIN_BS256) and the H200", nd=2)
+    V.num("EnergyMoeStep", e["moe_b1_step_ratio"], f"ServingModel ITL / measured decode step, Mixtral-8x7B batch 1, 128- and 2,048-token prompts (equal at two decimals) ({src})", nd=2)
+    pair("EnergyMoeTdpModeled", "moe_b1_rated_modeled", ratio(), f"TDP x ServingModel ITL / measured decode energy, Mixtral-8x7B batch 1 ({src})")
+    pair("EnergyIdle", "idle_over_tdp", pct(0), "idle_power_w / registry TDP, every row of the four tests")
+    pair("EnergyDecodeLead", "h200_decode_lead", pct(0), "1 - H200 / next-lowest mean measured decode energy, tests with the H200")
+    V.num("EnergyOtherClear", e["other_clear"], "prefill and training comparisons won on every pairing of boards, tests with the H200 (seed test per seed)")
+    V.num("EnergyOtherTotal", e["other_total"], "prefill and training comparisons, tests with the H200 (seed test per seed)")
+    pair("EnergyOtherLead", "other_h200_lead", pct(0),"1 - H200 / next-lowest mean measured energy where the H200 wins on every pairing")
+    pair("EnergyTrainAhOverHtwo", "train_a100_over_h200", pct(0), "ResNet-50 training, A100 / H200 mean measured energy - 1, tests with the H200")
+    V.pct("EnergyTrainAhOverHhFirstPct", e["train_a100_over_h100_first"], "ResNet-50 training, A100 / H100 mean measured energy - 1, gpu-energy", nd=0)
+    pair("EnergyTrainStepAh", "train_step_a100", ratio(), f"SingleNodeModel ResNet-50 step / measured step on the A100, every test ({src})")
+    pair("EnergyTrainStepHtwo", "train_step_h200", ratio(), f"SingleNodeModel ResNet-50 step / measured step on the H200 ({src})")
+    V.pct("EnergyBoardSpreadMaxPct", e["board_spread_max"], "max over GPU and decode config of highest / lowest board energy - 1, gpu-energy-boards rows of board_energy.csv", nd=1)
+    V.pct("EnergySeedBoardSpreadMaxPct", e["seed_board_spread_max"], "max decode spread_a / spread_b (highest / lowest board - 1), gpu-energy-seeds/seed_summary.csv", nd=1)
+    V.pct("EnergySeedShiftMeanPct", e["seed_shift_mean_max"], "max over GPUs of mean |seed 2198 / seed 2193 - 1| on the same board, decode rows of gpu-energy-seeds/seed_pairs.csv", nd=1)
+    V.pct("EnergySeedShiftMaxPct", e["seed_shift_max"], "max |seed 2198 / seed 2193 - 1|, decode rows of gpu-energy-seeds/seed_pairs.csv", nd=1)
+    V.num("EnergyBoardPairs", e["board_pairs"], "H100_vs_A100_pairs_all_tests, gpu-energy-boards/board_summary.csv")
+    pair("EnergyBoardLower", "board_h100_lower", ratio(0), "decode H100_lower_all_tests, gpu-energy-boards/board_summary.csv")
+    V.num("EnergyFirstAhClear", e["first_decode_a100_clear"], "decode comparisons the A100 wins on every pairing of boards, gpu-energy/device_choice.csv")
+    V.num("EnergyFirstDecodeTotal", e["first_decode_total"], "decode comparisons, gpu-energy/device_choice.csv")
+    V.num("EnergyAhTdpW", e["a100_tdp_w"], "Hardware.Cloud.A100 TDP")
+    V.num("EnergyAhLimitW", e["a100_raised_limit_w"], "A100 power limit above the TDP in summary.csv power_limits_w: one board in gpu-energy, one Llama-2-7B board in gpu-energy-workloads")
+
+
 def section_walls(V: Values) -> None:
     V.section("Walls")
     llama70, llama8 = Models.Language.Llama3_70B, Models.Language.Llama3_8B
@@ -1607,6 +1659,7 @@ def main() -> int:
         section_registry(V)
         section_counts(V, args.check)
         section_anchors(V)
+        section_energy(V)
         section_walls(V)
         roof = section_instructor(V, args.check)
         carbon = section_carbon(V)

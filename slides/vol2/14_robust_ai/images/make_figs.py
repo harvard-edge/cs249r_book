@@ -402,7 +402,7 @@ for k in (1, 2):
     zou(out / f'zou_step{k}.svg', k)
 
 def access(path, k):
-    rows = [('White-box', 'weights, gradients', 'one backward pass', 'adaptive white-box', V['red'], V['red_l']), ('Transfer', 'a surrogate model', 'craft offline, submit', "other models' attacks", V['amber'], V['amber_l']), ('Query', 'returned labels', 'thousands of queries', 'query budgets', V['violet'], V['violet_l']), ('Physical', 'the scene itself', 'survive the camera', 'drive-by tests', V['blue'], V['blue_l'])]
+    rows = [('White-box', 'weights, gradients', '1 or k backward passes', 'adaptive white-box', V['red'], V['red_l']), ('Transfer', 'a surrogate model', 'craft offline, submit', "other models' attacks", V['amber'], V['amber_l']), ('Query', 'returned labels', 'thousands of queries', 'query budgets', V['violet'], V['violet_l']), ('Physical', 'the scene itself', 'survive the camera', 'drive-by tests', V['blue'], V['blue_l'])]
     b = [text(20, 26, 'Attacker has', V['gray'], 20, 700, 'start'), text(495, 26, 'Attack cost', V['gray'], 20, 700), text(770, 26, 'Test it demands', V['gray'], 20, 700)]
     for i, (n, has, cost, ev, s, f) in enumerate(rows):
         y = 40 + i * 88

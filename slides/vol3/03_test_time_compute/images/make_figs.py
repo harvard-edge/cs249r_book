@@ -371,7 +371,7 @@ def diamond(ax, x, y, w, h, text, role='neutral', alpha=1.0):
     ax.text(x + w / 2, y + h / 2, text, ha='center', va='center', fontsize=15, color=txt, alpha=alpha, zorder=3)
 
 def stop():
-    steps = [('1. Ceiling\nreached?', 'Stop admitting;\nkeep a pass,\nelse escalate', 'bad'), ('2. Candidate\naccepted?', 'Stop search;\nsend it to the\nacceptance check', 'mem'), ('3. Gain per\ndollar too low?', 'Stop early;\nreport incomplete\nor escalate', 'tool')]
+    steps = [('1. Ceiling\nreached?', 'Stop admitting;\nkeep a pass,\nelse escalate', 'bad'), ('2. Criteria\nmet?', 'Stop search:\nto the acceptance\ndecision', 'mem'), ('3. Gain per\ndollar too low?', 'Stop early;\nreport incomplete\nor escalate', 'tool')]
     for k in (1, 2, 3):
         fig, ax = canvas(9.0, 3.4)
         box(ax, 0.3, 19, 14.5, 12, 'Before\nadmitting\nwork', 'neutral', fs=15)

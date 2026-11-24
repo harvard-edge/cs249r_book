@@ -308,7 +308,7 @@ for k in (1, 2, 3):
     save_svg(p, f'join_step{k}.svg')
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(3.4, 2.4))
-    vals = [('Incumbent\n30 days', 10.0, 'memory', '95%'), ('Candidate\n2 days', 7.0, 'network', '20%')]
+    vals = [('Incumbent\nmatured', 10.0, 'memory', '95%'), ('Candidate\n2 days', 7.0, 'network', '7%')]
     for i, (lab, v, ck, cov) in enumerate(vals):
         ax.bar(i, v, 0.55, color=C[ck])
         ax.text(i, v + 0.3, f'{v:.0f}%', ha='center', va='bottom', fontsize=13, fontweight='bold', color=C[ck])
