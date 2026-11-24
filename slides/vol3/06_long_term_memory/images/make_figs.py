@@ -389,7 +389,7 @@ def generations_fig(path, k):
         s.text(tx, y - 12, lab, size=20, color=col, bold=True)
     if k >= 2:
         s.rect(14, 254, 612, 70, 'compute', sw=2)
-        s.text(28, 282, '2. Commit r18: exclude r17 in 0.4 µs', size=20, role='compute', bold=True)
+        s.text(28, 282, '2. Commit r18: exclude r17 in under 1 µs', size=20, role='compute', bold=True)
         s.text(28, 310, 'Mid-rebuild queries read pool.py directly or say partial.', size=19, color='#0f172a')
     if k >= 3:
         s.rect(14, 336, 612, 70, 'fault', sw=2.5)

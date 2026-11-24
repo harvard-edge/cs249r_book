@@ -127,10 +127,11 @@ def hook_timeline(k):
 for k in range(1, 5):
     hook_timeline(k)
 
-def gantt(name, rows, xmax, notes=(), size=(5.4, 3.4), crit=(), ghost=(), qmark=None, gap=None, late=(), fs=15):
+def gantt(name, rows, xmax, notes=(), size=(5.4, 3.4), crit=(), ghost=(), qmark=None, gap=None, late=(), fs=15, show_dur=False):
     """rows: list of (label, start, end, color_key). crit: labels outlined in
     violet (the critical path). ghost: (label, start, end) drawn faint.
-    gap: (start, end) hatched as unattributed time. late: labels drawn red dashed."""
+    gap: (start, end) hatched as unattributed time. late: labels drawn red dashed.
+    show_dur: label non-late bars with their duration in seconds."""
     fig, ax = plt.subplots(figsize=size)
     n = len(rows)
     for i, (label, s0, e0, ck) in enumerate(rows):
@@ -143,6 +144,13 @@ def gantt(name, rows, xmax, notes=(), size=(5.4, 3.4), crit=(), ghost=(), qmark=
                 ax.barh(y, e0 - s0, left=s0, height=0.6, color=C['danger_l'], edgecolor=C['danger'], linestyle='--', linewidth=2.4, zorder=2)
             else:
                 ax.barh(y, e0 - s0, left=s0, height=0.6, color=C[ck], zorder=2, edgecolor=VIO if label in crit else 'none', linewidth=3.0 if label in crit else 0)
+                if show_dur:
+                    dur = e0 - s0
+                    txt = f'{dur:.1f} s'
+                    if dur >= 1.8:
+                        ax.text((s0 + e0) / 2, y, txt, ha='center', va='center', fontsize=fs - 3.5, color='white', fontweight='bold', zorder=3)
+                    else:
+                        ax.text(e0 + 0.25, y, txt, ha='left', va='center', fontsize=fs - 3.5, color=C['text'], fontweight='bold', zorder=3)
         if label not in late or e0 is not None:
             ax.text(-0.15, y, label, ha='right', va='center', fontsize=fs, color=C['danger'] if label in late else C['text'], fontweight='bold')
     if gap:
@@ -176,9 +184,9 @@ rows = [(lbl, S[k][0], S[k][1], ck) for lbl, k, ck in LBL]
 t_end = S['chat synthesize_report'][1]
 rows_base = rows + [('late callback', None, None, 'danger')]
 rows_late = rows + [('late callback', t_end, t_end + 0.85, 'danger')]
-gantt('run_step1.svg', rows_base, 13.0, size=(5.4, 3.55), late=('late callback',), fs=16.5)
-gantt('run_step2.svg', rows_base, 13.0, size=(5.4, 3.55), crit=('retrieve', 'model: propose', 'run_tests', 'model: report'), gap=(S['execute_tool run_tests'][1], S['chat synthesize_report'][0]), late=('late callback',), notes=[(S['execute_tool run_lint'][1] + 0.3, 2, 'off the path', C['neutral'], 'left'), (9.9, 3, f"{run['gap']:.1f} s gap", C['danger'], 'left')], fs=16.5)
-gantt('run_step3.svg', rows_late, 13.0, size=(5.4, 3.55), crit=('retrieve', 'model: propose', 'run_tests', 'model: report'), gap=(S['execute_tool run_tests'][1], S['chat synthesize_report'][0]), late=('late callback',), notes=[(S['execute_tool run_lint'][1] + 0.3, 2, 'off the path', C['neutral'], 'left'), (9.9, 3, f"{run['gap']:.1f} s gap", C['danger'], 'left'), (t_end - 0.25, 0, 'attaches after root close', C['danger'], 'right')], fs=16.5)
+gantt('run_step1.svg', rows_base, 13.0, size=(5.4, 3.55), late=('late callback',), fs=16.5, show_dur=True)
+gantt('run_step2.svg', rows_base, 13.0, size=(5.4, 3.55), crit=('retrieve', 'model: propose', 'run_tests', 'model: report'), gap=(S['execute_tool run_tests'][1], S['chat synthesize_report'][0]), late=('late callback',), notes=[(S['execute_tool run_lint'][1] + 0.3, 2, 'off the path', C['neutral'], 'left'), (9.9, 3, f"{run['gap']:.1f} s gap", C['danger'], 'left')], fs=16.5, show_dur=True)
+gantt('run_step3.svg', rows_late, 13.0, size=(5.4, 3.55), crit=('retrieve', 'model: propose', 'run_tests', 'model: report'), gap=(S['execute_tool run_tests'][1], S['chat synthesize_report'][0]), late=('late callback',), notes=[(S['execute_tool run_lint'][1] + 0.3, 2, 'off the path', C['neutral'], 'left'), (9.9, 3, f"{run['gap']:.1f} s gap", C['danger'], 'left'), (t_end - 0.25, 0, 'attaches after root close', C['danger'], 'right')], fs=16.5, show_dur=True)
 iv = {'retrieve': (0.0, 0.2), 'propose': (0.2, 3.2), 'tests': (3.2, 9.2), 'lint': (3.2, 5.2), 'synthesize': (9.7, 11.7)}
 t_ret, t_pro = (iv['retrieve'][1], iv['propose'][1])
 t_chk = t_pro

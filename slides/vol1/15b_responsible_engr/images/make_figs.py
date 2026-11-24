@@ -133,7 +133,9 @@ def _llm(name, color, first):
     """One Table 4 bar; a star marks a value Luccioni et al. inferred."""
     d = {'GPT-3': {'model': 'GPT-3', 'energy_mwh': 1287.0, 'energy_inferred': 0.0, 'grid_g_per_kwh': 429.0, 'grid_inferred': 0.0, 'tco2e_pue': 552.0, 'tco2e_inferred': 0.0}, 'Gopher': {'model': 'Gopher', 'energy_mwh': 1066.0, 'energy_inferred': 1.0, 'grid_g_per_kwh': 330.0, 'grid_inferred': 0.0, 'tco2e_pue': 380.0, 'tco2e_inferred': 0.0}, 'OPT': {'model': 'OPT', 'energy_mwh': 324.0, 'energy_inferred': 1.0, 'grid_g_per_kwh': 231.0, 'grid_inferred': 1.0, 'tco2e_pue': 76.3, 'tco2e_inferred': 1.0}, 'BLOOM': {'model': 'BLOOM', 'energy_mwh': 433.0, 'energy_inferred': 0.0, 'grid_g_per_kwh': 57.0, 'grid_inferred': 0.0, 'tco2e_pue': 30.0, 'tco2e_inferred': 0.0}}[name]
     star = lambda k: '*' if d[k + '_inferred'] else ''
-    t = f"{d['tco2e_pue']:g} t{star('tco2e')}: {d['energy_mwh']:,.0f} MWh{star('energy')} at {d['grid_g_per_kwh']:.0f} g/kWh{star('grid')}"
+    # 2026-11-24: Table 4 reports GPT-3's energy after PUE and the others before it, so the
+    # label shows only the PUE-inclusive bar value and the grid intensity, not mixed-basis MWh.
+    t = f"{d['tco2e_pue']:g} t{star('tco2e')} at {d['grid_g_per_kwh']:.0f} g/kWh{star('grid')}"
     return (name, d['tco2e_pue'], color, t, first)
 bar_steps('llm4', [_llm('GPT-3', 'danger', 1), _llm('Gopher', 'neutral', 2), _llm('OPT', 'neutral', 2), _llm('BLOOM', 'data', 1)], 2, (5.8, 2.3), 1150, 'Training emissions × PUE (t CO₂e)', label_size=12)
 for k in (1, 2, 3):

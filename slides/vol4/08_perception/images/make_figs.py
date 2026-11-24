@@ -183,7 +183,7 @@ def capture(step):
         ax.barh(1.1, 16.6, left=16.0 / 2, height=0.5, color=C['neutral'])
         ax.text(16.0 / 2 + 16.6 / 2, 1.1, 'readout 16.6', color='white', ha='center', va='center', fontsize=10, fontweight='bold')
         ax.barh(1.1, 2.0, left=24.6, height=0.5, color=C['amber'])
-        ax.text(26.6 + 0.4, 1.1, 'link + DMA', color=C['amber'], ha='left', va='center', fontsize=10)
+        ax.text(26.6 + 0.4, 1.1, 'link + DMA\n2.0 ms', color=C['amber'], ha='left', va='center', fontsize=10)
         ax.axvline(26.6, color=C['veto'], lw=2, ls='--')
         ax.text(26.6 - 0.4, 0.25, 'arrival stamp: 26.6 ms late\n= 39.9 mm', color=C['veto'], fontsize=10.5, fontweight='bold', ha='right', va='center')
     if step >= 3:
@@ -301,11 +301,11 @@ def capture_ring(step):
     ax.annotate('', xy=(sx0 - 0.10, 3.98), xytext=(2.68, 3.98), arrowprops=dict(arrowstyle='-|>', color=C['propose'], lw=2.2))
     if step >= 2:
         ax.annotate('', xy=(sx0 + 3 * (sw + gap) + sw / 2, 4.74), xytext=(sx0 + sw + gap + sw / 2, 4.74), arrowprops=dict(arrowstyle='-|>', color=C['propose'], lw=2.0))
-        ax.text(sx0 + 2 * (sw + gap) + sw / 2, 4.98, 'DMA advances while Slot 0 runs', ha='center', va='center', fontsize=11.5, fontweight='bold', color=C['propose'])
+        ax.text(sx0 + 2 * (sw + gap) + sw / 2, 4.98, 'If contention holds Slot 0, DMA fills ring', ha='center', va='center', fontsize=11.5, fontweight='bold', color=C['propose'])
 
     # Middle row: Consumer box under Slot 0 + right status callout
     rbox(3.32, 1.98, 5.38, 0.90, '#F0FDFA', C['sense'], lw=2.0)
-    ax.text(6.01, 2.60, 'ISP + Backbone (22 ms)', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['sense'])
+    ax.text(6.01, 2.60, 'Vision backbone (22 ms)', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['sense'])
     ax.text(6.01, 2.22, 'zero-copy read of Slot 0 (ptr + t0)', ha='center', va='center', fontsize=11.2, color=C['text'])
     ax.annotate('', xy=(4.60, 2.94), xytext=(4.60, 3.34), arrowprops=dict(arrowstyle='-|>', color=C['sense'], lw=2.2))
 
@@ -314,14 +314,14 @@ def capture_ring(step):
         ax.text(11.78, 2.43, 'Zero copy saves DRAM\nbandwidth on 4K frames', ha='center', va='center', fontsize=11.8, fontweight='bold', color=C['text'])
     elif step == 2:
         rbox(9.20, 1.98, 5.16, 0.90, '#FEF3C7', C['amber'], lw=1.8)
-        ax.text(11.78, 2.43, 'At 60 Hz (16.7 ms/frame),\nDMA catches up to Slot 0', ha='center', va='center', fontsize=11.5, fontweight='bold', color=C['amber'])
+        ax.text(11.78, 2.43, 'At 60 Hz (16.7 ms), a stall\nlets DMA wrap after Slot 3', ha='center', va='center', fontsize=11.5, fontweight='bold', color=C['amber'])
     else:
         rbox(9.20, 1.98, 5.16, 0.90, '#DCFCE7', C['permit'], lw=1.6)
         ax.text(11.78, 2.43, 'Pinning guards Slot 0\nuntil ref count hits 0', ha='center', va='center', fontsize=11.5, fontweight='bold', color=C['permit'])
         # Bottom row: contrasting outcomes
         rbox(0.20, 0.16, 6.90, 1.48, '#FEE2E2', C['veto'], lw=2.0)
         ax.text(3.65, 1.34, 'Unpinned ring: silent frame tear', ha='center', va='center', fontsize=12.2, fontweight='bold', color=C['veto'])
-        ax.text(3.65, 0.88, 'DMA overwrites Slot 0 mid-inference:', ha='center', va='center', fontsize=11.2, color=C['text'])
+        ax.text(3.65, 0.88, 'If held past Slot 3, DMA overwrites Slot 0:', ha='center', va='center', fontsize=11.2, color=C['text'])
         ax.text(3.65, 0.46, 'mixed epochs, corrupt boxes, no flag', ha='center', va='center', fontsize=11.2, fontweight='bold', color=C['veto'])
 
         rbox(7.46, 0.16, 6.90, 1.48, '#DCFCE7', C['permit'], lw=2.0)

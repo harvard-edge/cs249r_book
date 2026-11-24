@@ -346,7 +346,7 @@ for i, (head_, one, many) in enumerate(rows):
     g.text(475, y + 44, many, 27, C['network'], 'bold', 'start', first=2)
 g.write('fleet', 2)
 g = Svg(900, 248)
-stages = [('Wake word', 'KWS, microcontroller', ['200 KB INT8 in 1 MB', '20 MFLOP', 'milliwatts'], 'Power', C['danger']), ('Front end', 'MobileNetV2-size, phone', ['600 MFLOP', '3.5 MB INT8', '5 W'], 'Compute', C['compute']), ('Ranking', 'DLRM, cloud', ['100 GB of tables', 'one H100: 80 GB'], 'Capacity', C['network']), ('Reply', 'GPT-2, cloud H100', ['3 GB per token', '0.9 ms floor', '295× compute floor'], 'Bandwidth', C['memory'])]
+stages = [('Wake word', 'KWS, microcontroller', ['200 KB INT8 in 1 MB', '20 MFLOP', 'milliwatts'], 'Power', C['danger']), ('Front end', 'MobileNetV2-size, phone', ['600 MFLOP', '3.5 MB INT8', '5 W'], 'Compute', C['compute']), ('Ranking', 'DLRM, cloud', ['100 GB of tables', 'one H100: 80 GB'], 'Capacity', C['network']), ('Reply', 'GPT-2 XL, cloud H100', ['3 GB per token', '0.9 ms floor', '295× compute floor'], 'Bandwidth', C['memory'])]
 for i, (name, sub, nums, limit_term, col) in enumerate(stages):
     x = 2 + i * 228
     g.rect(x, 2, 215, 180, 'white', C['neutral'], sw=2)

@@ -429,7 +429,7 @@ for k in (1, 2):
     al = 1.0 if k >= 2 else 0.0
     ax.barh(0, 1000, 0.56, color=C['compute'], alpha=al)
     ax.barh(0, 1500, 0.56, left=1000, color=C['compute_l'], edgecolor=C['compute'], lw=1.4, alpha=al)
-    ax.text(-35, 0, 'At η = 0.4', ha='right', va='center', fontsize=13.5, fontweight='bold', color=C['text'], alpha=al)
+    ax.text(-35, 0, r'At $\eta_{\text{hw}}$ = 0.4', ha='right', va='center', fontsize=13.5, fontweight='bold', color=C['text'], alpha=al)
     ax.text(1750, 0, 'stalls, waits, overhead', ha='center', va='center', fontsize=12.5, fontweight='bold', color=C['text'], alpha=al)
     ax.text(2540, 0, '2,500', va='center', fontsize=13.5, fontweight='bold', color=C['compute'], alpha=al)
     ax.set_xlim(0, 2950)

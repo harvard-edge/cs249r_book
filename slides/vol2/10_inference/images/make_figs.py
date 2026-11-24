@@ -220,16 +220,16 @@ def lengths():
     a1.set_xlabel('Output tokens per chat request')
     a1.set_ylabel('Requests')
     a1.set_xlim(0, 1000.0)
-    bars = [('Ch. example', 'cb_idle_pct', 0.375, 'neutral'), ('Chat trace', 'chat_idle_pct', 0.5029291738, 'memory'), ('Code trace', 'code_idle_pct', 0.6287342088, 'compute')]
+    bars = [('Ch. example\n(batch of 4)', 'cb_idle_pct', 0.375, 'neutral'), ('Chat trace\n(batch of 8)', 'chat_idle_pct', 0.5029291738, 'memory'), ('Code trace\n(batch of 8)', 'code_idle_pct', 0.6287342088, 'compute')]
     for i, (lab, key, share, ck) in enumerate(bars):
         v = 100 * share
         a2.barh(2 - i, v, color=C[ck], height=0.6)
-        a2.text(v + 2, 2 - i, f"{ {'Ch. example': '37.5', 'Chat trace': '50', 'Code trace': '63'}[lab]}%", va='center', fontsize=12, fontweight='bold', color=C[ck])
+        a2.text(v + 2, 2 - i, f"{ {'cb_idle_pct': '37.5', 'chat_idle_pct': '50', 'code_idle_pct': '63'}[key]}%", va='center', fontsize=12, fontweight='bold', color=C[ck])
         a2.text(-3, 2 - i, lab, ha='right', va='center', fontsize=11, fontweight='bold')
     a2.set_xlim(0, 90)
     a2.set_yticks([])
     a2.spines['left'].set_visible(False)
-    a2.set_xlabel('Slot time idle, batch of 8')
+    a2.set_xlabel('Slot time idle (%)')
     sp.save(fig, out / 'lengths.svg')
 lengths()
 OUTS = [50, 200, 100, 150]
@@ -362,7 +362,7 @@ def precision():
     a2.set_ylim(-1.0, 1.6)
     a2.set_yticks([])
     a2.spines['left'].set_visible(False)
-    a2.set_xlabel('Max batch, 70B GQA, 8× H100')
+    a2.set_xlabel('Max batch, 70B GQA, 8× H100\n(4,096-token context)')
     sp.save(fig, out / 'precision.svg')
 precision()
 

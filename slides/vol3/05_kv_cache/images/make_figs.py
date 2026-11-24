@@ -464,8 +464,12 @@ def burst():
 
 def stream():
     fig, ax = plt.subplots(figsize=(3.05, 1.75))
+    entries = (
+        {'model': 'Llama-2-13B', 'cache_tokens': 1024.0, 'sink_tokens': 4.0, 'window_perplexity': 5158.07, 'sink_perplexity': 5.4, 'table': 1.0},
+        {'model': 'Llama-2-7B', 'cache_tokens': 4096.0, 'sink_tokens': 4.0, 'window_perplexity': 3359.95, 'sink_perplexity': 9.59, 'table': 2.0},
+    )
     labs, vals, cols = ([], [], [])
-    for e in ({'model': 'Llama-2-13B', 'cache_tokens': 1024.0, 'sink_tokens': 4.0, 'window_perplexity': 5158.07, 'sink_perplexity': 5.4, 'table': 1.0}, {'model': 'Llama-2-7B', 'cache_tokens': 4096.0, 'sink_tokens': 4.0, 'window_perplexity': 3359.95, 'sink_perplexity': 9.59, 'table': 2.0}):
+    for e in entries:
         win, sink = (e['window_perplexity'], e['sink_perplexity'])
         labs += ['window', '+ first 4']
         vals += [win, sink]
@@ -477,8 +481,9 @@ def stream():
     ax.set_yscale('log')
     ax.set_ylim(1, 100000.0)
     ax.set_xticks(x, labs, fontsize=10)
-    for xi, name in ((0.5, 'Llama-2-13B'), (2.5, 'Llama-2-7B')):
-        ax.text(xi, -0.36, name, transform=ax.get_xaxis_transform(), ha='center', va='top', fontsize=11, fontweight='bold')
+    for xi, e in zip((0.5, 2.5), entries):
+        ax.text(xi, -0.24, e['model'], transform=ax.get_xaxis_transform(), ha='center', va='top', fontsize=11, fontweight='bold', color=C['text'])
+        ax.text(xi, -0.37, f"cache: {int(e['cache_tokens']):,}", transform=ax.get_xaxis_transform(), ha='center', va='top', fontsize=10, color=C['text'])
     ax.set_ylabel('Perplexity (log)')
     ax.minorticks_off()
     save(fig, 'stream')
@@ -530,10 +535,23 @@ def gain():
     fig, ax = plt.subplots(figsize=(3.05, 1.8))
     xs = np.linspace(0, 0.9, 200)
     ax.plot(xs * 100, 1 / (1 - xs), color=C['data'], lw=2.6)
-    pts = [(0.1875, 1.25, 'repair: 1.25×', (26, 1.85)), (0.7058823529, 3.365853659, 'repair, shared\nworkspace: 3.4×', (3, 4.6)), (0.75, 4.0, 'support: 4.0×', (30, 8.3))]
-    for f, g, lab, xy in pts:
-        ax.plot(f * 100, g, 'o', ms=8, color=C['memory'], mec='white', mew=1.5, zorder=3)
+    ax.text(83.5, 7.7, '1/(1\u2212f)', ha='right', va='center', fontsize=10, fontweight='bold', color=C['data'])
+    pts = [
+        (0.7058823529, 3.365853659, 'repair, shared\nworkspace: 3.4×', (3, 2.80), 'headroom'),
+        (0.1875, 1.25, 'repair: 1.25×', (38, 0.55), 'raw'),
+        (0.75, 4.0, 'support: 4.0×', (22, 5.75), 'raw'),
+    ]
+    seen = set()
+    for f, g, lab, xy, basis in pts:
+        if basis == 'headroom':
+            lbl = 'out + 10% headroom (floored)' if basis not in seen else None
+            ax.plot(f * 100, g, 'o', ms=8, color=C['memory'], mec='white', mew=1.5, zorder=4, label=lbl)
+        else:
+            lbl = 'raw pool (floored)' if basis not in seen else None
+            ax.plot(f * 100, g, 's', ms=6.5, mfc='white', mec=C['memory'], mew=1.8, zorder=3, label=lbl)
+        seen.add(basis)
         ax.annotate(lab, (f * 100, g), xytext=xy, textcoords='data', fontsize=11, fontweight='bold', color=C['text'], arrowprops=dict(arrowstyle='-', color=C['neutral'], lw=0.8))
+    ax.legend(loc='upper left', frameon=False, fontsize=9.5, markerscale=0.85, handlelength=1.0, handletextpad=0.4, labelspacing=0.25, borderaxespad=0.3, borderpad=0.15)
     ax.set_xlabel('Shared fraction of each request (%)')
     ax.set_ylabel('Resident-fit gain')
     ax.set_xlim(0, 92)

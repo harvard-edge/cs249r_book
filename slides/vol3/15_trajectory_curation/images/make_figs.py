@@ -412,10 +412,10 @@ def synthesis():
     svg('synthesis.svg', W, H, b)
 
 def recall_thumb():
-    """Text-free: one saved prefix and three continuation branches (Lecture 14's postmortem)."""
+    """Text-free: one saved prefix and three accepted continuation reruns (Lecture 14's paginated postmortem)."""
     b = f'<line x1="20" y1="110" x2="260" y2="110" stroke="{GRAY}" stroke-width="10" stroke-linecap="round"/>'
     b += f'<circle cx="260" cy="110" r="16" fill="{PURPLE}"/>'
-    for y, c in ((40, GREEN), (110, GREEN), (180, RED)):
+    for y, c in ((40, GREEN), (110, GREEN), (180, GREEN)):
         b += f'<path d="M276,110 C330,110 340,{y} 400,{y} L560,{y}" fill="none" stroke="{c}" stroke-width="9" stroke-linecap="round"/>'
         b += f'<circle cx="580" cy="{y}" r="16" fill="{c}"/>'
     svg('recall_branches.svg', 620, 220, b)

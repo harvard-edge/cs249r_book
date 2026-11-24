@@ -364,7 +364,7 @@ ax.set_xlabel('Separation the arm must keep, before sensor and position margins 
 ax.tick_params(labelsize=10)
 save(fig, 'ssm')
 b = []
-rows = [('Model fidelity', 'observer: predicted vs. measured'), ('Bounded push', 'observer against the force bound'), ('Torque available', 'current shunts, saturation flag'), ('Solver on time', 'watchdog and cycle counter'), ('Short tick', 'bus timestamps; 1.501 mm drift')]
+rows = [('Model fidelity', 'observer: predicted vs. measured'), ('Bounded push', 'observer against the force bound'), ('Torque available', 'current shunts, saturation flag'), ('Solver on time', 'watchdog and cycle counter'), ('Short tick', 'bus timestamps: jitter, missed samples')]
 b.append(text(155, 30, 'Premise', 25, '#047857', weight='bold'))
 b.append(text(615, 30, 'Detector, every tick', 25, RED, weight='bold'))
 for i, (p, d) in enumerate(rows):
@@ -397,7 +397,7 @@ ax.spines['left'].set_visible(False)
 ax.set_xlabel('Microseconds within one 1 ms tick', fontsize=11)
 ax.tick_params(labelsize=10)
 save(fig, 'cycle')
-RUNGS = [('PROJECT', ['fresh proposal,', 'correction exists'], 'least change', GREEN, GREEN_F), ('HOLD', ['lease lost,', 'standing still'], 'powered hold', GREEN, GREEN_F), ('STOP', ['lease lost or', 'breach, moving'], 'resident stop', AMBER, '#FEF3C7'), ('INHIBIT', ['MCU fails', '(watchdog)'], 'STO + brakes', RED, RED_F)]
+RUNGS = [('PROJECT', ['fresh proposal,', 'correction exists'], 'least change', GREEN, GREEN_F), ('HOLD', ['lease lost,', 'standing still'], 'powered hold', GREEN, GREEN_F), ('STOP', ['lease lost or', 'breach, moving'], 'resident stop', AMBER, '#FEF3C7'), ('INHIBIT', ['emergency stop or', 'MCU fails (watchdog)'], 'STO + brakes', RED, RED_F)]
 
 def ladder(step):
     b = []
@@ -479,6 +479,8 @@ def onset_clock(step):
     ax.barh(1, 60.0, left=0, color=GREEN, height=0.52, edgecolor='white')
     ax.barh(1, 22.0, left=60.0, color=SLATE, height=0.52, edgecolor='white')
     ax.text(30.0, 1, '60', ha='center', va='center', fontsize=11.5, color='white', fontweight='bold')
+    ax.text(71.0, 1, '22', ha='center', va='center', fontsize=10.5, color='white', fontweight='bold')
+    ax.annotate('tick, bus, brake onset', (71.0, 1.26), xytext=(71.0, 1.40), ha='center', va='bottom', fontsize=10, color=SLATE, arrowprops=dict(arrowstyle='-', color=SLATE, lw=1.0))
     ax.barh(1, spare_ms, left=82.0, color=GREEN_F, edgecolor=GREEN, ls='--', lw=1.4, height=0.52)
     ax.text(82.0 + spare_ms / 2, 1, '+100.8 ms', ha='center', va='center', fontsize=11, color='#047857', fontweight='bold')
     ax.axvline(rack_ms, color=RED, ls='--', lw=2.0)
@@ -491,6 +493,8 @@ def onset_clock(step):
         ax.barh(0, 140.0, left=60.0, color=AMBER, height=0.52, edgecolor='white')
         ax.barh(0, 22.0, left=200.0, color=SLATE, height=0.52, edgecolor='white')
         ax.text(120.0, 0, '+140 ms', ha='center', va='center', fontsize=11.5, color='white', fontweight='bold')
+    if step == 2:
+        ax.text(211.0, 0, '22', ha='center', va='center', fontsize=10.5, color='white', fontweight='bold')
     if step >= 3:
         ax.barh(0, 222.0 - rack_ms, left=rack_ms, color=RED_F, edgecolor=RED, hatch='///', lw=1.8, height=0.52, zorder=4)
         ax.text(226.0, 0.0, '50.99 mm\noverrun', ha='left', va='center', fontsize=11.5, color=RED, fontweight='bold')

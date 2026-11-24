@@ -190,11 +190,15 @@ for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.3, 2.05))
     ax.axhline(5.0, color=C['danger'], lw=1.6, ls='--')
     ax.text(0.1, 5.0 - 0.15, 'Release limit: 5 points', color=C['danger'], fontsize=11, fontweight='bold', va='top')
-    ax.plot(q, grow, '-o', color=C['compute'], lw=3, ms=6)
-    ax.plot([6], [5.314683], 'o', ms=12, color=C['danger'], zorder=5)
-    ax.annotate('Quarter 6: 5.3', (6, 5.314683), xytext=(-10, 10), textcoords='offset points', ha='right', fontsize=11, fontweight='bold', color=C['danger'])
-    ax.text(8.15, grow[-1], 'factor 1.10', color=C['compute'], fontsize=11, fontweight='bold', va='center')
     a = 1.0 if k == 2 else 0.0
+    if k == 1:
+        ax.plot(q[:2], grow[:2], '-o', color=C['compute'], lw=3, ms=6)
+        ax.annotate('3.0 to 3.3 (factor 1.10)', (1, grow[1]), xytext=(10, -2), textcoords='offset points', ha='left', va='center', fontsize=11, fontweight='bold', color=C['compute'])
+    else:
+        ax.plot(q, grow, '-o', color=C['compute'], lw=3, ms=6)
+        ax.plot([6], [5.314683], 'o', ms=12, color=C['danger'], zorder=5)
+        ax.annotate('Quarter 6: 5.3', (6, 5.314683), xytext=(-10, 10), textcoords='offset points', ha='right', fontsize=11, fontweight='bold', color=C['danger'])
+    ax.text(8.15, grow[-1], 'factor 1.10', color=C['compute'], fontsize=11, fontweight='bold', va='center', alpha=a)
     ax.plot(q, decay, '-o', color=C['data'], lw=3, ms=6, alpha=a)
     ax.text(8.15, decay[-1], 'factor 0.90\n(randomized\napprovals)', color=C['data'], fontsize=11, fontweight='bold', va='center', alpha=a)
     ax.set_xlim(0, 8)

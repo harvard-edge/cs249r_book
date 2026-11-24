@@ -340,8 +340,8 @@ for k in (1, 2):
             ax.text(left + w / 2, -0.52 if i != 1 else 0.48, lab, ha='center', va='center', fontsize=10, color=col, fontweight='bold')
         left += w
     ax.text(full + 0.003, 0, '0.24 Wh (2.4×)', va='center', fontsize=12, fontweight='bold', color=C['danger'])
-    ax.text(-0.004, 1, 'Active accelerators only', ha='right', va='center', fontsize=12, fontweight='bold')
-    ax.text(-0.004, 0, 'Whole serving system', ha='right', va='center', fontsize=12, fontweight='bold')
+    ax.text(-0.004, 1, 'Active accelerators only\n(most efficient data centers)', ha='right', va='center', fontsize=12, fontweight='bold')
+    ax.text(-0.004, 0, 'Whole serving system\n(fleet-wide)', ha='right', va='center', fontsize=12, fontweight='bold')
     ax.set_yticks([])
     ax.set_ylim(-0.85, 1.5)
     ax.set_xlim(0, 0.32)

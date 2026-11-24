@@ -196,22 +196,26 @@ def incident():
             s.text(745, 230, 'never dispatched', 19, ROLE['fault'][2])
             s.text(20, 390, 'The first private read is read-only, and a per-call grant check refuses it.', 19, GRAY, anchor='start', italic=True)
         s.save(f'incident_step{k}')
-    s = Svg(640, 400)
-    s.text(20, 32, 'Task: address the issues in one public repo', 22, INK, anchor='start', weight='bold')
-    for i, (n, name, target, role) in enumerate(calls):
-        y = 52 + i * 116
-        s.rect(20, y, 280, 96, 'white' if i == 0 else role)
-        s.text(160, y + 30, name, 21, INK, weight='bold', mono=True)
-        s.text(160, y + 57, target, 20, GRAY)
-        s.text(160, y + 83, 'schema ok, token ok', 20, ROLE['memory'][2])
-        if i < 2:
-            s.arrow(160, y + 96, 160, y + 114, 'gray')
-    s.text(320, 108, "reads the attacker's issue", 20, GRAY, anchor='start')
-    s.cross(300, 168, 14)
-    s.box(360, 172, 270, 96, 'fault', 'Grant check refuses', 'target not in the task', fs=21, sfs=20)
-    s.arrow(360, 220, 304, 220, 'red')
-    s.text(320, 342, 'never dispatched', 20, ROLE['fault'][2], anchor='start')
-    s.save('incident_col')
+    # 2026-11-24: two steps, so the retrieval question shows the calls before the checks' verdicts.
+    for k in (1, 2):
+        s = Svg(640, 400)
+        s.text(20, 32, 'Task: address the issues in one public repo', 22, INK, anchor='start', weight='bold')
+        for i, (n, name, target, role) in enumerate(calls):
+            y = 52 + i * 116
+            s.rect(20, y, 280, 96, 'white' if (i == 0 or k == 1) else role)
+            s.text(160, y + 30, name, 21, INK, weight='bold', mono=True)
+            s.text(160, y + 57, target, 20, GRAY)
+            if k == 2:
+                s.text(160, y + 83, 'schema ok, token ok', 20, ROLE['memory'][2])
+            if i < 2:
+                s.arrow(160, y + 96, 160, y + 114, 'gray')
+        s.text(320, 108, "reads the attacker's issue", 20, GRAY, anchor='start')
+        if k == 2:
+            s.cross(300, 168, 14)
+            s.box(360, 172, 270, 96, 'fault', 'Grant check refuses', 'target not in the task', fs=21, sfs=20)
+            s.arrow(360, 220, 304, 220, 'red')
+            s.text(320, 342, 'never dispatched', 20, ROLE['fault'][2], anchor='start')
+        s.save(f'incident_col_step{k}')
 
 def worlds():
     titles = [('Request lost', 'no effect'), ('Reply lost', 'effect happened'), ('Still in flight', 'effect still to come')]
