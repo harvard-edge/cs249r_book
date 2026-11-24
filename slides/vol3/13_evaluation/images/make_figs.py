@@ -205,7 +205,7 @@ def wilson_fig():
     ax.set_ylim(-0.6, 2.85)
     ax.set_yticks([])
     ax.spines['left'].set_visible(False)
-    ax.set_xlabel('Acceptance rate (%), 95 percent interval')
+    ax.set_xlabel('Failure rate (%), 95 percent interval')
     sp.save(fig, HERE / 'wilson.svg')
 
 def ranks():
@@ -294,21 +294,30 @@ def dims():
         b = []
         for i, (t1, t2, e1, e2, s, f) in enumerate(cols):
             x = 20 + i * 220
-            b.append(box(x, 20, 200, 190, f, s))
-            b.append(text(x + 100, 68, t1, 26, s, weight='bold'))
-            b.append(text(x + 100, 100, t2, 26, s, weight='bold'))
-            b.append(text(x + 100, 150, e1, 19, INK))
-            b.append(text(x + 100, 176, e2, 19, INK))
+            b.append(box(x, 14, 200, 166, f, s))
+            b.append(text(x + 100, 54, t1, 26, s, weight='bold'))
+            b.append(text(x + 100, 84, t2, 26, s, weight='bold'))
+            b.append(text(x + 100, 128, e1, 19, INK))
+            b.append(text(x + 100, 154, e2, 19, INK))
         if step == 2:
-            b.append(text(450, 262, 'The accepted-task criteria they supply', 22, GRAY, weight='bold'))
-            spans = [(20, 420, 'process', PURPLE), (460, 640, 'outcome', PURPLE), (670, 880, 'resource, residual duty', PURPLE)]
+            b.append(arrow(120, 180, 120, 275, 'g', GRAY))
+            b.append(arrow(260, 180, 260, 275, 'g', GRAY))
+            b.append(arrow(595, 180, 595, 275, 'g', GRAY))
+            b.append('<line x1="587" y1="222" x2="603" y2="222" stroke="white" stroke-width="7"/>')
+            b.append(f'<path d="M715,180 L715,214 Q715,222 707,222 L320,222 Q312,222 312,230 L312,275" fill="none" stroke="{RED}" stroke-width="2.5" marker-end="url(#ar)"/>')
+            b.append(text(454, 208, 'authority side of process', 17, RED, weight='bold'))
+            b.append(arrow(795, 180, 795, 275, 'r', RED))
+            b.append(text(806, 212, 'budget,', 17, RED, anchor='start', weight='bold'))
+            b.append(text(806, 234, 'cleanup', 17, RED, anchor='start', weight='bold'))
+            b.append(text(450, 263, 'Accepted-task criteria', 20, GRAY, weight='bold'))
+            spans = [(20, 440, 'process', PURPLE), (460, 650, 'outcome', PURPLE), (670, 880, 'resource, residual duty', PURPLE)]
             for x1, x2, lab, c in spans:
                 b.append(box(x1, 280, x2 - x1, 54, PURPLE_L, c, rx=8))
                 b.append(text((x1 + x2) / 2, 316, lab, 22 if len(lab) < 12 else 17, c, weight='bold'))
-            b.append(text(450, 378, 'Exposure each audits', 22, GRAY, weight='bold'))
-            b.append(text(220, 414, 'authority exercised', 21, INK))
-            b.append(text(550, 414, 'state the result rests on', 21, INK))
-            b.append(text(770, 414, 'horizon consumed', 21, INK))
+            b.append(text(450, 376, 'Exposure each audits', 22, GRAY, weight='bold'))
+            b.append(text(230, 412, 'authority exercised', 21, INK))
+            b.append(text(552, 412, 'state the result rests on', 21, INK))
+            b.append(text(780, 412, 'horizon consumed', 21, INK))
         svg(HERE / f'dims_step{step}.svg', 900, 430, '\n'.join(b))
 
 def gym():

@@ -26,7 +26,7 @@ def dispatch_share(path, k):
     rows = [
         ('Small op\n(1 μs kernel)', 15, 1, '16 μs'),
         ('Large op\n(100 μs kernel)', 15, 100, '115 μs'),
-        ('5 fused ops\n(compiled)', 5, 4, '9 μs vs. 55 μs eager'),
+        ('5 fused ops\n(compiled)', 5, 4, '9 μs vs. 55 μs eager\n(10 μs/op Python only)'),
     ]
     fig, ax = plt.subplots(figsize=(5.8, 2.55))
     n = len(rows)
@@ -34,6 +34,8 @@ def dispatch_share(path, k):
         y = n - 1 - i
         shown = i < k
         ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha='right', va='center', fontsize=12, fontweight='bold', color=C['text'] if shown else 'white')
+        if i == 2:
+            ax.text(101.5, y, note_txt, ha='left', va='center', fontsize=11, fontweight='bold', color=C['data'], alpha=1.0 if shown else 0.0)
         if not shown:
             continue
         d = 100.0 * disp / (disp + kern)
@@ -48,15 +50,15 @@ def dispatch_share(path, k):
             ax.text(d + k_pct / 2, y, k_lab, ha='center', va='center', fontsize=11.5, fontweight='bold', color='white')
         else:
             ax.text(101.5, y, f'kernel {k_pct:.0f}%', ha='left', va='center', fontsize=11.5, fontweight='bold', color=bar_col)
-        if i == 2:
-            ax.text(101.5, y, note_txt, ha='left', va='center', fontsize=11, fontweight='bold', color=C['data'])
+    if k >= 3:
+        ax.axhline(0.5, color=C['grid'], lw=0.9, ls='--')
     ax.set_xlim(0, 140)
     ax.set_xticks([0, 25, 50, 75, 100])
     ax.set_xticklabels(['0%', '25%', '50%', '75%', '100%'])
     ax.set_ylim(-0.6, n - 0.35)
     ax.set_yticks([])
     ax.spines['left'].set_visible(False)
-    ax.set_xlabel('Share of step time (eager: 15 μs/op; compiled 5-op region: 5 μs launch + 4 μs fused)')
+    ax.set_xlabel('Share of step time (single op: 15 μs host; 5-op: 5 μs launch + 4 μs fused vs. 10 μs/op Python)')
     sp.save(fig, path)
 for k in (1, 2, 3):
     dispatch_share(out / f'dispatch_share_step{k}.svg', k)

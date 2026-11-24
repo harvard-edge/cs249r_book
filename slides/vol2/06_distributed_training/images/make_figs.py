@@ -680,7 +680,9 @@ for i, (x_, v, c_) in enumerate(zip(xs_, vals, cols)):
     ax.text(xi, v + 3, f'{v:.0f}%', ha='center', fontsize=12, fontweight='bold', color=c_)
 ax.set_xticks([i + (0.6 if i >= 4 else 0) for i in range(8)], xs_)
 ax.text(1.5, 122, 'tensor parallel, one server', ha='center', fontsize=11.5, fontweight='bold', color=C['memory'])
-ax.text(6.1, 122, f"{max((r['gpus'] for r in meg if r['mode'] == 'model')):.0f}-way TP × data parallel", ha='center', fontsize=11.5, fontweight='bold', color=C['compute'])
+_tp_list = ', '.join((f"{r['gpus']:.0f}" for r in meg if r['mode'] == 'model'))
+_dp_deg = min((r['gpus'] for r in meg if r['mode'] == 'model+data')) / min((r['gpus'] for r in meg if r['mode'] == 'model'))
+ax.text(6.1, 122, f'TP {_tp_list} × {_dp_deg:.0f}-way DP', ha='center', fontsize=11.5, fontweight='bold', color=C['compute'])
 ax.set_ylim(0, 130)
 ax.set_yticks([0, 50, 100])
 ax.set_xlabel('GPUs (V100, DGX-2H)')
@@ -775,21 +777,27 @@ for k in (1, 2):
 # F25: ZeRO-3 175B on 64 GPUs: fits memory, stalls on wire (2-step)
 for k in (1, 2):
     fig, (a1, a2) = plt.subplots(2, 1, figsize=(4.6, 2.35), gridspec_kw={'height_ratios': [1, 1], 'hspace': 0.78})
+    al = 1.0 if k >= 2 else 0.0
     # Top: Memory bar (fits 80 GB)
-    a1.barh(0, 43.75, color=C['memory'], height=0.58)
-    a1.barh(0, 4.8, left=43.75, color=C['data'], height=0.58)
+    a1.barh(0, 43.75, color=C['memory'], height=0.58, alpha=al)
+    a1.barh(0, 4.8, left=43.75, color=C['data'], height=0.58, alpha=al)
     a1.axvline(80, color=C['danger'], lw=2, ls='--')
-    a1.text(22, 0, 'state 43.8 GB', ha='center', va='center', fontsize=13.5, fontweight='bold', color='white')
-    a1.text(49.5, 0, '48.6 GB', ha='left', va='center', fontsize=13.5, fontweight='bold', color=C['data'])
+    a1.text(22, 0, 'state 43.8 GB', ha='center', va='center', fontsize=13.5, fontweight='bold', color='white', alpha=al)
+    a1.text(49.5, 0, '48.6 GB', ha='left', va='center', fontsize=13.5, fontweight='bold', color=C['data'], alpha=al)
     a1.text(82.0, 0, '80 GB HBM', ha='left', va='center', fontsize=13.5, fontweight='bold', color=C['danger'])
+    if k == 1:
+        a1.text(6, 0, '?', ha='left', va='center', fontsize=16.5, fontweight='bold', color=C['neutral'])
     a1.set_xlim(0, 122)
     a1.set_ylim(-0.45, 0.55)
     a1.set_yticks([])
     a1.tick_params(axis='x', labelsize=12.5)
     a1.spines['left'].set_visible(False)
-    a1.set_title('Memory per GPU (64 GPUs): FITS', loc='left', fontsize=14, fontweight='bold', color=C['data'], pad=3)
+    a1.set_title(
+        'Memory per GPU (64 GPUs): FITS' if k >= 2 else 'Memory per GPU (64 GPUs): ?',
+        loc='left', fontsize=14, fontweight='bold',
+        color=C['data'] if k >= 2 else C['text'], pad=3,
+    )
     # Bottom: Step time bar (wire 10x compute)
-    al = 1.0 if k >= 2 else 0.0
     a2.barh(0, 2.1, color=C['memory'], height=0.58, alpha=al)
     a2.barh(0, 22.0, left=2.1, color=C['danger'], height=0.58, alpha=al)
     a2.text(13.1, 0, 'regather ~1.1 TB (~22 s)', ha='center', va='center', fontsize=13.5, fontweight='bold', color='white', alpha=al)

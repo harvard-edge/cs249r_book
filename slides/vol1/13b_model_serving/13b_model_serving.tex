@@ -363,7 +363,7 @@
   \mlsyscredit{Kwon et al., ``PagedAttention'' (vLLM), SOSP 2023, arXiv 2309.06180, Fig.~12a (OPT-13B, one A100, ShareGPT), cropped; legend rows rearranged.}
   \note{%
     \mlsysnotemeta{1.5 min}{Optional}%
-    Real traces confirm how scheduling and memory shift Part 1's queueing knee, measured in Kwon et al. (2023, Figure 12a) for OPT-13B on one A100 running variable-length ShareGPT conversation traces. Normalized latency, end-to-end time divided by output tokens, stays flat against request rate until each curve's knee, where queues climb steeply. FasterTransformer saturates earliest, while three contiguous-cache Orca variants push the knee right as over-reservation shrinks. Even Orca Oracle, which knows exact output lengths in advance, still suffers contiguous memory fragmentation. Combining continuous batching with paged KV memory (developed in Section 3), vLLM moves the knee 1.7 to 2.7x past Orca Oracle, and up to 22x past FasterTransformer.
+    Real traces confirm how scheduling and memory shift Part 1's queueing knee, measured in Kwon et al. (2023, Figure 12a) for OPT-13B on one A100 running variable-length ShareGPT conversation traces. Normalized latency, end-to-end time divided by output tokens, stays flat against request rate until each curve's knee, where queues climb steeply. FasterTransformer saturates earliest, while three contiguous-cache Orca variants push the knee right as over-reservation shrinks. Even Orca Oracle, which knows exact output lengths in advance, still suffers contiguous memory fragmentation. A paged cache instead allocates fixed-size KV blocks anywhere in memory as tokens arrive, avoiding contiguous slabs. Combining continuous batching with paged KV memory (developed in Section 3), vLLM moves the knee 1.7 to 2.7x past Orca Oracle, and up to 22x past FasterTransformer.
 
     \notecue{Watch for}{The Orca curves reflect Kwon et al.'s reimplementation rather than the original Orca codebase.}
 
@@ -392,7 +392,7 @@
   \mlsyscredit{Derived from Model Serving, \S13.11.3 and \S13.10.4 (interactive Explore figure: Chunked Prefill; Llama 3 8B, 4 GB INT4, 20 ms TPOT). Agrawal et al., ``Sarathi-Serve,'' OSDI 2024.}
   \note{%
     \mlsysnotemeta{3.5 min}{Core}%
-    Continuous batching keeps slots full, yet servers still stall, seen in vLLM's 198.59 ms p99 inter-token latency (ITL) spike. On INT4 Llama 3 8B (20 ms TPOT), 32 conversations of 1,256 tokens read 4 GB weights plus 5.3 GB cache (9.3 GB) in 2.8 ms. Before reading on, diagnose why all 32 freeze together.
+    Continuous batching keeps slots full, yet servers still stall, seen in vLLM's 198.59 ms p99 inter-token latency (ITL) spike. ITL tracks individual token-to-token gaps, unlike per-request mean TPOT. On INT4 Llama 3 8B (20 ms TPOT), 32 conversations of 1,256 tokens read 4 GB weights plus 5.3 GB cache (9.3 GB) in 2.8 ms. Before reading on, diagnose why all 32 freeze together.
 
     \notecue{Check}{A 1,000-token prompt runs prefill inline, adding 41.3 ms to 2.8 ms for 44.0 ms (unrounded), stalling all 32 past 20 ms; random jitter fails to explain synchronized stalls. Agrawal et al.'s Sarathi-Serve (OSDI 2024) uses chunked prefill, splitting prompts into four 250-token chunks (10.3 + 2.8 = 13.1 ms/step), putting TTFT near 52 versus 44 ms (8 ms cost) while protecting TPOT. At 0.0413 ms/token (41.3 over 1,000), the derived cap $(20 - 2.8)/0.0413 \approx 417$ tokens is tighter than the chapter's general 512-token example. Measured on Mistral-7B and Yi-34B, it sustained 2.6x and up to 3.7x vLLM capacity. TPOT thus caps, continuous batching fills, and chunking shields the batch.}
 
@@ -531,10 +531,11 @@
     \end{column}
     \begin{column}{0.41\textwidth}
       \centering
+      \uncover<2->{%
       \begin{tikzpicture}[font=\scriptsize]
         \node[draw=GreenLine, fill=GreenL, rounded corners=3pt, text width=4.6cm, align=center, minimum height=1.25cm] at (0,1.75) {\textbf{\textcolor{GreenLine}{Paging changes (allocator)}}\\[0.06cm]Non-contiguous blocks\\Prefix sharing (copy-on-write)\\Eliminates fragmentation};
         \node[draw=BlueLine, fill=BlueL, rounded corners=3pt, text width=4.6cm, align=center, minimum height=1.25cm] at (0,0.0) {\textbf{\textcolor{BlueLine}{Model sets (architecture)}}\\[0.06cm]Bytes per token ($2 n_L n_{\text{kv}} d_h b$)\\GQA / MQA head sharing\\KV quantization (FP8/INT8)};
-      \end{tikzpicture}
+      \end{tikzpicture}}
     \end{column}
   \end{columns}
   \mlsyscredit{Model Serving, \S13.10.4 and \S13.10.5; Kwon et al., SOSP 2023.}
@@ -780,7 +781,7 @@
 \begin{frame}{Takeaways}
   \thumbline{thumb_phases_step4.pdf}{Prefill sets TTFT with arithmetic; decode sets TPOT with one weight read per step.}\\[0.12cm]
   \thumbline{thumb_frontier_step3.pdf}{Each sequence adds its cache read to the step, so a TPOT target caps the batch.}\\[0.12cm]
-  \thumbline{thumb_cb_step7.pdf}{Continuous batching fills a freed slot at the next step; chunking keeps prompts from stalling it.}\\[0.12cm]
+  \thumbline{thumb_cb_step7.pdf}{Continuous batching fills a freed slot at the next step; chunking or disaggregation keeps prompts from stalling it.}\\[0.12cm]
   \thumbline{thumb_kv_budget_8b.pdf}{Free memory over cache per conversation sets concurrency (65 estimated, 51.39 in vLLM's log); paging and sharing recover it.}\\[0.12cm]
   \thumbline{thumb_joules_token.pdf}{Joules and dollars per token follow how full each decode step runs.}
   \note{%

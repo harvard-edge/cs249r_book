@@ -256,20 +256,50 @@ mesh_plot()
 
 def gantt(k):
     rows = [('v1 spec', 1), ('v2 module', 2), ('v3 module', 3), ('v4 module', 4), ('v5 assess', 5), ('v6 bindings', 6), ('v7 integrate', 7)]
-    crit = {1, 2, 5, 7}
+    durs = {'v1 spec': 20.5, 'v2 module': 42, 'v3 module': 42, 'v4 module': 42, 'v5 assess': 43, 'v6 bindings': 16.5, 'v7 integrate': 69}
+    starts = {'v1 spec': 0.0, 'v2 module': 20.5, 'v3 module': 20.5, 'v4 module': 20.5, 'v5 assess': 62.5, 'v6 bindings': 62.5, 'v7 integrate': 105.5}
+    crit = {1, 2, 3, 5, 7}
     fig, ax = plt.subplots(figsize=(5.8, 2.8))
     n = len(rows)
+    h = 0.62
     for i, (lab, key) in enumerate(rows):
         y = n - 1 - i
-        dur = {'v1 spec': 20.5, 'v2 module': 42, 'v3 module': 42, 'v4 module': 42, 'v5 assess': 43, 'v6 bindings': 16.5, 'v7 integrate': 69}[lab]
+        dur = durs[lab]
         oncrit = k >= 2 and key in crit
         color = C['network'] if oncrit else C['memory'] if key != 7 else C['data']
-        ax.barh(y, dur, left={'v1 spec': 0.0, 'v2 module': 20.5, 'v3 module': 20.5, 'v4 module': 20.5, 'v5 assess': 62.5, 'v6 bindings': 62.5, 'v7 integrate': 105.5}[lab], height=0.62, color=color, edgecolor=C['danger'] if oncrit else 'none', linewidth=2.4 if oncrit else 0)
+        ax.barh(y, dur, left=starts[lab], height=h, color=color, edgecolor=C['danger'] if oncrit else 'none', linewidth=2.4 if oncrit else 0, zorder=3)
         ax.text(-3, y, lab, ha='right', va='center', fontsize=12, color=C['text'], fontweight='bold')
+
+    def seg(xs, ys, is_crit=False, cap='round'):
+        col = C['danger'] if (k >= 2 and is_crit) else C['neutral']
+        lw = 1.7 if (k >= 2 and is_crit) else 1.4
+        ax.plot(xs, ys, color=col, lw=lw, solid_capstyle=cap, solid_joinstyle='round', zorder=2)
+
+    def arr(p0, p1, is_crit=False, dst_crit=False):
+        col = C['danger'] if (k >= 2 and is_crit) else C['neutral']
+        lw = 1.7 if (k >= 2 and is_crit) else 1.4
+        sb = 1.6 if (k >= 2 and dst_crit) else 0.8
+        ax.annotate('', xy=p1, xytext=p0, arrowprops=dict(arrowstyle='-|>', mutation_scale=11, color=col, lw=lw, shrinkA=0, shrinkB=sb), zorder=4)
+
+    # DAG dependency arrows: v1 -> v2,v3,v4; v2,v3 -> v5; v4 -> v6; v5,v6 -> v7
+    seg([13.0, 13.0], [4.0, 3.0], is_crit=False)
+    seg([13.0, 13.0], [6.0 - h / 2, 4.0], is_crit=True)
+    arr((13.0, 5.0), (20.5, 5.0), is_crit=True, dst_crit=True)
+    arr((13.0, 4.0), (20.5, 4.0), is_crit=True, dst_crit=True)
+    arr((13.0, 3.0), (20.5, 3.0), is_crit=False, dst_crit=False)
+    seg([62.5, 70.0], [5.0, 5.0], is_crit=True)
+    seg([62.5, 70.0], [4.0, 4.0], is_crit=True)
+    arr((70.0, 5.0), (70.0, 2.0 + h / 2), is_crit=True, dst_crit=True)
+    seg([55.0, 55.0], [3.0 - h / 2, 1.0], is_crit=False)
+    arr((55.0, 1.0), (62.5, 1.0), is_crit=False, dst_crit=False)
+    seg([105.5, 105.5], [2.0 - h / 2, 0.95], is_crit=True, cap='butt')
+    arr((105.5, 1.0), (105.5, 0.0 + h / 2), is_crit=True, dst_crit=True)
+    seg([76.5, 76.5], [1.0 - h / 2, 0.0], is_crit=False)
+    arr((76.5, 0.0), (105.5, 0.0), is_crit=False, dst_crit=True)
     if k >= 2:
         ys = n - 1 - 5
-        ax.annotate('', xy=(105.5, ys), xytext=(79.0, ys), arrowprops=dict(arrowstyle='<->', color=C['data'], lw=2))
-        ax.text(105.5 + 2, ys, '26.5 s slack', fontsize=12, color=C['data'], fontweight='bold', va='center')
+        ax.annotate('', xy=(105.5, ys), xytext=(79.0, ys), arrowprops=dict(arrowstyle='<->', color=C['data'], lw=2), zorder=4)
+        ax.text(105.5 + 3.5, ys, '26.5 s slack', fontsize=12, color=C['data'], fontweight='bold', va='center')
         ax.text(174.5, n - 0.8, 'done at 174.5 s', ha='right', fontsize=12, color=C['danger'], fontweight='bold')
     ax.set_xlim(0, 180)
     ax.set_ylim(-0.6, n - 0.2)
@@ -480,11 +510,11 @@ for k in (1, 2, 3):
 
 def atten(k):
     s = Svg(900, 400)
-    s.box(290, 8, 320, 100, 'Root', ('read repo, edit callers,', 'publish; $39 available'), 'store', tsize=22, ssize=20)
+    s.box(290, 8, 320, 100, 'Root', ('read repo, edit callers,', 'publish; root allowance'), 'store', tsize=22, ssize=20)
     s.arrow([(450, 108), (210, 150)], VIO)
-    s.box(30, 152, 360, 100, 'worker_caller_01', ('edit callers only;', '$13 reserved'), 'think', tsize=22, ssize=20)
+    s.box(30, 152, 360, 100, 'worker_caller_01', ('edit callers only;', 'reserved sub-allowance'), 'think', tsize=22, ssize=20)
     s.arrow([(210, 252), (210, 290)], VIO)
-    s.box(30, 292, 360, 100, 'inspection child', ('read one file;', '$5 out of the $13'), 'think', tsize=22, ssize=20)
+    s.box(30, 292, 360, 100, 'inspection child', ('read one file;', 'drawn from caller reserve'), 'think', tsize=22, ssize=20)
     sh = k >= 2
     s.arrow([(390, 342), (600, 342), (600, 112)], RED, dash=True, show=sh)
     s.text(620, 160, 'names the root', 21, P['fault'][2], bold=True, anchor='start', show=sh)

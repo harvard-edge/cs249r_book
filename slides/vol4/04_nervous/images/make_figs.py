@@ -99,7 +99,7 @@ def plot_axes(w, h, left, bottom, right=0.2, top=0.15):
 def rate_ladder(step):
     w, h = (10.9, 5.9)
     fig, ax = plot_axes(w, h, left=2.9, bottom=1.0, right=0.15, top=0.1)
-    rows = [('Intent model', 500.0, NAVY, '500 ms  (2 Hz)', 'set by prefill and weight sweeps'), ('Chunk policy', 50.0, BLUE, '50 ms  (20 Hz)', 'set by one weight sweep per 16-setpoint chunk'), ('Permission tick', 1.0, GREEN, '1 ms  (1 kHz)', 'set by travel: 1.5 mm per tick at 1.5 m/s'), ('Current loop', 0.05, SLATE, '50 µs  (20 kHz)', 'set by the winding: L/R = 2.7 ms, pole near 59 Hz')]
+    rows = [('Intent model', 500.0, NAVY, '500 ms  (2 Hz)', 'set by prefill and weight sweeps'), ('Chunk policy', 50.0, BLUE, '50 ms  (20 Hz)', 'set by one vision-and-decoding pass: 40 ms (p99)'), ('Permission tick', 1.0, GREEN, '1 ms  (1 kHz)', 'set by travel: 1.5 mm per tick at 1.5 m/s'), ('Current loop', 0.05, SLATE, '50 µs  (20 kHz)', 'set by the winding: L/R = 2.7 ms, pole near 59 Hz')]
     lo = 0.01
     for i, (lab, t, c, period_lbl, why) in enumerate(rows):
         y = 3 - i
@@ -367,11 +367,11 @@ def lease(step):
 def openvla():
     w, h = (9.2, 3.8)
     fig, ax = plot_axes(w, h, left=0.2, bottom=1.0, right=0.2, top=0.45)
-    for i, ((lab, _), key) in enumerate(zip([('FP16', Q_(840.0, 'ms')), ('FP8', Q_(471.0, 'ms')), ('INT4', Q_(336.0, 'ms'))], ('vla_fp16', 'vla_fp8', 'vla_int4'))):
+    for i, ((lab, _), key) in enumerate(zip([('FP16', Q_(840.0, 'ms')), ('8-bit', Q_(471.0, 'ms')), ('INT4', Q_(336.0, 'ms'))], ('vla_fp16', 'vla_fp8', 'vla_int4'))):
         y = 2 - i
-        t = {'FP16': 840.0, 'FP8': 471.0, 'INT4': 336.0}[lab]
+        t = {'FP16': 840.0, '8-bit': 471.0, 'INT4': 336.0}[lab]
         ax.barh(y, t, color=NAVY, height=0.42)
-        ax.text(t + 12, y, f"{lab}  { {'FP16': '840', 'FP8': '471', 'INT4': '336'}[lab]} ms", fontsize=FS_S, va='center', color=NAVY, fontweight='bold')
+        ax.text(t + 12, y, f"{lab}  { {'FP16': '840', '8-bit': '471', 'INT4': '336'}[lab]} ms", fontsize=FS_S, va='center', color=NAVY, fontweight='bold')
     ax.axvline(60.0, color=GREEN_D, ls='-', lw=2)
     ax.text(60.0, 2.62, 'lease 60', color=GREEN_D, fontsize=FS_S, ha='center', va='bottom', fontweight='bold')
     ax.axvline(258.3, color=RED, ls='--', lw=1.6)
