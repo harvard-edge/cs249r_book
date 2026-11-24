@@ -213,8 +213,19 @@ jobs:
               python3 scripts/pdf2pptx.py _build/$vol/*.pdf --output-dir _build/$vol --dpi 300
             fi
           done
-          # The release ships presenting PDFs and PPTX only.
-          rm -f _build/vol*/*-notes.pdf
+          # 2026-11-23: the release now ships the notes too. <deck>-notes.pdf
+          # (instructor notes, with the gray "In class" cues) stays beside the
+          # deck; <deck>-student-notes.pdf (the same notes without the "In
+          # class" cues) is the public "Slides + notes" download. Both are built
+          # after pdf2pptx so the converter never mistakes them for decks.
+          for vol in $LIVE_VOLUMES; do
+            v=${vol#vol}
+            for ch_dir in $vol/*_*/; do
+              d=$(basename "$ch_dir")
+              [ -f "$ch_dir/$d.tex" ] || continue
+              make student-notes V=$v D=$d > /dev/null 2>&1 || true
+            done
+          done
 
       # pdf2pptx runs per volume and the PDF gate above cannot see its
       # failures; this gate stops the publish before the artifact upload
@@ -237,6 +248,25 @@ jobs:
             exit 1
           fi
           echo "✅ Every deck folder with a .tex has its PPTX"
+
+      - name: 🔍 Verify every deck has both notes PDFs
+        working-directory: slides
+        run: |
+          missing=()
+          for vol in $LIVE_VOLUMES; do
+            for ch_dir in $vol/*_*/; do
+              d=$(basename "$ch_dir")
+              [ -f "$ch_dir/$d.tex" ] || continue
+              [ -f "_build/$vol/$d-notes.pdf" ] || missing+=("$vol/$d-notes.pdf")
+              [ -f "_build/$vol/$d-student-notes.pdf" ] || missing+=("$vol/$d-student-notes.pdf")
+            done
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "❌ ${#missing[@]} notes PDF(s) missing:"
+            for m in "${missing[@]}"; do echo "   - $m"; done
+            exit 1
+          fi
+          echo "✅ Every deck has instructor and student notes"
 
       - name: 📦 Upload slide artifacts
         uses: actions/upload-artifact@v7
@@ -265,15 +295,28 @@ jobs:
           cd builds
 
           # Per-volume and combined archives for the live volumes only.
-          ALL_PDF=(); ALL_PPTX=()
+          ALL_PDF=(); ALL_PPTX=(); ALL_NOTES=(); ALL_INST=()
           for vol in $LIVE_VOLUMES; do
             V="Vol${vol#vol}"
-            zip -r "../MLSysBook-Slides-${V}-PDF.zip" $vol/*.pdf
+            decks=(); notes=(); inst=()
+            for f in $vol/*.pdf; do
+              case "$f" in
+                *-student-notes.pdf) notes+=("$f") ;;
+                *-notes.pdf) inst+=("$f") ;;
+                *) decks+=("$f") ;;
+              esac
+            done
+            zip -r "../MLSysBook-Slides-${V}-PDF.zip" "${decks[@]}"
             zip -r "../MLSysBook-Slides-${V}-PPTX.zip" $vol/*.pptx
-            ALL_PDF+=($vol/*.pdf); ALL_PPTX+=($vol/*.pptx)
+            zip -r "../MLSysBook-Slides-${V}-Notes.zip" "${notes[@]}"
+            zip -r "../MLSysBook-Slides-${V}-InstructorNotes.zip" "${inst[@]}"
+            ALL_PDF+=("${decks[@]}"); ALL_PPTX+=($vol/*.pptx)
+            ALL_NOTES+=("${notes[@]}"); ALL_INST+=("${inst[@]}")
           done
           zip -r ../MLSysBook-Slides-All-PDF.zip "${ALL_PDF[@]}"
           zip -r ../MLSysBook-Slides-All-PPTX.zip "${ALL_PPTX[@]}"
+          zip -r ../MLSysBook-Slides-All-Notes.zip "${ALL_NOTES[@]}"
+          zip -r ../MLSysBook-Slides-All-InstructorNotes.zip "${ALL_INST[@]}"
 
           # Per-deck files: GitHub Releases is a flat namespace, so vol1/00_course_overview.pdf
           # and vol2/00_course_overview.pdf collide. Stage prefixed copies for upload.
@@ -328,6 +371,13 @@ jobs:
             - **MLSysBook-Slides-Vol1-PDF.zip**: Volume I
             - **MLSysBook-Slides-Vol2-PDF.zip**: Volume II
 
+            ### Slides with notes
+            Each page shows one slide with its notes below: what the slide shows, the questions it asks with their answers, and common misconceptions.
+            - **MLSysBook-Slides-All-Notes.zip**: Volumes I and II
+            - **MLSysBook-Slides-Vol1-Notes.zip**: Volume I
+            - **MLSysBook-Slides-Vol2-Notes.zip**: Volume II
+            - **MLSysBook-Slides-All-InstructorNotes.zip**, **-Vol1-**, **-Vol2-**: the same notes plus the "In class" cues for running each activity
+
             ### PowerPoint downloads
             Each PowerPoint slide is an image of the PDF page, so the text is not editable. The notes pane holds the speaker notes, which appear in presenter view.
             - **MLSysBook-Slides-All-PPTX.zip**: Volumes I and II
@@ -339,7 +389,7 @@ jobs:
             - **MLSysBook-TinyML-Slides.zip**: slides only
             - **MLSysBook-TinyML-Readings.zip**: readings only
 
-            The PDF and PowerPoint file for each lecture are also attached below.
+            The slides PDF, slides-with-notes PDF, instructor notes PDF, and PowerPoint file for each lecture are also attached below.
 
             ### Source
             - LaTeX source for all four volumes: [slides/](${{ github.server_url }}/${{ github.repository }}/tree/main/slides)
@@ -353,6 +403,12 @@ jobs:
             MLSysBook-Slides-All-PPTX.zip
             MLSysBook-Slides-Vol1-PPTX.zip
             MLSysBook-Slides-Vol2-PPTX.zip
+            MLSysBook-Slides-All-Notes.zip
+            MLSysBook-Slides-Vol1-Notes.zip
+            MLSysBook-Slides-Vol2-Notes.zip
+            MLSysBook-Slides-All-InstructorNotes.zip
+            MLSysBook-Slides-Vol1-InstructorNotes.zip
+            MLSysBook-Slides-Vol2-InstructorNotes.zip
             MLSysBook-TinyML-All.zip
             MLSysBook-TinyML-Slides.zip
             MLSysBook-TinyML-Readings.zip
@@ -379,6 +435,12 @@ jobs:
             MLSysBook-Slides-All-PPTX.zip
             MLSysBook-Slides-Vol1-PPTX.zip
             MLSysBook-Slides-Vol2-PPTX.zip
+            MLSysBook-Slides-All-Notes.zip
+            MLSysBook-Slides-Vol1-Notes.zip
+            MLSysBook-Slides-Vol2-Notes.zip
+            MLSysBook-Slides-All-InstructorNotes.zip
+            MLSysBook-Slides-Vol1-InstructorNotes.zip
+            MLSysBook-Slides-Vol2-InstructorNotes.zip
             MLSysBook-TinyML-All.zip
             MLSysBook-TinyML-Slides.zip
             MLSysBook-TinyML-Readings.zip
