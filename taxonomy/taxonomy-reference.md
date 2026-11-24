@@ -1,4 +1,9 @@
-# MLSysBook Taxonomy of Machine Learning Systems
+---
+title: "ML Systems Taxonomy: Topic reference"
+subtitle: "MLSysBook Taxonomy of Machine Learning Systems"
+toc: true
+toc-location: right
+---
 
 **Editorial draft.** Classification is provisional; collection membership is not a broader/narrower assertion.
 
