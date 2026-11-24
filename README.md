@@ -54,7 +54,7 @@
   <b><a href="https://mlsysbook.ai/kits/">🧰 Kits</a></b>
   <br>
   <b><a href="https://mlsysbook.ai/slides/">📊 Slides</a></b> •
-  <b><a href="https://mlsysbook.ai/vol1/backmatter/studysheets.html">📝 Study Sheets</a></b> •
+  <b><a href="https://mlsysbook.ai/studysheets/">📝 Study Sheets</a></b> •
   <b><a href="https://mlsysbook.ai/instructors/">🎓 Instructors</a></b> •
   <b><a href="https://mlsysbook.ai/staffml/">💼 StaffML</a></b> •
   <b><a href="taxonomy/">Taxonomy</a></b>
@@ -267,7 +267,7 @@ Around the textbook sit the companion tools that let students build, measure, an
       <td><b>Study Sheets</b></td>
       <td>A two-page printable sheet for every chapter: the key ideas on the front, practice on the back.</td>
       <td>Volumes I and II</td>
-      <td><a href="https://mlsysbook.ai/vol1/backmatter/studysheets.html">Volume I</a> · <a href="https://mlsysbook.ai/vol2/backmatter/studysheets.html">Volume II</a></td>
+      <td><a href="https://mlsysbook.ai/studysheets/#vol1">Volume I</a> · <a href="https://mlsysbook.ai/studysheets/#vol2">Volume II</a></td>
     </tr>
     <tr>
       <td align="center">💼</td>
@@ -322,7 +322,7 @@ Where to begin depends on what you want from the curriculum.
       <td align="center">📖</td>
       <td><b>A student or self-learner</b></td>
       <td><a href="https://mlsysbook.ai/vol1/">Read Volume I</a></td>
-      <td>Build <a href="https://mlsysbook.ai/tinytorch/">TinyTorch</a>, model systems with <a href="https://mlsysbook.ai/mlsysim/">MLSys·im</a>, review each chapter with the <a href="https://mlsysbook.ai/vol1/backmatter/studysheets.html">study sheets</a>, and practice with <a href="https://mlsysbook.ai/staffml/">StaffML</a></td>
+      <td>Build <a href="https://mlsysbook.ai/tinytorch/">TinyTorch</a>, model systems with <a href="https://mlsysbook.ai/mlsysim/">MLSys·im</a>, review each chapter with the <a href="https://mlsysbook.ai/studysheets/">study sheets</a>, and practice with <a href="https://mlsysbook.ai/staffml/">StaffML</a></td>
     </tr>
     <tr>
       <td align="center">🎓</td>
@@ -476,7 +476,7 @@ What a textbook provides is perspective and a coherent mental model: the order i
 
 Bruce Davie made this point in his essay [“Textbooks in Tokenland”](https://systemsapproach.org/2026/06/01/textbooks-in-tokenland/) (Systems Approach). A language model generates text without communicative intent, he writes, while a textbook is a deliberate path from a teacher to a student toward a shared understanding of how the world works.
 
-The two are not in opposition. The book provides the structure and the quantitative argument, and interactive tools let a reader test that understanding. The Marimo labs ask a reader to predict an outcome and then check it, and the SocratiQ tutor answers questions about the page being read.
+The two are not in opposition. The book provides the structure and the quantitative argument, and interactive tools let a reader test that understanding. The study sheets give each chapter practice questions with answers to check against, and the SocratiQ tutor answers questions about the page being read.
 
 </details>
 
