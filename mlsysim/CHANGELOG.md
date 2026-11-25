@@ -33,6 +33,46 @@ Release body. Omit any section that has no entries for a given release.
     - @profvjreddi
 -->
 
+## v0.3.2 (2026-11-25)
+
+This patch release adds measured-energy and time-shifting models contributed by
+the community, corrects hardware specifications, and replaces the remaining
+heuristics with first-principles models. Calculated values can change where a
+heuristic was replaced or a specification corrected; review downstream numbers
+before updating prose, figures, or tables.
+
+### Solvers, Models & Taxonomy
+
+- `TemporalShiftModel` estimates the emissions saved by moving a job to a
+  lower-carbon window.
+- A calibrated GPU power model with waiting costs, fitted to measured GPU energy
+  across boards, workloads, and the H200.
+- `CompressionModel` can use measured accuracy curves (opt-in) instead of an
+  assumed curve.
+- The remaining heuristic estimates are replaced with first-principles models,
+  covered by a first-principles regression suite.
+
+### Hardware Registry
+
+- The T4 carries its FP32 and INT4 rates.
+- `labeled_capacity`, so shares divide by a device's printed capacity label.
+- GB200 rack peaks and grid provenance are aligned with their sources; book
+  data that ended in 2024 is refreshed with verified 2025–26 values.
+
+### Internal
+
+- Physics, solvers, unit formatters, and registries are audited.
+
+### Contributors
+
+- @prawalpokharel: carbon-aware time shifting (#2193), measured GPU energy and
+  the calibrated power model (#2198), measured accuracy curves for
+  `CompressionModel` (#2207), and the paper's measured-energy evaluation (#2216)
+- @Shakhtar-Sankur: T4 FP32 and INT4 rates (#2192)
+- @Nishitha-Rajesh: TTFT-excluded decode inter-token latency for the paper's
+  Benchmark 2 (#2186)
+- @profvjreddi
+
 ## v0.3.1 (2026-11-04)
 
 This release corrects training units of work and serving resource accounting,

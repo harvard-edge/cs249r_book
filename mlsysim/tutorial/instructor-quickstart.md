@@ -11,7 +11,7 @@
 ```bash
 pip install mlsysim
 python3 -c "import mlsysim; print(mlsysim.__version__)"
-# Should print: 0.3.1
+# Should print: 0.3.2
 ```
 
 ### Minute 3–8: Your First Live Demo
