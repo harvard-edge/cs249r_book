@@ -199,7 +199,7 @@ If you use mlsysim in your research or teaching, please cite:
   title        = {{MLSys$\cdot$im}: First-Principles Infrastructure Modeling for Machine Learning Systems},
   year         = {2026},
   url          = {https://mlsysbook.ai/mlsysim},
-  version      = {0.3.1},
+  version      = {0.3.2},
   institution  = {Harvard University}
 }
 ```

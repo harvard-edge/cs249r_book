@@ -3,7 +3,7 @@ title: "API Stability Promise"
 subtitle: "Semantic versioning, stable entry points, and experimental surfaces in pre-1.0 MLSys·im."
 ---
 
-> **Applies to:** `mlsysim` v0.3.x (current release: `0.3.1`)
+> **Applies to:** `mlsysim` v0.3.x (current release: `0.3.2`)
 
 This document defines which parts of the `mlsysim` API are stable within a minor
 release series, which are experimental, and what guarantees code built on top of
@@ -141,7 +141,7 @@ engine use this registry.
 ## Experimental API (may change in v0.4.0)
 
 These interfaces work today and are covered by the test suite, but may evolve in
-minor releases (`0.4.0`). Pin to `mlsysim ~= 0.3.0` (or `== 0.3.1` for exact value
+minor releases (`0.4.0`). Pin to `mlsysim ~= 0.3.0` (or `== 0.3.2` for exact value
 reproducibility) when building automated grading or CI pipelines against them.
 
 ### Individual Solver Classes
@@ -196,14 +196,14 @@ reorganized in `0.4.0`.
 Interfaces listed here still work in `0.3.x` with deprecation warnings and are
 scheduled for removal in the next minor release.
 
-No public import path is deprecated in `0.3.1`. Deprecations will be listed here
+No public import path is deprecated in `0.3.2`. Deprecations will be listed here
 and in the changelog before `0.4.0`.
 
 ---
 
 ## How to Protect Downstream Code
 
-1. **Pin the dependency:** `mlsysim ~= 0.3.0` (allows `0.3.x` patches, blocks `0.4.0`), or `mlsysim == 0.3.1` in course autograders that assert exact numerical outputs.
+1. **Pin the dependency:** `mlsysim ~= 0.3.0` (allows `0.3.x` patches, blocks `0.4.0`), or `mlsysim == 0.3.2` in course autograders that assert exact numerical outputs.
 2. **Use `Engine.solve()` as the primary single-node interface.** It is the most stable entry point.
 3. **Import domain solvers from `mlsysim.solvers`.** Keep solver imports explicit.
 4. **Run with warnings enabled** (`python3 -W default`) to catch deprecation notices early.

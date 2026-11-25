@@ -78,7 +78,7 @@ print('All checks passed.')
 Expected output:
 
 ```
-mlsysim v0.3.1
+mlsysim v0.3.2
 ResNet-50 on A100: 0.07 ms, bottleneck=Compute
 Hardware: 54 accelerators
 Models:   44 workloads
