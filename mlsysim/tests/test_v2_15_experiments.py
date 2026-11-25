@@ -166,7 +166,7 @@ def test_cleanest_site_is_rejected_when_it_misses_deadline():
     rows = evaluate_placements(workload, _placement_sites())
 
     assert rows[0].feasible
-    assert rows[0].water_use == (workload.it_energy * _placement_sites()[0].wue).to("liter")
+    assert rows[0].water_use.m_as("liter") == pytest.approx((workload.it_energy * _placement_sites()[0].wue).m_as("liter"))
     assert not rows[1].feasible
     assert "execution misses deadline" in rows[1].reasons
     assert select_lowest_carbon_placement(workload, _placement_sites()).site == "home"
@@ -185,7 +185,7 @@ def test_placement_wue_uses_it_energy_independently_of_pue():
 
     assert rows[0].facility_energy != rows[1].facility_energy
     assert rows[0].water_use == rows[1].water_use
-    assert rows[0].water_use == (workload.it_energy * site.wue).to("liter")
+    assert rows[0].water_use.m_as("liter") == pytest.approx((workload.it_energy * site.wue).m_as("liter"))
     assert evaluate_placements(workload, (replace(site, wue=None),))[0].water_use is None
 
 
