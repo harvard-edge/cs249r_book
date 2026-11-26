@@ -42,8 +42,8 @@ dense FP16 peak.
 | --- | --- |
 | `plan.json` | The configuration matrix, declared before any run, with every efficiency and the questions the analysis answers. |
 | `pilot-plan.json` | `plan.json` with two trials per configuration and a note saying so. The pilot runs used it. |
-| `runs/<run-id>/` | One measurement session on one GPU, as in `../gpu-energy/`: `trials.jsonl` and a `manifest.json` that hashes it. 28 runs are committed. 20 are used and 8 are excluded, each with its reason in `summary.provenance.json`. |
-| `summary.csv`, `summary.provenance.json`, `device_choice.csv` | Written from `mlsysim/` by `paper/scripts/analyze_gpu_energy.py --root paper/data/gpu-energy-workloads`. `make publication-check` runs the same command with `--check`. |
+| `runs/<run-id>/` | One measurement session on one GPU, as in `../gpu-energy/`: a `manifest.json` that hashes the run's `trials.jsonl`. The `trials.jsonl` files are not committed (see `../README.md`). 28 manifests are committed. 20 runs are used and 8 are excluded, each with its reason in `summary.provenance.json`. |
+| `summary.csv`, `summary.provenance.json`, `device_choice.csv` | Written from `mlsysim/` by `paper/scripts/analyze_gpu_energy.py --root paper/data/gpu-energy-workloads`. With the raw `trials.jsonl` files in place, the same command with `--check` replays them. `make publication-check` replays the raw trials of `../gpu-energy/` only. |
 
 ## Results (measured 2026-11-19)
 

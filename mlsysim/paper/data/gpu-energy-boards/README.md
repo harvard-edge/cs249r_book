@@ -23,7 +23,10 @@ seeds on the same boards.
 | `board_energy.csv` | Written by `paper/scripts/compare_gpu_energy_boards.py`: each verified run's mean energy and time per unit of work, from all three tests, for the configurations of this plan. |
 | `board_summary.csv` | Written by the same script: the comparisons the plan declares, one row per configuration. |
 
-`make publication-check` runs both scripts with `--check`.
+With the raw `trials.jsonl` files of this test and of
+`../gpu-energy-workloads/` in place (see `../README.md`), both commands with
+`--check` replay the committed summaries. `make publication-check` replays the
+raw trials of `../gpu-energy/` only.
 
 ## Results (measured 2026-11-19)
 
