@@ -24,7 +24,9 @@ measures both seeds on one GPU, one after the other.
 | `seed_pairs.csv` | Written by `paper/scripts/compare_gpu_energy_seeds.py`: each pair's energy per unit of work with both seeds, and the ratio of seed 2198's to seed 2193's. |
 | `seed_summary.csv` | Written by the same script: the comparisons the plans declare, one row per GPU and configuration. |
 
-`make publication-check` runs all three with `--check`.
+With the raw `trials.jsonl` files in place (see `../README.md`), all three
+commands with `--check` replay the committed summaries.
+`make publication-check` replays the raw trials of `../gpu-energy/` only.
 
 ## Results (measured 2026-11-19)
 
